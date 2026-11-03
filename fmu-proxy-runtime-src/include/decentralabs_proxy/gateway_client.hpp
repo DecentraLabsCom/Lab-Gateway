@@ -31,6 +31,8 @@ struct OutputSnapshot {
     bool event_handling_needed = false;
     bool terminate_simulation = false;
     bool finished = false;
+    bool next_event_time_defined = false;
+    std::optional<double> next_event_time;
 };
 
 class GatewayClient {
@@ -44,7 +46,8 @@ public:
                                const std::map<std::string, ScalarValue>& initial_parameters,
                                bool early_return_allowed = false);
     OperationResult Reconfigure(const std::map<std::string, ScalarValue>& values);
-    OperationResult SetInputs(const std::map<std::string, ScalarValue>& values);
+    OperationResult SetInputs(const std::map<std::string, ScalarValue>& values,
+                              bool* terminate_simulation = nullptr);
     ValueResult<OutputSnapshot> Step(double delta_t);
     ValueResult<OutputSnapshot> Step(double current_time, double delta_t);
     ValueResult<OutputSnapshot> Advance(

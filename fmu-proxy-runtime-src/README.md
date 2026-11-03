@@ -30,9 +30,12 @@ The files here now implement a functional `win64` runtime:
 - Gateway protocol client with request/response correlation
 - capability-aware pacing for input update and output read quotas
 - runtime writes to FMI `tunable` parameters at Co-Simulation communication points
-- FMI 3 structural-parameter writes in Configuration Mode before initialization and
-  Reconfiguration Mode during Co-Simulation; Gateway policy currently authorizes runtime
-  reconfiguration only for the FMI-LS-DAE Boolean mode selector
+- FMI 3 fixed/tunable structural-parameter writes in Configuration Mode before initialization;
+  tunable structural parameters can also be changed in Reconfiguration Mode during Co-Simulation
+- zero-length FMI 3 arrays after structural reconfiguration, with unresolved dimensions kept distinct
+  from valid empty arrays
+- scalar triggered FMI 3 input/output Clocks when the source uses Event Mode; periodic/aperiodic
+  Clocks, dimensioned Clocks and Scheduled Execution are rejected during proxy generation
 - FMI 2 and FMI 3 initialization with `stopTimeDefined = false` as an open-ended horizon
 - native `WSS` transport on Windows via WinHTTP
 - native `WSS` transport on Linux via OpenSSL + raw sockets/WebSocket framing

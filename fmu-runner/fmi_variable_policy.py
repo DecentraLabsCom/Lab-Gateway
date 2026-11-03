@@ -62,14 +62,6 @@ def _supports_configuration_mode(metadata: Mapping[str, Any]) -> bool:
     return fmi_major == 3 and supports_execution
 
 
-def _fmi_ls_dae_enable_parameter_name(metadata: Mapping[str, Any]) -> str | None:
-    declaration = metadata.get("fmiLsDae")
-    if not isinstance(declaration, Mapping):
-        return None
-    name = declaration.get("enableDAEParameter")
-    return name if isinstance(name, str) and name else None
-
-
 def _supports_model_exchange(metadata: Mapping[str, Any]) -> bool:
     if metadata.get("supportsModelExchange") is True:
         return True
@@ -79,6 +71,19 @@ def _supports_model_exchange(metadata: Mapping[str, Any]) -> bool:
         str(metadata.get("simulationType") or metadata.get("simulationKind") or "").lower(),
     )
     return simulation_type == "modelexchange"
+
+
+def _supports_event_mode(metadata: Mapping[str, Any]) -> bool:
+    try:
+        fmi_major = int(str(metadata.get("fmiVersion") or "").split(".", 1)[0])
+    except (TypeError, ValueError):
+        return False
+    if fmi_major != 3:
+        return False
+    if _supports_model_exchange(metadata):
+        return True
+    capabilities = metadata.get("capabilities")
+    return isinstance(capabilities, Mapping) and capabilities.get("hasEventMode") is True
 
 
 def _default_permissions(
@@ -103,12 +108,15 @@ def _default_permissions(
         return {"read": read, "writeAt": []}
 
     if causality == "input":
-        write_at.append("initialization")
-        # The Executor currently permits runtime writes to inputs. FMI constant
-        # inputs remain fixed after initialization, so scheduled/runtime writes
-        # are not granted for those variables.
-        if variability in {"continuous", "discrete", "tunable"}:
-            write_at.append("runtime")
+        if declared_type == "Clock":
+            if _supports_event_mode(metadata):
+                write_at.append("runtime")
+        else:
+            write_at.append("initialization")
+            # FMI constant inputs remain fixed after initialization, so scheduled/runtime writes
+            # are not granted for those variables.
+            if variability in {"continuous", "discrete", "tunable"}:
+                write_at.append("runtime")
     elif causality == "parameter" and variability in {"fixed", "tunable"}:
         write_at.append("initialization")
         if variability == "tunable" and supports_runtime_tunable_parameters:
@@ -117,19 +125,11 @@ def _default_permissions(
             write_at.append("runtime")
     elif (
         causality == "structuralParameter"
-        and (
-            (variability == "fixed" and declared_type == "UInt64")
-            or (variability == "tunable" and declared_type == "Boolean")
-        )
+        and variability in {"fixed", "tunable"}
         and supports_configuration_mode
     ):
         write_at.append("configuration")
-        if (
-            variability == "tunable"
-            and declared_type == "Boolean"
-            and variable.get("name") == _fmi_ls_dae_enable_parameter_name(metadata)
-            and _supports_model_exchange(metadata)
-        ):
+        if variability == "tunable":
             write_at.append("reconfiguration")
 
     return {"read": read, "writeAt": write_at}

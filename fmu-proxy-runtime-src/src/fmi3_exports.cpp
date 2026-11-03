@@ -1,6 +1,7 @@
 #include "fmi3/fmi3Functions.h"
 
 #include <limits>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -38,21 +39,68 @@ struct Fmi3Instance {
 
 struct Fmi3StateHandle {
     std::string checkpoint;
+    Fmi3Mode mode = Fmi3Mode::kStep;
+    Fmi3Mode configuration_return_mode = Fmi3Mode::kInstantiated;
+    bool event_mode_pending = false;
 };
 
-constexpr size_t kMaximumSerializedStateTokenBytes = 64 * 1024;
+constexpr size_t kMaximumSerializedStateTokenBytes = 16 * 1024 * 1024;
+
+std::string SerializeFmi3State(const Fmi3StateHandle& state) {
+    JsonObject object = {
+        {"checkpoint", JsonValue(state.checkpoint)},
+        {"mode", JsonValue(static_cast<int>(state.mode))},
+        {"configurationReturnMode", JsonValue(static_cast<int>(state.configuration_return_mode))},
+        {"eventModePending", JsonValue(state.event_mode_pending)},
+    };
+    return SerializeJson(JsonValue(std::move(object)));
+}
+
+bool ParseFmi3State(const std::string& serialized, Fmi3StateHandle* state) {
+    if (state == nullptr) {
+        return false;
+    }
+    const auto parsed = ParseJson(serialized);
+    const JsonObject* object = parsed ? parsed.value.AsObject() : nullptr;
+    if (object == nullptr) {
+        return false;
+    }
+    const JsonValue* checkpoint = FindObjectValue(*object, "checkpoint");
+    const JsonValue* mode = FindObjectValue(*object, "mode");
+    const JsonValue* return_mode = FindObjectValue(*object, "configurationReturnMode");
+    const JsonValue* pending = FindObjectValue(*object, "eventModePending");
+    if (checkpoint == nullptr || !checkpoint->IsString()
+        || mode == nullptr || !mode->IsNumber()
+        || return_mode == nullptr || !return_mode->IsNumber()
+        || pending == nullptr || !pending->IsBool()) {
+        return false;
+    }
+    const double raw_mode = mode->AsNumber(-1.0);
+    const double raw_return_mode = return_mode->AsNumber(-1.0);
+    if (raw_mode < 0 || raw_mode > static_cast<int>(Fmi3Mode::kTerminated)
+        || std::floor(raw_mode) != raw_mode
+        || raw_return_mode < 0 || raw_return_mode > static_cast<int>(Fmi3Mode::kTerminated)
+        || std::floor(raw_return_mode) != raw_return_mode) {
+        return false;
+    }
+    state->checkpoint = checkpoint->AsString();
+    state->mode = static_cast<Fmi3Mode>(static_cast<int>(raw_mode));
+    state->configuration_return_mode = static_cast<Fmi3Mode>(static_cast<int>(raw_return_mode));
+    state->event_mode_pending = pending->AsBool();
+    return true;
+}
 
 Fmi3Instance* AsInstance(fmi3Instance instance) {
     return static_cast<Fmi3Instance*>(instance);
 }
 
-bool HasOutputClock(const Fmi3Instance* instance) {
+bool HasClock(const Fmi3Instance* instance) {
     if (instance == nullptr) {
         return false;
     }
     const auto& variables = instance->runtime.Model().variables;
     for (const auto& variable : variables) {
-        if (variable.type == ScalarType::kClock && variable.causality == "output") {
+        if (variable.type == ScalarType::kClock) {
             return true;
         }
     }
@@ -116,8 +164,8 @@ bool ValidateValueCounts(Fmi3Instance* instance,
     if (instance == nullptr) {
         return false;
     }
-    const std::size_t expected = instance->runtime.ExpectedValueCount(valueReferences, nValueReferences);
-    if (expected == nValues && expected != 0) {
+    std::size_t expected = 0;
+    if (instance->runtime.TryExpectedValueCount(valueReferences, nValueReferences, &expected) && expected == nValues) {
         return true;
     }
     Log(instance, fmi3Error, "logStatusError", "FMI 3 value buffer length does not match referenced scalar/array variables");
@@ -130,7 +178,7 @@ fmi3Status GetSignedIntegerValues(Fmi3Instance* instance,
                                   const size_t nValueReferences,
                                   FmiInteger values[],
                                   const size_t nValues) {
-    if (instance == nullptr || values == nullptr) {
+    if (instance == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(instance, valueReferences, nValueReferences, nValues)) {
@@ -158,7 +206,7 @@ fmi3Status GetUnsignedIntegerValues(Fmi3Instance* instance,
                                     const size_t nValueReferences,
                                     FmiInteger values[],
                                     const size_t nValues) {
-    if (instance == nullptr || values == nullptr) {
+    if (instance == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(instance, valueReferences, nValueReferences, nValues)) {
@@ -185,7 +233,7 @@ fmi3Status SetSignedIntegerValues(Fmi3Instance* instance,
                                   const size_t nValueReferences,
                                   const FmiInteger values[],
                                   const size_t nValues) {
-    if (instance == nullptr || values == nullptr) {
+    if (instance == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(instance, valueReferences, nValueReferences, nValues)) {
@@ -204,7 +252,7 @@ fmi3Status SetUnsignedIntegerValues(Fmi3Instance* instance,
                                     const size_t nValueReferences,
                                     const FmiInteger values[],
                                     const size_t nValues) {
-    if (instance == nullptr || values == nullptr) {
+    if (instance == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(instance, valueReferences, nValueReferences, nValues)) {
@@ -226,7 +274,7 @@ using decentralabs::proxy::AttachLogger;
 using decentralabs::proxy::Fmi3Mode;
 using decentralabs::proxy::Fmi3Instance;
 using decentralabs::proxy::Fmi3StateHandle;
-using decentralabs::proxy::HasOutputClock;
+using decentralabs::proxy::HasClock;
 using decentralabs::proxy::kMaximumSerializedStateTokenBytes;
 using decentralabs::proxy::OperationResult;
 using decentralabs::proxy::ParseJson;
@@ -284,8 +332,8 @@ fmi3Instance fmi3InstantiateCoSimulation(
         delete instance;
         return nullptr;
     }
-    if (HasOutputClock(instance) && !instance->event_mode_used) {
-        Log(instance, fmi3Error, "logStatusError", "Clock outputs require Event Mode to be negotiated at instantiation");
+    if (HasClock(instance) && !instance->event_mode_used) {
+        Log(instance, fmi3Error, "logStatusError", "Clock variables require Event Mode to be negotiated at instantiation");
         delete instance;
         return nullptr;
     }
@@ -378,8 +426,8 @@ fmi3Status fmi3EnterConfigurationMode(fmi3Instance instance) {
         return fmi3Fatal;
     }
     const bool initialization_configuration = impl->mode == Fmi3Mode::kInstantiated;
-    if (!initialization_configuration && (impl->mode != Fmi3Mode::kEvent || !impl->event_mode_used)) {
-        return Unsupported(impl, "Reconfiguration Mode can only be entered from Event Mode");
+    if (!initialization_configuration && impl->mode != Fmi3Mode::kStep) {
+        return Unsupported(impl, "Reconfiguration Mode can only be entered from Step Mode in Co-Simulation");
     }
     if (!HasStructuralParameter(impl, !initialization_configuration)) {
         return Unsupported(
@@ -441,12 +489,22 @@ fmi3Status fmi3UpdateDiscreteStates(
     if (impl->mode != Fmi3Mode::kEvent) {
         return Unsupported(impl, "Discrete states can only be updated in Event Mode");
     }
+    bool terminate = false;
+    bool next_event_time_defined = false;
+    double next_event_time = 0.0;
+    const auto status = impl->runtime.UpdateDiscreteStates(
+        &terminate,
+        &next_event_time_defined,
+        &next_event_time);
+    if (!status) {
+        return ToFmiStatus(impl, status);
+    }
     if (discreteStatesNeedUpdate != nullptr) *discreteStatesNeedUpdate = fmi3False;
-    if (terminateSimulation != nullptr) *terminateSimulation = fmi3False;
+    if (terminateSimulation != nullptr) *terminateSimulation = terminate ? fmi3True : fmi3False;
     if (nominalsOfContinuousStatesChanged != nullptr) *nominalsOfContinuousStatesChanged = fmi3False;
     if (valuesOfContinuousStatesChanged != nullptr) *valuesOfContinuousStatesChanged = fmi3False;
-    if (nextEventTimeDefined != nullptr) *nextEventTimeDefined = fmi3False;
-    if (nextEventTime != nullptr) *nextEventTime = 0.0;
+    if (nextEventTimeDefined != nullptr) *nextEventTimeDefined = next_event_time_defined ? fmi3True : fmi3False;
+    if (nextEventTime != nullptr) *nextEventTime = next_event_time_defined ? next_event_time : 0.0;
     return fmi3OK;
 }
 
@@ -485,7 +543,7 @@ fmi3Status fmi3GetFloat32(
     fmi3Float32 values[],
     size_t nValues) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
@@ -568,7 +626,7 @@ fmi3Status fmi3GetUInt32(
     fmi3UInt32 values[],
     size_t nValues) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
@@ -610,7 +668,7 @@ fmi3Status fmi3GetUInt64(
     fmi3UInt64 values[],
     size_t nValues) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
@@ -626,7 +684,7 @@ fmi3Status fmi3GetBoolean(
     fmi3Boolean values[],
     size_t nValues) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
@@ -675,7 +733,7 @@ fmi3Status fmi3GetBinary(
     fmi3Binary values[],
     size_t nValues) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || valueSizes == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValues > 0 && (valueSizes == nullptr || values == nullptr))) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
@@ -690,7 +748,7 @@ fmi3Status fmi3GetClock(
     size_t nValueReferences,
     fmi3Clock values[]) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValueReferences > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (impl->mode != Fmi3Mode::kEvent) {
@@ -714,7 +772,7 @@ fmi3Status fmi3SetFloat32(
     const fmi3Float32 values[],
     size_t nValues) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
@@ -793,7 +851,7 @@ fmi3Status fmi3SetUInt32(
     const fmi3UInt32 values[],
     size_t nValues) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
@@ -809,7 +867,7 @@ fmi3Status fmi3SetUInt64(
     const fmi3UInt64 values[],
     size_t nValues) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
@@ -843,7 +901,7 @@ fmi3Status fmi3SetBoolean(
     const fmi3Boolean values[],
     size_t nValues) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValues > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
@@ -880,7 +938,7 @@ fmi3Status fmi3SetBinary(
     const fmi3Binary values[],
     size_t nValues) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || valueSizes == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValues > 0 && (valueSizes == nullptr || values == nullptr))) {
         return fmi3Fatal;
     }
     if (!ValidateValueCounts(impl, valueReferences, nValueReferences, nValues)) {
@@ -895,7 +953,7 @@ fmi3Status fmi3SetClock(
     size_t nValueReferences,
     const fmi3Clock values[]) {
     Fmi3Instance* impl = AsInstance(instance);
-    if (impl == nullptr || values == nullptr) {
+    if (impl == nullptr || (nValueReferences > 0 && values == nullptr)) {
         return fmi3Fatal;
     }
     if (impl->mode != Fmi3Mode::kEvent) {
@@ -971,7 +1029,8 @@ fmi3Status fmi3GetFMUState(fmi3Instance instance, fmi3FMUState* FMUState) {
     if (!status) {
         return ToFmiStatus(impl, status);
     }
-    auto state = std::unique_ptr<Fmi3StateHandle>(new (std::nothrow) Fmi3StateHandle{std::move(checkpoint)});
+    auto state = std::unique_ptr<Fmi3StateHandle>(new (std::nothrow) Fmi3StateHandle{
+        std::move(checkpoint), impl->mode, impl->configuration_return_mode, impl->event_mode_pending});
     if (!state) {
         return fmi3Error;
     }
@@ -985,7 +1044,14 @@ fmi3Status fmi3SetFMUState(fmi3Instance instance, fmi3FMUState FMUState) {
         return fmi3Fatal;
     }
     const auto* state = static_cast<const Fmi3StateHandle*>(FMUState);
-    return ToFmiStatus(impl, impl->runtime.RestoreFmuState(state->checkpoint));
+    const auto status = impl->runtime.RestoreFmuState(state->checkpoint);
+    if (!status) {
+        return ToFmiStatus(impl, status);
+    }
+    impl->mode = state->mode;
+    impl->configuration_return_mode = state->configuration_return_mode;
+    impl->event_mode_pending = state->event_mode_pending;
+    return fmi3OK;
 }
 
 fmi3Status fmi3FreeFMUState(fmi3Instance instance, fmi3FMUState* FMUState) {
@@ -1004,7 +1070,11 @@ fmi3Status fmi3SerializedFMUStateSize(fmi3Instance instance, fmi3FMUState FMUSta
         return fmi3Fatal;
     }
     const auto* state = static_cast<const Fmi3StateHandle*>(FMUState);
-    *size = state->checkpoint.size();
+    const size_t serialized_size = SerializeFmi3State(*state).size();
+    if (serialized_size > kMaximumSerializedStateTokenBytes) {
+        return Unsupported(impl, "Serialized FMU state exceeds the supported size limit");
+    }
+    *size = serialized_size;
     return fmi3OK;
 }
 
@@ -1014,10 +1084,11 @@ fmi3Status fmi3SerializeFMUState(fmi3Instance instance, fmi3FMUState FMUState, f
         return fmi3Fatal;
     }
     const auto* state = static_cast<const Fmi3StateHandle*>(FMUState);
-    if (size != state->checkpoint.size()) {
+    const std::string serialized = SerializeFmi3State(*state);
+    if (serialized.size() > kMaximumSerializedStateTokenBytes || size != serialized.size()) {
         return Unsupported(impl, "Serialized FMU state buffer has the wrong size");
     }
-    std::memcpy(serializedState, state->checkpoint.data(), size);
+    std::memcpy(serializedState, serialized.data(), size);
     return fmi3OK;
 }
 
@@ -1030,14 +1101,10 @@ fmi3Status fmi3DeserializeFMUState(fmi3Instance instance, const fmi3Byte seriali
     if (size == 0 || size > kMaximumSerializedStateTokenBytes) {
         return Unsupported(impl, "Serialized FMU state token has an invalid size");
     }
-    std::string checkpoint(reinterpret_cast<const char*>(serializedState), size);
-    const auto parsed = ParseJson(checkpoint);
-    if (!parsed || parsed.value.AsObject() == nullptr) {
+    std::string serialized(reinterpret_cast<const char*>(serializedState), size);
+    auto state = std::unique_ptr<Fmi3StateHandle>(new (std::nothrow) Fmi3StateHandle());
+    if (!state || !ParseFmi3State(serialized, state.get())) {
         return Unsupported(impl, "Serialized FMU state token is invalid");
-    }
-    auto state = std::unique_ptr<Fmi3StateHandle>(new (std::nothrow) Fmi3StateHandle{std::move(checkpoint)});
-    if (!state) {
-        return fmi3Error;
     }
     *FMUState = static_cast<fmi3FMUState>(state.release());
     return fmi3OK;

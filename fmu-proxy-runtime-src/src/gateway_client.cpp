@@ -1,5 +1,6 @@
 #include "decentralabs_proxy/gateway_client.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <thread>
@@ -54,6 +55,36 @@ OperationResult EnsureResponseType(const JsonObject& response, const std::string
     return OperationResult::Failure(
         "GATEWAY_PROTOCOL_ERROR",
         "Unexpected gateway response type: " + response_type);
+}
+
+OperationResult ParseNextEventMetadata(const JsonObject& object, OutputSnapshot* snapshot) {
+    if (snapshot == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "Missing output snapshot");
+    }
+    const JsonValue* defined_value = FindObjectValue(object, "nextEventTimeDefined");
+    if (defined_value == nullptr) {
+        snapshot->next_event_time_defined = false;
+        snapshot->next_event_time.reset();
+        return OperationResult::Success();
+    }
+    if (!defined_value->IsBool()) {
+        return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway returned an invalid next-event-time flag");
+    }
+    snapshot->next_event_time_defined = defined_value->AsBool();
+    snapshot->next_event_time.reset();
+    if (!snapshot->next_event_time_defined) {
+        return OperationResult::Success();
+    }
+    const JsonValue* time_value = FindObjectValue(object, "nextEventTime");
+    if (time_value == nullptr || !time_value->IsNumber()) {
+        return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway omitted a defined next event time");
+    }
+    const double time = time_value->AsNumber();
+    if (!std::isfinite(time) || time < snapshot->sim_time - std::max(1e-12, std::abs(snapshot->sim_time) * 1e-12)) {
+        return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway returned an invalid next event time");
+    }
+    snapshot->next_event_time = time;
+    return OperationResult::Success();
 }
 
 }  // namespace
@@ -271,7 +302,8 @@ OperationResult GatewayClient::Reconfigure(const std::map<std::string, ScalarVal
     return EnsureResponseType(response.value, kSimReconfigured);
 }
 
-OperationResult GatewayClient::SetInputs(const std::map<std::string, ScalarValue>& values) {
+OperationResult GatewayClient::SetInputs(const std::map<std::string, ScalarValue>& values,
+                                         bool* terminate_simulation) {
     if (values.empty()) {
         return OperationResult::Success();
     }
@@ -287,7 +319,11 @@ OperationResult GatewayClient::SetInputs(const std::map<std::string, ScalarValue
     if (!response) {
         return response.status;
     }
-    return EnsureResponseType(response.value, kSimInputsUpdated);
+    const auto status = EnsureResponseType(response.value, kSimInputsUpdated);
+    if (status && terminate_simulation != nullptr) {
+        *terminate_simulation = JsonBool(response.value, "terminateSimulation");
+    }
+    return status;
 }
 
 ValueResult<OutputSnapshot> GatewayClient::Step(const double delta_t) {
@@ -411,6 +447,10 @@ ValueResult<OutputSnapshot> GatewayClient::Advance(
         snapshot.event_handling_needed = JsonBool(sample, "eventHandlingNeeded");
         snapshot.terminate_simulation = JsonBool(sample, "terminateSimulation");
         snapshot.finished = JsonBool(sample, "finished", JsonBool(response.value, "finished"));
+        const auto event_metadata_status = ParseNextEventMetadata(sample, &snapshot);
+        if (!event_metadata_status) {
+            return ValueResult<OutputSnapshot>::Failure(event_metadata_status.code, event_metadata_status.message);
+        }
         const JsonValue* values = FindObjectValue(sample, "outputs");
         if (values == nullptr || values->AsObject() == nullptr) {
             return ValueResult<OutputSnapshot>::Failure(
@@ -460,6 +500,12 @@ ValueResult<OutputSnapshot> GatewayClient::GetOutputs(const std::vector<std::str
             snapshot.values = *object;
         }
     }
+    const auto event_metadata_status = ParseNextEventMetadata(response.value, &snapshot);
+    if (!event_metadata_status) {
+        return ValueResult<OutputSnapshot>::Failure(event_metadata_status.code, event_metadata_status.message);
+    }
+    snapshot.terminate_simulation = JsonBool(response.value, "terminateSimulation");
+    snapshot.finished = JsonBool(response.value, "finished");
     return ValueResult<OutputSnapshot>::Success(std::move(snapshot));
 }
 
@@ -517,6 +563,10 @@ ValueResult<OutputSnapshot> GatewayClient::RestoreFmuState(
     const JsonValue* outputs = FindObjectValue(response.value, "outputs");
     if (outputs != nullptr && outputs->AsObject() != nullptr) {
         snapshot.values = *outputs->AsObject();
+    }
+    const auto event_metadata_status = ParseNextEventMetadata(response.value, &snapshot);
+    if (!event_metadata_status) {
+        return ValueResult<OutputSnapshot>::Failure(event_metadata_status.code, event_metadata_status.message);
     }
     return ValueResult<OutputSnapshot>::Success(std::move(snapshot));
 }

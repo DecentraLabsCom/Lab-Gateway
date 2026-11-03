@@ -401,12 +401,13 @@ external AAS; it can consume the supported restricted Part 4 JSON profile when
 the provider has linked it. The Part 4 `UPDATE` right covers the write phases
 supported for that variable by FMI and the runtime; FMI 2.0 and FMI 3.0
 Co-Simulation `tunable` parameters can be changed at initialization and at
-runtime communication points. FMI 3.0 fixed `UInt64` `structuralParameter`
-values are writable only in Configuration Mode and determine dependent array
-shapes. FMI-LS-DAE's scalar tunable Boolean `structuralParameter` selector is
-writable in Configuration Mode before initialization and in Reconfiguration
-Mode from Event Mode during Model Exchange. The Gateway keeps these phases
-distinct from ordinary initialization and communication-point writes. The Lab
+runtime communication points. FMI 3.0 fixed and tunable
+`structuralParameter` values are writable in Configuration Mode; tunable
+structural parameters are also writable in Reconfiguration Mode. Dimensions
+referenced by arrays must be scalar `UInt64` structural parameters or
+constant `UInt64` values. Initial dimensions are positive; a reconfigured
+dimension may be zero when permitted by the FMU. The Gateway keeps these
+phases distinct from ordinary initialization and communication-point writes. The Lab
 Manager link panel checks FMU AAS links
 and displays a warning when the linked shell, policy submodel or
 policy-to-FMU mapping cannot be validated. An external AAS with no compatible
@@ -422,11 +423,11 @@ FMU metadata and runtime capabilities.
 
 | FMI causality | IDTA 02005 port description | Generated Part 4 rights |
 | --- | --- | --- |
-| `input` | `Input` / `Input` | `READ`; `UPDATE` when variability is recognized. |
+| `input` | `Input` / `Input` | `READ`; `UPDATE` when variability is recognized. FMI 3 Clock inputs receive runtime access only when Event Mode is supported. |
 | `output` | `Output` / `Output` | `READ`. |
 | `parameter` | `Parameter` / `Input` | `READ`; `UPDATE` for `fixed` or `tunable` variability. |
 | `calculatedParameter` | `Parameter` / `Input` | `READ`; read-only. |
-| `structuralParameter` | `Parameter` / `Input` | `READ`; `UPDATE` in Configuration Mode for fixed `UInt64` dimensions and scalar tunable Boolean FMI-LS-DAE selectors, with the selector also writable in Reconfiguration Mode. |
+| `structuralParameter` | `Parameter` / `Input` | `READ`; `UPDATE` in Configuration Mode for FMI 3 fixed/tunable structural parameters, and in Reconfiguration Mode for tunable structural parameters. |
 | `independent` | `Internal` / `Acausal` | `READ`; read-only. |
 | `local` | Omitted from generated `Ports` | No access rule. |
 | Unknown causality | `Internal` / `Acausal`, if present | No access; fails closed. |
@@ -435,12 +436,14 @@ Default write phases are:
 
 - **Inputs:** initialization when variability is recognized; runtime for
   `continuous`, `discrete` and `tunable` inputs. `constant` and `fixed` inputs
-  are therefore initialization-only.
+  are therefore initialization-only. FMI 3 Clock inputs can be activated at
+  runtime only when the execution path supports Event Mode.
 - **Parameters:** initialization for `fixed` and `tunable`; runtime
   communication points for `tunable` parameters in FMI 2.0/3.0 Co-Simulation.
-- **Structural parameters:** Configuration Mode for FMI 3.0 fixed `UInt64`
-  dimensions and scalar tunable Boolean FMI-LS-DAE selectors. The DAE selector
-  may also be changed in Reconfiguration Mode from Event Mode; fixed dimensions
+- **Structural parameters:** Configuration Mode for FMI 3.0 fixed and tunable
+  structural parameters. Tunable structural parameters may also be changed in
+  Reconfiguration Mode. In Co-Simulation this is entered from Step Mode; in
+  Model Exchange it is entered from Event Mode. Fixed structural parameters
   remain initialization-only.
 
 Read access is granted by default for recognized non-`local` causalities. An

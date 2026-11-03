@@ -33,6 +33,9 @@ public:
     OperationResult ExitInitializationMode();
     OperationResult EnterConfigurationMode();
     OperationResult ExitConfigurationMode();
+    OperationResult UpdateDiscreteStates(bool* terminate_simulation = nullptr,
+                                         bool* next_event_time_defined = nullptr,
+                                         double* next_event_time = nullptr);
     bool HasStructuralParameters() const;
     bool HasTunableStructuralParameters() const;
     void SetEarlyReturnAllowed(bool allowed);
@@ -42,24 +45,27 @@ public:
     OperationResult CaptureFmuState(std::string& serialized_state);
     OperationResult RestoreFmuState(const std::string& serialized_state);
 
-    OperationResult SetReal(const std::uint32_t* value_references, std::size_t count, const double* values, std::size_t value_count = 0);
-    OperationResult SetInteger(const std::uint32_t* value_references, std::size_t count, const std::int32_t* values, std::size_t value_count = 0);
-    OperationResult SetSignedInteger(const std::uint32_t* value_references, std::size_t count, const std::int64_t* values, std::size_t value_count = 0);
-    OperationResult SetUnsignedInteger(const std::uint32_t* value_references, std::size_t count, const std::uint64_t* values, std::size_t value_count = 0);
-    OperationResult SetBoolean(const std::uint32_t* value_references, std::size_t count, const bool* values, std::size_t value_count = 0);
-    OperationResult SetString(const std::uint32_t* value_references, std::size_t count, const char* const* values, std::size_t value_count = 0);
-    OperationResult SetBinary(const std::uint32_t* value_references, std::size_t count, const std::size_t* value_sizes, const std::uint8_t* const* values, std::size_t value_count = 0);
+    OperationResult SetReal(const std::uint32_t* value_references, std::size_t count, const double* values, std::optional<std::size_t> value_count = std::nullopt);
+    OperationResult SetInteger(const std::uint32_t* value_references, std::size_t count, const std::int32_t* values, std::optional<std::size_t> value_count = std::nullopt);
+    OperationResult SetSignedInteger(const std::uint32_t* value_references, std::size_t count, const std::int64_t* values, std::optional<std::size_t> value_count = std::nullopt);
+    OperationResult SetUnsignedInteger(const std::uint32_t* value_references, std::size_t count, const std::uint64_t* values, std::optional<std::size_t> value_count = std::nullopt);
+    OperationResult SetBoolean(const std::uint32_t* value_references, std::size_t count, const bool* values, std::optional<std::size_t> value_count = std::nullopt);
+    OperationResult SetString(const std::uint32_t* value_references, std::size_t count, const char* const* values, std::optional<std::size_t> value_count = std::nullopt);
+    OperationResult SetBinary(const std::uint32_t* value_references, std::size_t count, const std::size_t* value_sizes, const std::uint8_t* const* values, std::optional<std::size_t> value_count = std::nullopt);
     OperationResult SetClock(const std::uint32_t* value_references, std::size_t count, const bool* values);
 
-    OperationResult GetReal(const std::uint32_t* value_references, std::size_t count, double* values, std::size_t value_count = 0) const;
-    OperationResult GetInteger(const std::uint32_t* value_references, std::size_t count, std::int32_t* values, std::size_t value_count = 0) const;
-    OperationResult GetSignedInteger(const std::uint32_t* value_references, std::size_t count, std::int64_t* values, std::size_t value_count = 0) const;
-    OperationResult GetUnsignedInteger(const std::uint32_t* value_references, std::size_t count, std::uint64_t* values, std::size_t value_count = 0) const;
-    OperationResult GetBoolean(const std::uint32_t* value_references, std::size_t count, bool* values, std::size_t value_count = 0) const;
-    OperationResult GetString(const std::uint32_t* value_references, std::size_t count, const char** values, std::size_t value_count = 0);
-    OperationResult GetBinary(const std::uint32_t* value_references, std::size_t count, std::size_t* value_sizes, const std::uint8_t** values, std::size_t value_count = 0);
+    OperationResult GetReal(const std::uint32_t* value_references, std::size_t count, double* values, std::optional<std::size_t> value_count = std::nullopt) const;
+    OperationResult GetInteger(const std::uint32_t* value_references, std::size_t count, std::int32_t* values, std::optional<std::size_t> value_count = std::nullopt) const;
+    OperationResult GetSignedInteger(const std::uint32_t* value_references, std::size_t count, std::int64_t* values, std::optional<std::size_t> value_count = std::nullopt) const;
+    OperationResult GetUnsignedInteger(const std::uint32_t* value_references, std::size_t count, std::uint64_t* values, std::optional<std::size_t> value_count = std::nullopt) const;
+    OperationResult GetBoolean(const std::uint32_t* value_references, std::size_t count, bool* values, std::optional<std::size_t> value_count = std::nullopt) const;
+    OperationResult GetString(const std::uint32_t* value_references, std::size_t count, const char** values, std::optional<std::size_t> value_count = std::nullopt);
+    OperationResult GetBinary(const std::uint32_t* value_references, std::size_t count, std::size_t* value_sizes, const std::uint8_t** values, std::optional<std::size_t> value_count = std::nullopt);
     OperationResult GetClock(const std::uint32_t* value_references, std::size_t count, bool* values);
     std::size_t ExpectedValueCount(const std::uint32_t* value_references, std::size_t count) const;
+    bool TryExpectedValueCount(const std::uint32_t* value_references,
+                               std::size_t count,
+                               std::size_t* expected_value_count) const;
 
     const RuntimeConfig& Config() const;
     const ModelDescription& Model() const;
@@ -76,8 +82,10 @@ private:
     OperationResult SetValue(const VariableInfo& variable, ScalarValue value);
     const ScalarValue* GetCachedValue(std::uint32_t value_reference) const;
     OperationResult ApplyOutputSnapshot(const OutputSnapshot& snapshot);
+    void InvalidateArraysForStructuralParameter(const VariableInfo& variable, bool initialization_configuration);
     void SeedCacheFromModelDefaults();
     std::size_t ResolveVariableFlatSize(const VariableInfo& variable) const;
+    bool TryResolveVariableFlatSize(const VariableInfo& variable, std::size_t* flat_size) const;
     std::optional<std::int32_t> ResolveDimensionExtent(const DimensionInfo& dimension) const;
     void SetError(const std::string& message);
     static std::string DecodeFileUri(const std::string& resource_location);
@@ -86,14 +94,14 @@ private:
     OperationResult SetNumericValues(const std::uint32_t* value_references,
                                      std::size_t count,
                                      const T* values,
-                                     std::size_t value_count,
+                                     std::optional<std::size_t> value_count,
                                      ScalarType expected_type);
 
     template <typename T>
     OperationResult GetNumericValues(const std::uint32_t* value_references,
                                      std::size_t count,
                                      T* values,
-                                     std::size_t value_count,
+                                     std::optional<std::size_t> value_count,
                                      ScalarType expected_type) const;
 
     TransportFactory transport_factory_;

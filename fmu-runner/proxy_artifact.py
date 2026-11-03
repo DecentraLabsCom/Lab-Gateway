@@ -29,6 +29,8 @@ _FMI_LS_REF_NAME = "org.fmi-standard.fmi-ls-ref"
 _FMI_LS_REF_NAMESPACE = "http://fmi-standard.org/fmi-ls-manifest"
 _FMI_LS_REF_MANIFEST_PATH = f"extra/{_FMI_LS_REF_NAME}/fmi-ls-manifest.xml"
 _FMI_LS_REF_VERSION = "1.0.0-alpha.1"
+_FMI_LS_REF_DESCRIPTION = "Layered Standard providing information on related files included in an FMU."
+_FMI_LS_STRUCT_DESCRIPTION = "Layered standard for structuring of variables"
 _SSV_NAMESPACE = "http://ssp-standard.org/SSP1/SystemStructureParameterValues"
 _MA_HS_EXPERIMENTS_NAMESPACE = "http://modelica.org/HSExperiments1/HSExperiments"
 _SSP_PARAMETER_SET_MEDIA_TYPE = "application/x-ssp-parameter-set"
@@ -299,7 +301,7 @@ def _fmi_ls_ref_archive_entries(
     manifest.set(f"{{{_FMI_LS_REF_NAMESPACE}}}fmi-ls-version", _FMI_LS_REF_VERSION)
     manifest.set(
         f"{{{_FMI_LS_REF_NAMESPACE}}}fmi-ls-description",
-        "Reservation-safe parameter configurations and experiments for this proxy FMU.",
+        _FMI_LS_REF_DESCRIPTION,
     )
     for source, role, media_type, description in related_entries:
         related = ET.SubElement(manifest, "Related", {
@@ -341,6 +343,7 @@ def _fmi_ls_struct_archive_entries(model_xml: bytes, value: Any) -> tuple[tuple[
     manifest = ET.Element("fmiLayeredStandardManifest")
     manifest.set(f"{{{_FMI_LS_NAMESPACE}}}fmi-ls-name", MANIFEST_NAME)
     manifest.set(f"{{{_FMI_LS_NAMESPACE}}}fmi-ls-version", struct["manifestVersion"])
+    manifest.set(f"{{{_FMI_LS_NAMESPACE}}}fmi-ls-description", _FMI_LS_STRUCT_DESCRIPTION)
 
     terminals_root = ET.Element("fmiTerminalsAndIcons", {"fmiVersion": "3.0"})
     terminals = ET.SubElement(terminals_root, "Terminals")

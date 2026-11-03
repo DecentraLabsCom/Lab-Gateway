@@ -245,12 +245,6 @@ def _validate_proxy_generation_supported(model_metadata: dict):
     source_capabilities = source_capabilities if isinstance(source_capabilities, dict) else {}
     has_clock = False
     source_uses_model_exchange = str(model_metadata.get("simulationKind") or "").lower() == "modelexchange"
-    fmi_ls_dae = model_metadata.get("fmiLsDae")
-    dae_selector_name = (
-        fmi_ls_dae.get("enableDAEParameter")
-        if isinstance(fmi_ls_dae, dict)
-        else None
-    )
     model_variables = model_metadata.get("modelVariables", [])
     variables_by_reference = {
         variable.get("valueReference"): variable
@@ -289,32 +283,18 @@ def _validate_proxy_generation_supported(model_metadata: dict):
         if normalized_type == "Clock":
             has_clock = True
             if (
-                variable.get("causality") != "output"
+                variable.get("causality") not in {"input", "output"}
                 or variable.get("intervalVariability") != "triggered"
             ):
                 raise HTTPException(
                     status_code=422,
-                    detail=f"Generated FMI 3 proxy FMUs currently support only triggered output Clocks: {variable.get('name')}",
+                    detail=f"Generated FMI 3 proxy FMUs currently support only triggered input and output Clocks: {variable.get('name')}",
                 )
         if variable.get("causality") == "structuralParameter":
-            is_fixed_dimension_parameter = (
-                normalized_type == "UInt64" and variable.get("variability") == "fixed"
-            )
-            is_tunable_boolean_selector = (
-                normalized_type == "Boolean"
-                and variable.get("variability") == "tunable"
-                and not (variable.get("dimensions") or [])
-                and source_uses_model_exchange
-                and variable.get("name") == dae_selector_name
-            )
-            if not is_fixed_dimension_parameter and not is_tunable_boolean_selector:
+            if variable.get("variability") not in {"fixed", "tunable"}:
                 raise HTTPException(
                     status_code=422,
-                    detail=(
-                        "Generated FMI 3 proxy FMUs support fixed UInt64 dimension parameters and scalar "
-                        "tunable Boolean structural parameters: "
-                        f"{variable.get('name')}"
-                    ),
+                    detail=f"FMI structural parameters must be fixed or tunable: {variable.get('name')}",
                 )
         for dimension in variable.get("dimensions", []) or []:
             if "start" not in dimension and "valueReference" not in dimension:
@@ -326,15 +306,22 @@ def _validate_proxy_generation_supported(model_metadata: dict):
                 structural_parameter = variables_by_reference.get(dimension.get("valueReference"))
                 if (
                     not isinstance(structural_parameter, dict)
-                    or structural_parameter.get("causality") != "structuralParameter"
                     or _normalize_proxy_fmi3_type(structural_parameter.get("type")) != "UInt64"
-                    or structural_parameter.get("variability") != "fixed"
+                    or not (
+                        structural_parameter.get("variability") == "constant"
+                        or (
+                            structural_parameter.get("causality") == "structuralParameter"
+                            and structural_parameter.get("variability") in {"fixed", "tunable"}
+                        )
+                    )
+                    or (structural_parameter.get("causality") == "structuralParameter"
+                        and structural_parameter.get("dimensions"))
                 ):
                     raise HTTPException(
                         status_code=422,
                         detail=(
-                            "Generated FMI 3 proxy FMUs require dimensions to reference fixed UInt64 "
-                            f"structural parameters: {variable.get('name')}"
+                            "Generated FMI 3 proxy FMUs require dimensions to reference constant or "
+                            f"fixed/tunable structural UInt64 variables: {variable.get('name')}"
                         ),
                     )
     if has_clock and not source_uses_model_exchange and source_capabilities.get("hasEventMode") is not True:
@@ -512,6 +499,7 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
 
     model_variables = ET.SubElement(root, "ModelVariables")
     output_indexes = []
+    initial_unknown_indexes = []
     written_index = 0  # 1-based position in ModelVariables (independent vars excluded)
 
     for index, var in enumerate(model_metadata.get("modelVariables", []), start=1):
@@ -554,6 +542,14 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
             scalar_attrs["initial"] = initial
 
         type_attrs = {}
+        if fmi_major_version >= 3 and normalized_fmi3_type != "Clock":
+            clock_references = [
+                str(reference)
+                for reference in (var.get("clocks") or [])
+                if isinstance(reference, int) and not isinstance(reference, bool) and reference >= 0
+            ]
+            if clock_references:
+                type_attrs["clocks"] = " ".join(clock_references)
         unit = _normalize_xml_value(var.get("unit"))
         if unit and (var_type == "Real" or normalized_fmi3_type in {"Float32", "Float64"}):
             type_attrs["unit"] = unit
@@ -712,19 +708,57 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
 
         if (causality or "").lower() == "output":
             output_indexes.append((written_index, value_reference))
+        if fmi_major_version >= 3 and _is_fmi3_initial_unknown(var, initial):
+            initial_unknown_indexes.append(value_reference)
 
     model_structure = ET.SubElement(root, "ModelStructure")
-    if output_indexes:
-        if fmi_major_version >= 3:
-            for _, value_reference in output_indexes:
-                ET.SubElement(model_structure, "Output", {"valueReference": str(value_reference)})
-        else:
-            outputs = ET.SubElement(model_structure, "Outputs")
-            for idx, _ in output_indexes:
-                ET.SubElement(outputs, "Unknown", {"index": str(idx)})
+    if fmi_major_version >= 3:
+        for _, value_reference in output_indexes:
+            ET.SubElement(model_structure, "Output", {"valueReference": str(value_reference)})
+        for value_reference in initial_unknown_indexes:
+            ET.SubElement(model_structure, "InitialUnknown", {"valueReference": str(value_reference)})
+    elif output_indexes:
+        outputs = ET.SubElement(model_structure, "Outputs")
+        for idx, _ in output_indexes:
+            ET.SubElement(outputs, "Unknown", {"index": str(idx)})
 
     xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     return xml_bytes
+
+
+def _is_fmi3_initial_unknown(variable: dict, initial: Any) -> bool:
+    """Return whether FMI 3 requires this proxy variable in InitialUnknown."""
+    causality = str(variable.get("causality") or "local").lower()
+    if causality == "calculatedparameter":
+        return True
+
+    if initial is not None:
+        is_unknown = str(initial).lower() in {"approx", "calculated"}
+        if causality == "output":
+            return is_unknown
+        # Clocked variables may be included when the FMU chooses to initialize
+        # them in Initialization Mode; an explicit unknown initial value is
+        # the metadata signal that this proxy preserves that choice.
+        return is_unknown and bool(variable.get("clocks"))
+
+    variability = str(variable.get("variability") or "").lower()
+    variable_type = _normalize_proxy_fmi3_type(variable.get("type"))
+    if not variability:
+        if causality in {"input", "output", "local"}:
+            variability = "continuous" if variable_type in {"Float32", "Float64"} else "discrete"
+        elif causality == "independent":
+            variability = "continuous"
+        else:
+            variability = "fixed"
+
+    # FMI 3 requires non-clocked discrete and continuous outputs in this list;
+    # constant outputs default to exact and are not initialization unknowns.
+    return (
+        causality == "output"
+        and variable_type != "Clock"
+        and not variable.get("clocks")
+        and variability in {"discrete", "continuous"}
+    )
 
 
 def _collect_runtime_files(

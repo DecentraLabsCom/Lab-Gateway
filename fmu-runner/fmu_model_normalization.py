@@ -113,6 +113,15 @@ def normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str
     initial = raw.get("initial")
     if isinstance(initial, str) and initial.strip():
         entry["initial"] = initial.strip()[:32]
+    raw_clocks = raw.get("clocks")
+    if isinstance(raw_clocks, list) and len(raw_clocks) <= 256:
+        clock_references = [
+            reference
+            for item in raw_clocks
+            if (reference := _normalize_fmi_non_negative_integer(item)) is not None
+        ]
+        if clock_references:
+            entry["clocks"] = clock_references
     nominal = raw.get("nominal")
     if nominal is not None and not isinstance(nominal, bool):
         try:

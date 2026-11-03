@@ -544,41 +544,63 @@ std::optional<std::int32_t> ProxyRuntime::ResolveDimensionExtent(const Dimension
 }
 
 std::size_t ProxyRuntime::ResolveVariableFlatSize(const VariableInfo& variable) const {
+    std::size_t flat_size = 0;
+    return TryResolveVariableFlatSize(variable, &flat_size) ? flat_size : 0;
+}
+
+bool ProxyRuntime::TryResolveVariableFlatSize(const VariableInfo& variable, std::size_t* flat_size) const {
+    if (flat_size == nullptr) {
+        return false;
+    }
     if (variable.dimensions.empty()) {
-        return 1;
+        *flat_size = 1;
+        return true;
     }
     std::size_t size = 1;
     for (const auto& dimension : variable.dimensions) {
         const auto extent = ResolveDimensionExtent(dimension);
         if (!extent.has_value() || *extent < 0) {
-            return 0;
+            return false;
         }
         const auto unsigned_extent = static_cast<std::size_t>(*extent);
         if (unsigned_extent != 0 && size > std::numeric_limits<std::size_t>::max() / unsigned_extent) {
-            return 0;
+            return false;
         }
         size *= unsigned_extent;
     }
-    return size;
+    *flat_size = size;
+    return true;
 }
 
 std::size_t ProxyRuntime::ExpectedValueCount(const std::uint32_t* value_references, const std::size_t count) const {
-    if (value_references == nullptr) {
+    std::size_t expected = 0;
+    if (!TryExpectedValueCount(value_references, count, &expected)) {
         return 0;
+    }
+    return expected;
+}
+
+bool ProxyRuntime::TryExpectedValueCount(const std::uint32_t* value_references,
+                                         const std::size_t count,
+                                         std::size_t* expected_value_count) const {
+    if (expected_value_count == nullptr || (count > 0 && value_references == nullptr)) {
+        return false;
     }
     std::size_t expected = 0;
     for (std::size_t index = 0; index < count; ++index) {
         const VariableInfo* variable = FindVariableByValueReference(model_, value_references[index]);
         if (variable == nullptr) {
-            return 0;
+            return false;
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0) {
-            return 0;
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size)
+            || flat_size > std::numeric_limits<std::size_t>::max() - expected) {
+            return false;
         }
         expected += flat_size;
     }
-    return expected;
+    *expected_value_count = expected;
+    return true;
 }
 
 OperationResult ProxyRuntime::Configure(const std::string& instance_name, const std::string& resource_location) {
@@ -715,6 +737,32 @@ OperationResult ProxyRuntime::ExitConfigurationMode() {
             SetError(status.message);
             return status;
         }
+        std::vector<std::string> affected_output_names;
+        for (const auto& [name, value] : reconfiguration_values_) {
+            (void)value;
+            const VariableInfo* variable = FindVariableByName(model_, name);
+            if (variable != nullptr) {
+                InvalidateArraysForStructuralParameter(*variable, false);
+                for (const auto& candidate : model_.variables) {
+                    const bool depends_on_parameter = std::any_of(
+                        candidate.dimensions.begin(), candidate.dimensions.end(),
+                        [variable](const DimensionInfo& dimension) {
+                            return dimension.value_reference == variable->value_reference;
+                        });
+                    if (depends_on_parameter && candidate.causality == "output") {
+                        affected_output_names.push_back(candidate.name);
+                    }
+                }
+            }
+        }
+        if (!affected_output_names.empty()) {
+            const auto outputs = gateway_client_->GetOutputs(affected_output_names);
+            if (!outputs) {
+                SetError(outputs.status.message);
+                return outputs.status;
+            }
+            ApplyOutputSnapshot(outputs.value);
+        }
     }
     configuration_mode_ = false;
     configuration_mode_initialization_ = false;
@@ -734,6 +782,52 @@ bool ProxyRuntime::HasTunableStructuralParameters() const {
     });
 }
 
+void ProxyRuntime::InvalidateArraysForStructuralParameter(
+    const VariableInfo& structural_parameter,
+    const bool initialization_configuration) {
+    for (const auto& candidate : model_.variables) {
+        const bool depends_on_parameter = std::any_of(
+            candidate.dimensions.begin(), candidate.dimensions.end(),
+            [&structural_parameter](const DimensionInfo& dimension) {
+                return dimension.value_reference == structural_parameter.value_reference;
+            });
+        if (!depends_on_parameter) {
+            continue;
+        }
+        cached_values_.erase(candidate.value_reference);
+        std::size_t flat_size = 0;
+        if (TryResolveVariableFlatSize(candidate, &flat_size) && flat_size == 0) {
+            switch (candidate.type) {
+                case ScalarType::kReal:
+                    cached_values_[candidate.value_reference] = RealArray{};
+                    break;
+                case ScalarType::kInteger:
+                case ScalarType::kEnumeration:
+                    if (BoundsForDeclaredType(candidate.declared_type).unsigned_only) {
+                        cached_values_[candidate.value_reference] = UnsignedIntegerArray{};
+                    } else {
+                        cached_values_[candidate.value_reference] = IntegerArray{};
+                    }
+                    break;
+                case ScalarType::kBoolean:
+                case ScalarType::kClock:
+                    cached_values_[candidate.value_reference] = BooleanArray{};
+                    break;
+                case ScalarType::kString:
+                    cached_values_[candidate.value_reference] = StringArray{};
+                    break;
+                case ScalarType::kBinary:
+                    cached_values_[candidate.value_reference] = BinaryArray{};
+                    break;
+            }
+        }
+        pending_inputs_.erase(candidate.name);
+        if (initialization_configuration) {
+            initial_inputs_.erase(candidate.name);
+        }
+    }
+}
+
 OperationResult ProxyRuntime::ExitInitializationMode() {
     if (gateway_client_ == nullptr) {
         return OperationResult::Failure("RUNTIME_NOT_CONFIGURED", "Runtime is not configured");
@@ -746,7 +840,8 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
     std::map<std::string, ScalarValue> initialization_parameters;
     for (const auto& [name, value] : pending_inputs_) {
         const VariableInfo* variable = FindVariableByName(model_, name);
-        if (variable != nullptr && variable->start_value.has_value()
+        if (variable != nullptr && variable->causality != "structuralParameter"
+            && variable->start_value.has_value()
             && *variable->start_value == value) {
             initial_inputs_.erase(name);
             continue;
@@ -765,6 +860,19 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
         SetError(status.message);
         return status;
     }
+    std::vector<std::string> output_variables;
+    for (const auto& variable : model_.variables) {
+        if (variable.causality == "output") {
+            output_variables.push_back(variable.name);
+        }
+    }
+    const auto initial_outputs = gateway_client_->GetOutputs(output_variables);
+    if (!initial_outputs) {
+        state_ = SessionState::kError;
+        SetError(initial_outputs.status.message);
+        return initial_outputs.status;
+    }
+    ApplyOutputSnapshot(initial_outputs.value);
     pending_inputs_.clear();
     current_time_ = experiment_.start_time;
     realtime_sim_origin_ = current_time_;
@@ -789,6 +897,50 @@ OperationResult ProxyRuntime::ApplyOutputSnapshot(const OutputSnapshot& snapshot
             continue;
         }
         cached_values_[variable->value_reference] = *converted;
+    }
+    return OperationResult::Success();
+}
+
+OperationResult ProxyRuntime::UpdateDiscreteStates(bool* terminate_simulation,
+                                                   bool* next_event_time_defined,
+                                                   double* next_event_time) {
+    if (gateway_client_ == nullptr || !gateway_client_->IsConnected()) {
+        return OperationResult::Failure("RUNTIME_NOT_CONNECTED", "Discrete-state update requires an active Gateway session");
+    }
+    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning) {
+        return OperationResult::Failure("STATE_ERROR", "Discrete-state update requires an initialized simulation");
+    }
+    bool terminated = false;
+    const auto input_status = gateway_client_->SetInputs(pending_inputs_, &terminated);
+    if (!input_status) {
+        SetError(input_status.message);
+        return input_status;
+    }
+    pending_inputs_.clear();
+
+    std::vector<std::string> output_variables;
+    for (const auto& variable : model_.variables) {
+        if (variable.causality == "output") {
+            output_variables.push_back(variable.name);
+        }
+    }
+    const auto outputs = gateway_client_->GetOutputs(output_variables);
+    if (!outputs) {
+        SetError(outputs.status.message);
+        return outputs.status;
+    }
+    ApplyOutputSnapshot(outputs.value);
+    last_step_event_handling_needed_ = false;
+    last_step_terminated_ = terminated;
+    simulation_finished_ = terminated;
+    if (next_event_time_defined != nullptr) {
+        *next_event_time_defined = outputs.value.next_event_time_defined;
+    }
+    if (next_event_time != nullptr) {
+        *next_event_time = outputs.value.next_event_time.value_or(0.0);
+    }
+    if (terminate_simulation != nullptr) {
+        *terminate_simulation = terminated;
     }
     return OperationResult::Success();
 }
@@ -923,12 +1075,42 @@ OperationResult ProxyRuntime::CaptureFmuState(std::string& serialized_state) {
     if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning) {
         return OperationResult::Failure("STATE_ERROR", "FMU state capture requires an initialized simulation");
     }
+    if (configuration_mode_) {
+        return OperationResult::Failure("STATE_ERROR", "FMU state capture is unavailable in Configuration Mode");
+    }
     const auto checkpoint = gateway_client_->CaptureFmuState();
     if (!checkpoint) {
         SetError(checkpoint.status.message);
         return checkpoint.status;
     }
-    serialized_state = SerializeJson(JsonValue(checkpoint.value));
+    const JsonValue* remote_checkpoint_value = FindObjectValue(checkpoint.value, "checkpoint");
+    const JsonObject* remote_checkpoint = remote_checkpoint_value == nullptr
+        ? nullptr
+        : remote_checkpoint_value->AsObject();
+    if (remote_checkpoint == nullptr) {
+        return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway returned an invalid FMU checkpoint");
+    }
+    std::map<std::string, ScalarValue> cached_by_name;
+    for (const auto& [reference, value] : cached_values_) {
+        const VariableInfo* variable = FindVariableByValueReference(model_, reference);
+        if (variable != nullptr) {
+            cached_by_name.emplace(variable->name, value);
+        }
+    }
+    JsonObject state = {
+        {"version", JsonValue(2)},
+        {"checkpoint", JsonValue(*remote_checkpoint)},
+        {"currentTime", JsonValue(current_time_)},
+        {"running", JsonValue(state_ == SessionState::kRunning)},
+        {"simulationFinished", JsonValue(simulation_finished_)},
+        {"lastStepEarlyReturn", JsonValue(last_step_early_return_)},
+        {"lastStepEventHandlingNeeded", JsonValue(last_step_event_handling_needed_)},
+        {"lastStepTerminated", JsonValue(last_step_terminated_)},
+        {"initialInputs", JsonValue(scalar_value_codec::EncodeJsonObject(initial_inputs_))},
+        {"pendingInputs", JsonValue(scalar_value_codec::EncodeJsonObject(pending_inputs_))},
+        {"cachedValues", JsonValue(scalar_value_codec::EncodeJsonObject(cached_by_name))},
+    };
+    serialized_state = SerializeJson(JsonValue(std::move(state)));
     return OperationResult::Success();
 }
 
@@ -944,10 +1126,59 @@ OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_stat
         return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state is invalid");
     }
     const JsonObject* serialized_object = parsed.value.AsObject();
+    const JsonValue* version = FindObjectValue(*serialized_object, "version");
     const JsonValue* checkpoint_value = FindObjectValue(*serialized_object, "checkpoint");
     const JsonObject* checkpoint = checkpoint_value == nullptr ? nullptr : checkpoint_value->AsObject();
-    if (checkpoint == nullptr) {
+    const JsonValue* time_value = FindObjectValue(*serialized_object, "currentTime");
+    const JsonValue* running_value = FindObjectValue(*serialized_object, "running");
+    const JsonValue* finished_value = FindObjectValue(*serialized_object, "simulationFinished");
+    const JsonValue* early_return_value = FindObjectValue(*serialized_object, "lastStepEarlyReturn");
+    const JsonValue* event_needed_value = FindObjectValue(*serialized_object, "lastStepEventHandlingNeeded");
+    const JsonValue* terminated_value = FindObjectValue(*serialized_object, "lastStepTerminated");
+    if (version == nullptr || !version->IsNumber() || version->AsNumber() != 2.0
+        || checkpoint == nullptr || time_value == nullptr || !time_value->IsNumber()
+        || running_value == nullptr || !running_value->IsBool()
+        || finished_value == nullptr || !finished_value->IsBool()
+        || early_return_value == nullptr || !early_return_value->IsBool()
+        || event_needed_value == nullptr || !event_needed_value->IsBool()
+        || terminated_value == nullptr || !terminated_value->IsBool()) {
         return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state is incomplete");
+    }
+    const double serialized_time = time_value->AsNumber();
+    if (!std::isfinite(serialized_time)) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU time is invalid");
+    }
+    auto decode_values = [this, serialized_object](const char* field,
+                                                    std::map<std::string, ScalarValue>* output) {
+        if (output == nullptr) {
+            return false;
+        }
+        const JsonValue* value = FindObjectValue(*serialized_object, field);
+        const JsonObject* object = value == nullptr ? nullptr : value->AsObject();
+        if (object == nullptr) {
+            return false;
+        }
+        output->clear();
+        for (const auto& [name, item] : *object) {
+            const VariableInfo* variable = FindVariableByName(model_, name);
+            if (variable == nullptr) {
+                return false;
+            }
+            const auto converted = ConvertJsonValue(item, *variable);
+            if (!converted.has_value()) {
+                return false;
+            }
+            output->emplace(name, *converted);
+        }
+        return true;
+    };
+    std::map<std::string, ScalarValue> initial_inputs;
+    std::map<std::string, ScalarValue> pending_inputs;
+    std::map<std::string, ScalarValue> cached_by_name;
+    if (!decode_values("initialInputs", &initial_inputs)
+        || !decode_values("pendingInputs", &pending_inputs)
+        || !decode_values("cachedValues", &cached_by_name)) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU proxy values are invalid");
     }
     std::vector<std::string> output_variables;
     output_variables.reserve(512);
@@ -961,12 +1192,18 @@ OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_stat
         SetError(restored.status.message);
         return restored.status;
     }
+    const double time_tolerance = std::max(1e-12, std::abs(serialized_time) * 1e-12);
+    if (!std::isfinite(restored.value.sim_time)
+        || std::abs(restored.value.sim_time - serialized_time) > time_tolerance) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Gateway restored a different simulation time");
+    }
     current_time_ = restored.value.sim_time;
-    simulation_finished_ = false;
-    last_step_early_return_ = false;
-    last_step_event_handling_needed_ = false;
-    last_step_terminated_ = false;
-    pending_inputs_.clear();
+    simulation_finished_ = finished_value->AsBool();
+    last_step_early_return_ = early_return_value->AsBool();
+    last_step_event_handling_needed_ = event_needed_value->AsBool();
+    last_step_terminated_ = terminated_value->AsBool();
+    initial_inputs_ = std::move(initial_inputs);
+    pending_inputs_ = std::move(pending_inputs);
     cached_values_.clear();
     SeedCacheFromModelDefaults();
     const OutputSnapshot output_snapshot{
@@ -974,6 +1211,16 @@ OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_stat
         restored.value.values,
     };
     ApplyOutputSnapshot(output_snapshot);
+    for (const auto& [name, value] : cached_by_name) {
+        const VariableInfo* variable = FindVariableByName(model_, name);
+        if (variable != nullptr) {
+            cached_values_[variable->value_reference] = value;
+        }
+    }
+    state_ = running_value->AsBool() ? SessionState::kRunning : SessionState::kInitialized;
+    configuration_mode_ = false;
+    configuration_mode_initialization_ = false;
+    reconfiguration_values_.clear();
     realtime_sim_origin_ = current_time_;
     realtime_wall_origin_ = std::chrono::steady_clock::now();
     realtime_clock_started_ = true;
@@ -992,8 +1239,7 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
         && ((initialization_state && variable.variability != "constant")
             || (runtime_state && variable.variability == "tunable"));
     const bool writable_structural_parameter = variable.causality == "structuralParameter"
-        && ((variable.variability == "fixed" && variable.declared_type == "UInt64")
-            || (variable.variability == "tunable" && variable.declared_type == "Boolean"))
+        && (variable.variability == "fixed" || variable.variability == "tunable")
         && configuration_mode_
         && ((initialization_state && configuration_mode_initialization_)
             || (runtime_state && !configuration_mode_initialization_ && variable.variability == "tunable"))
@@ -1007,25 +1253,25 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
         return OperationResult::Failure("SIMULATION_FINISHED", "Simulation has finished");
     }
     if (writable_structural_parameter) {
-        if (variable.declared_type == "UInt64") {
-            const auto* unsigned_value = std::get_if<std::uint64_t>(&value);
-            if (unsigned_value == nullptr) {
-                return OperationResult::Failure("TYPE_MISMATCH", "UInt64 structural parameters must use UInt64 values");
-            }
-            const bool defines_array_dimension = std::any_of(
+        const bool defines_array_dimension = std::any_of(
                 model_.variables.begin(), model_.variables.end(), [&variable](const VariableInfo& candidate) {
                     return std::any_of(candidate.dimensions.begin(), candidate.dimensions.end(), [&variable](const DimensionInfo& dimension) {
                         return dimension.value_reference == variable.value_reference;
                     });
                 });
-            if (defines_array_dimension && (*unsigned_value == 0 ||
-                *unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()))) {
+        if (defines_array_dimension) {
+            const auto* unsigned_value = std::get_if<std::uint64_t>(&value);
+            if (variable.declared_type != "UInt64" || unsigned_value == nullptr) {
+                return OperationResult::Failure("TYPE_MISMATCH", "A structural dimension must be a scalar UInt64");
+            }
+            if ((configuration_mode_initialization_ && *unsigned_value == 0) ||
+                *unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) {
                 return OperationResult::Failure(
                     "INVALID_DIMENSION",
-                    "Structural array dimensions must fit a positive 32-bit extent");
+                    configuration_mode_initialization_
+                        ? "Initial structural array dimensions must fit a positive 32-bit extent"
+                        : "Reconfigured structural array dimensions must fit a non-negative 32-bit extent");
             }
-        } else if (std::get_if<bool>(&value) == nullptr) {
-            return OperationResult::Failure("TYPE_MISMATCH", "Boolean structural parameters must use Boolean values");
         }
     }
     if (initialization_state && !writable_structural_parameter && variable.start_value.has_value()
@@ -1037,7 +1283,8 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
     }
 
     const auto cached = cached_values_.find(variable.value_reference);
-    if (runtime_state && cached != cached_values_.end() && cached->second == value) {
+    if (runtime_state && variable.type != ScalarType::kClock
+        && cached != cached_values_.end() && cached->second == value) {
         return OperationResult::Success();
     }
     cached_values_[variable.value_reference] = value;
@@ -1046,35 +1293,7 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
         return OperationResult::Success();
     }
     if (writable_structural_parameter) {
-        for (const auto& candidate : model_.variables) {
-            const bool depends_on_parameter = std::any_of(
-                candidate.dimensions.begin(), candidate.dimensions.end(), [&variable](const DimensionInfo& dimension) {
-                    return dimension.value_reference == variable.value_reference;
-                });
-            if (!depends_on_parameter) {
-                continue;
-            }
-            const std::size_t flat_size = ResolveVariableFlatSize(candidate);
-            auto cached_array = cached_values_.find(candidate.value_reference);
-            if (flat_size == 0 || cached_array == cached_values_.end()) {
-                continue;
-            }
-            auto resize_array = [flat_size](ScalarValue& array_value) {
-                if (auto* real_items = std::get_if<RealArray>(&array_value)) real_items->resize(flat_size, 0.0);
-                else if (auto* integer_items = std::get_if<IntegerArray>(&array_value)) integer_items->resize(flat_size, 0);
-                else if (auto* unsigned_items = std::get_if<UnsignedIntegerArray>(&array_value)) unsigned_items->resize(flat_size, 0);
-                else if (auto* boolean_items = std::get_if<BooleanArray>(&array_value)) boolean_items->resize(flat_size, false);
-                else if (auto* string_items = std::get_if<StringArray>(&array_value)) string_items->resize(flat_size);
-                else if (auto* binary_items = std::get_if<BinaryArray>(&array_value)) binary_items->resize(flat_size);
-            };
-            resize_array(cached_array->second);
-            if (auto pending = pending_inputs_.find(candidate.name); pending != pending_inputs_.end()) {
-                resize_array(pending->second);
-            }
-            if (auto initial = initial_inputs_.find(candidate.name); initial != initial_inputs_.end()) {
-                resize_array(initial->second);
-            }
-        }
+        InvalidateArraysForStructuralParameter(variable, true);
     }
     if (initialization_state) {
         initial_inputs_[variable.name] = value;
@@ -1095,14 +1314,18 @@ template <typename T>
 OperationResult ProxyRuntime::SetNumericValues(const std::uint32_t* value_references,
                                                const std::size_t count,
                                                const T* values,
-                                               const std::size_t value_count,
+                                               const std::optional<std::size_t> value_count,
                                                const ScalarType expected_type) {
-    if (value_references == nullptr || values == nullptr) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "Set values received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "Set values buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "Set values received null buffers");
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1114,8 +1337,8 @@ OperationResult ProxyRuntime::SetNumericValues(const std::uint32_t* value_refere
             !(expected_type == ScalarType::kInteger && variable->type == ScalarType::kEnumeration)) {
             return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match setter");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "Set values buffer is too short for referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1191,41 +1414,45 @@ OperationResult ProxyRuntime::SetNumericValues(const std::uint32_t* value_refere
 OperationResult ProxyRuntime::SetReal(const std::uint32_t* value_references,
                                       const std::size_t count,
                                       const double* values,
-                                      const std::size_t value_count) {
+                                      const std::optional<std::size_t> value_count) {
     return SetNumericValues(value_references, count, values, value_count, ScalarType::kReal);
 }
 
 OperationResult ProxyRuntime::SetInteger(const std::uint32_t* value_references,
                                          const std::size_t count,
                                          const std::int32_t* values,
-                                         const std::size_t value_count) {
+                                         const std::optional<std::size_t> value_count) {
     return SetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::SetSignedInteger(const std::uint32_t* value_references,
                                                const std::size_t count,
                                                const std::int64_t* values,
-                                               const std::size_t value_count) {
+                                               const std::optional<std::size_t> value_count) {
     return SetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::SetUnsignedInteger(const std::uint32_t* value_references,
                                                  const std::size_t count,
                                                  const std::uint64_t* values,
-                                                 const std::size_t value_count) {
+                                                 const std::optional<std::size_t> value_count) {
     return SetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::SetBoolean(const std::uint32_t* value_references,
                                          const std::size_t count,
                                          const bool* values,
-                                         const std::size_t value_count) {
-    if (value_references == nullptr || values == nullptr) {
+                                         const std::optional<std::size_t> value_count) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetBoolean received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetBoolean buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "SetBoolean received null buffers");
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1236,8 +1463,8 @@ OperationResult ProxyRuntime::SetBoolean(const std::uint32_t* value_references,
         if (variable->type != ScalarType::kBoolean) {
             return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match SetBoolean");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "SetBoolean buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1264,13 +1491,17 @@ OperationResult ProxyRuntime::SetBoolean(const std::uint32_t* value_references,
 OperationResult ProxyRuntime::SetString(const std::uint32_t* value_references,
                                         const std::size_t count,
                                         const char* const* values,
-                                        const std::size_t value_count) {
-    if (value_references == nullptr || values == nullptr) {
+                                        const std::optional<std::size_t> value_count) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetString received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetString buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "SetString received null buffers");
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1281,8 +1512,8 @@ OperationResult ProxyRuntime::SetString(const std::uint32_t* value_references,
         if (variable->type != ScalarType::kString) {
             return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match SetString");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "SetString buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1310,13 +1541,17 @@ OperationResult ProxyRuntime::SetBinary(const std::uint32_t* value_references,
                                         const std::size_t count,
                                         const std::size_t* value_sizes,
                                         const std::uint8_t* const* values,
-                                        const std::size_t value_count) {
-    if (value_references == nullptr || value_sizes == nullptr || values == nullptr) {
+                                        const std::optional<std::size_t> value_count) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetBinary received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetBinary buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && (value_sizes == nullptr || values == nullptr)) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "SetBinary received null buffers");
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1327,8 +1562,8 @@ OperationResult ProxyRuntime::SetBinary(const std::uint32_t* value_references,
         if (variable->type != ScalarType::kBinary) {
             return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match SetBinary");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "SetBinary buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1371,7 +1606,7 @@ OperationResult ProxyRuntime::SetBinary(const std::uint32_t* value_references,
 OperationResult ProxyRuntime::SetClock(const std::uint32_t* value_references,
                                        const std::size_t count,
                                        const bool* values) {
-    if (value_references == nullptr || values == nullptr) {
+    if (count > 0 && (value_references == nullptr || values == nullptr)) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetClock received null buffers");
     }
     for (std::size_t index = 0; index < count; ++index) {
@@ -1394,14 +1629,18 @@ template <typename T>
 OperationResult ProxyRuntime::GetNumericValues(const std::uint32_t* value_references,
                                                const std::size_t count,
                                                T* values,
-                                               const std::size_t value_count,
+                                               const std::optional<std::size_t> value_count,
                                                const ScalarType expected_type) const {
-    if (value_references == nullptr || values == nullptr) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "Get values received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "Get values buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "Get values received null buffers");
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1413,12 +1652,20 @@ OperationResult ProxyRuntime::GetNumericValues(const std::uint32_t* value_refere
             !(expected_type == ScalarType::kInteger && variable->type == ScalarType::kEnumeration)) {
             return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match getter");
         }
+        if (expected_type == ScalarType::kReal && variable->causality == "independent") {
+            const std::size_t flat_size = ResolveVariableFlatSize(*variable);
+            if (flat_size != 1 || offset >= expected_count) {
+                return OperationResult::Failure("INVALID_ARGUMENT", "Independent variable must be scalar");
+            }
+            values[offset++] = static_cast<T>(current_time_);
+            continue;
+        }
         const ScalarValue* cached = GetCachedValue(value_references[index]);
         if (cached == nullptr) {
             return OperationResult::Failure("VALUE_UNAVAILABLE", "Value is not cached");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "Get values buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1472,41 +1719,45 @@ OperationResult ProxyRuntime::GetNumericValues(const std::uint32_t* value_refere
 OperationResult ProxyRuntime::GetReal(const std::uint32_t* value_references,
                                       const std::size_t count,
                                       double* values,
-                                      const std::size_t value_count) const {
+                                      const std::optional<std::size_t> value_count) const {
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kReal);
 }
 
 OperationResult ProxyRuntime::GetInteger(const std::uint32_t* value_references,
                                          const std::size_t count,
                                          std::int32_t* values,
-                                         const std::size_t value_count) const {
+                                         const std::optional<std::size_t> value_count) const {
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::GetSignedInteger(const std::uint32_t* value_references,
                                                const std::size_t count,
                                                std::int64_t* values,
-                                               const std::size_t value_count) const {
+                                               const std::optional<std::size_t> value_count) const {
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::GetUnsignedInteger(const std::uint32_t* value_references,
                                                  const std::size_t count,
                                                  std::uint64_t* values,
-                                                 const std::size_t value_count) const {
+                                                 const std::optional<std::size_t> value_count) const {
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::GetBoolean(const std::uint32_t* value_references,
                                          const std::size_t count,
                                          bool* values,
-                                         const std::size_t value_count) const {
-    if (value_references == nullptr || values == nullptr) {
+                                         const std::optional<std::size_t> value_count) const {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetBoolean received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetBoolean buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "GetBoolean received null buffers");
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1521,8 +1772,8 @@ OperationResult ProxyRuntime::GetBoolean(const std::uint32_t* value_references,
         if (cached == nullptr) {
             return OperationResult::Failure("VALUE_UNAVAILABLE", "Value is not cached");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "GetBoolean buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1548,14 +1799,18 @@ OperationResult ProxyRuntime::GetBoolean(const std::uint32_t* value_references,
 OperationResult ProxyRuntime::GetString(const std::uint32_t* value_references,
                                         const std::size_t count,
                                         const char** values,
-                                        const std::size_t value_count) {
-    if (value_references == nullptr || values == nullptr) {
+                                        const std::optional<std::size_t> value_count) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetString received null buffers");
     }
     string_cache_.clear();
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetString buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "GetString received null buffers");
     }
     string_cache_.reserve(expected_count);
     std::size_t offset = 0;
@@ -1571,8 +1826,8 @@ OperationResult ProxyRuntime::GetString(const std::uint32_t* value_references,
         if (cached == nullptr) {
             return OperationResult::Failure("VALUE_UNAVAILABLE", "Value is not cached");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "GetString buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1602,14 +1857,18 @@ OperationResult ProxyRuntime::GetBinary(const std::uint32_t* value_references,
                                         const std::size_t count,
                                         std::size_t* value_sizes,
                                         const std::uint8_t** values,
-                                        const std::size_t value_count) {
-    if (value_references == nullptr || value_sizes == nullptr || values == nullptr) {
+                                        const std::optional<std::size_t> value_count) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetBinary received null buffers");
     }
     string_cache_.clear();
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetBinary buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && (value_sizes == nullptr || values == nullptr)) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "GetBinary received null buffers");
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1624,8 +1883,8 @@ OperationResult ProxyRuntime::GetBinary(const std::uint32_t* value_references,
         if (cached == nullptr) {
             return OperationResult::Failure("VALUE_UNAVAILABLE", "Value is not cached");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "GetBinary buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1654,7 +1913,7 @@ OperationResult ProxyRuntime::GetBinary(const std::uint32_t* value_references,
 OperationResult ProxyRuntime::GetClock(const std::uint32_t* value_references,
                                        const std::size_t count,
                                        bool* values) {
-    if (value_references == nullptr || values == nullptr) {
+    if (count > 0 && (value_references == nullptr || values == nullptr)) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetClock received null buffers");
     }
     for (std::size_t index = 0; index < count; ++index) {
