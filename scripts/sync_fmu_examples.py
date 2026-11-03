@@ -418,18 +418,23 @@ def validate_webapp_bundle(path: Path) -> set[str]:
     return files
 
 
-def validate_smart_warehouse_checkpoint_sdk(archive: zipfile.ZipFile) -> None:
+def validate_fmu_state_checkpoint_sdk(archive: zipfile.ZipFile, app_name: str) -> None:
     """Check the advertised checkpoint capability and its SDK client use."""
     try:
         sdk_index = archive.read("sdk/index.js")
         sdk_client = archive.read("sdk/client.js")
     except KeyError as error:
-        raise ValueError("The Smart Warehouse app bundle is missing its checkpoint SDK modules.") from error
+        raise ValueError(f"The {app_name} app bundle is missing its checkpoint SDK modules.") from error
     if (
         b"fmu-state-checkpoints" not in sdk_index
-        or b"DIGITAL_TWIN_CAPABILITY.FMU_STATE_CHECKPOINTS" not in sdk_client
+        or b"FMU_STATE_CHECKPOINTS" not in sdk_client
     ):
-        raise ValueError("The Smart Warehouse app bundle is missing FMU state checkpoint support in its SDK.")
+        raise ValueError(f"The {app_name} app bundle is missing FMU state checkpoint support in its SDK.")
+
+
+def validate_smart_warehouse_checkpoint_sdk(archive: zipfile.ZipFile) -> None:
+    """Check the Smart Warehouse app's checkpoint SDK integration."""
+    validate_fmu_state_checkpoint_sdk(archive, "Smart Warehouse")
 
 
 def validate_fmu_session_app(path: Path) -> None:
@@ -578,10 +583,10 @@ def validate_dc_motor_fmu(path: Path) -> None:
         or jump_input_real is None
         or jump_input_real.get("unit") != "rad"
         or jump_input_real.get("start") != "0"
-        or jump_input_real.get("min") is not None
-        or jump_input_real.get("max") is not None
+        or jump_input_real.get("min") != "-0.4"
+        or jump_input_real.get("max") != "0.4"
     ):
-        raise ValueError("The DC motor FMU must expose a discrete load-angle jump input in rad without min/max bounds.")
+        raise ValueError("The DC motor FMU must expose a discrete load-angle jump input in rad bounded to +/-0.4.")
     missing_outputs = set(DC_MOTOR_REQUIRED_OUTPUT_UNITS) - outputs
     if missing_outputs:
         raise ValueError("The DC motor FMU is missing output signals: " + ", ".join(sorted(missing_outputs)))
@@ -921,8 +926,7 @@ def sync(
         validate_local_glb_output_bindings(pendulum_scene, pendulum_fmu)
         validate_local_fmu_session_app(pendulum_app, "inverted-pendulum")
         with zipfile.ZipFile(pendulum_app) as archive:
-            if b"fmu-state-checkpoints" not in archive.read("sdk/client.js"):
-                raise ValueError("The inverted-pendulum app bundle is missing FMU state checkpoint support in its SDK.")
+            validate_fmu_state_checkpoint_sdk(archive, "Inverted Pendulum")
         pendulum_target = target / "local-demos" / "inverted-pendulum" / "linux64"
         pendulum_target.mkdir(parents=True, exist_ok=True)
         copy_verified(pendulum_fmu, pendulum_target / INVERTED_PENDULUM_FMU_NAME)
