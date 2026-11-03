@@ -100,7 +100,9 @@ def test_build_proxy_artifact_declares_ref_and_struct_manifest_metadata(tmp_path
     assert ref.attrib["{http://fmi-standard.org/fmi-ls-manifest}fmi-ls-description"] == (
         "Layered Standard providing information on related files included in an FMU."
     )
-    assert ref.find("./Related").attrib["type"] == "application/x-ssp-parameter-set"
+    related = ref.find("./Related")
+    assert related is not None
+    assert related.attrib["type"] == "application/x-ssp-parameter-set"
     assert struct.attrib["{http://fmi-standard.org/fmi-ls-manifest}fmi-ls-name"] == "org.fmi-standard.fmi-ls-struct"
     assert struct.attrib["{http://fmi-standard.org/fmi-ls-manifest}fmi-ls-description"] == (
         "Layered standard for structuring of variables"
