@@ -633,6 +633,9 @@ def test_proxy_model_description_preserves_zero_value_reference():
     xml_bytes = _build_proxy_model_description_xml({
         "modelName": "ProxyDemo",
         "guid": "{proxy-guid}",
+        "fmiVersion": "2.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {
                 "name": "u",
@@ -663,6 +666,7 @@ def test_proxy_model_description_fmi2_excludes_independent_and_corrects_output_i
         "modelName": "BouncingBall",
         "guid": "{bb-guid}",
         "fmiVersion": "2.0",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {"name": "time",   "type": "Real", "causality": "independent", "variability": "continuous",  "valueReference": 0},
             {"name": "h",      "type": "Real", "causality": "output",      "variability": "continuous",  "valueReference": 1, "start": 1.0, "initial": "exact"},
@@ -689,6 +693,9 @@ def test_proxy_model_description_fmi2_excludes_independent_and_corrects_output_i
     xml_bytes = _build_proxy_model_description_xml({
         "modelName": "ProxyDemo",
         "guid": "{proxy-guid}",
+        "fmiVersion": "2.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {
                 "name": "u",
@@ -742,6 +749,7 @@ def test_proxy_model_description_preserves_fmi2_enumeration_declared_type_defini
         "modelName": "ProxyEnumDemo",
         "guid": "{proxy-guid}",
         "fmiVersion": "2.0",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {
                 "name": "Enumeration_input",
@@ -802,6 +810,7 @@ def test_proxy_model_description_generates_fmi3_model_description():
         "instantiationToken": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {
@@ -847,6 +856,7 @@ def test_proxy_model_description_generates_fmi3_dimensioned_variables():
         "instantiationToken": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {
@@ -901,6 +911,7 @@ def test_proxy_model_description_with_structural_arrays_passes_fmpy_validation(t
         "instantiationToken": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {"name": "time", "type": "Float64", "causality": "independent", "variability": "continuous", "valueReference": 0},
             {"name": "n", "type": "UInt64", "causality": "structuralParameter", "variability": "fixed", "valueReference": 1, "start": 3},
@@ -918,6 +929,7 @@ def test_proxy_model_description_with_structural_arrays_passes_fmpy_validation(t
 def test_proxy_generation_supports_tunable_structural_dimension_parameters():
     _validate_proxy_generation_supported({
         "fmiVersion": "3.0",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {"name": "n", "type": "UInt64", "causality": "structuralParameter", "variability": "tunable", "valueReference": 1, "start": 3},
             {"name": "u", "type": "Float64", "causality": "input", "dimensions": [{"valueReference": 1}], "valueReference": 2},
@@ -931,6 +943,10 @@ def test_proxy_generation_supports_tunable_boolean_structural_parameters(tmp_pat
         "instantiationToken": "{simple-dae}",
         "fmiVersion": "3.0",
         "simulationKind": "modelExchange",
+        "supportsModelExchange": True,
+        "numberOfContinuousStates": 0,
+        "numberOfEventIndicators": 0,
+        "modelStructure": {"derivatives": [], "eventIndicators": []},
         "modelVariables": [
             {
                 "name": "time",
@@ -979,6 +995,7 @@ def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
         "instantiationToken": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {
@@ -1027,6 +1044,7 @@ def test_proxy_model_description_with_clock_passes_fmpy_validation(tmp_path):
         "instantiationToken": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {
@@ -1084,6 +1102,7 @@ def test_validate_proxy_generation_supports_extended_fmi3_integer_types():
     metadata = {
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {"name": "i8", "type": "Int8", "valueReference": 1},
             {"name": "u8", "type": "UInt8", "valueReference": 2},
@@ -1102,6 +1121,7 @@ def test_validate_proxy_generation_supports_fmi3_binary_and_clock_types():
     metadata = {
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {"name": "blob", "type": "Binary", "valueReference": 1},
@@ -1123,6 +1143,7 @@ def test_validate_proxy_generation_rejects_dimensioned_clock_for_fmi3_proxy():
     metadata = {
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {
                 "name": "tick",

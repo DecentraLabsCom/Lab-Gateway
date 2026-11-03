@@ -107,6 +107,7 @@ def test_public_model_metadata_exposes_only_describe_contract_fields():
         "simulationType": "CoSimulation",
         "supportsCoSimulation": True,
         "supportsModelExchange": False,
+        "availableExecutionInterfaces": [],
         "supportsExecution": True,
         "executionInterface": None,
         "supportsFmiLsDae": False,

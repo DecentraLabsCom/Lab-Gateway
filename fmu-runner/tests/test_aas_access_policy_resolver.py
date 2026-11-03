@@ -16,6 +16,9 @@ from simulation_access_policy import build_part4_access_rules
 @pytest.fixture
 def metadata():
     return {
+        "fmiVersion": "2.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {"name": "command", "causality": "input", "variability": "continuous", "type": "Real", "valueReference": 1},
             {"name": "speed", "causality": "output", "variability": "continuous", "type": "Real", "valueReference": 2},
@@ -196,6 +199,10 @@ async def test_missing_aas_policy_uses_fmi_default(tmp_path, monkeypatch, metada
         "regenerationAvailable": True,
         "readableVariableCount": 2,
         "writableVariableCount": 1,
+        "availableExecutionInterfaces": ["CoSimulation"],
+        "authorizedExecutionInterfaces": ["CoSimulation"],
+        "executionInterfaceSelectionAvailable": False,
+        "executionInterfacePolicyEditable": False,
     }
 
 

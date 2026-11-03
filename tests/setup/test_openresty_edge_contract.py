@@ -45,8 +45,12 @@ EXPECTED_LOCATION_MATRIX = (
     "= /lab-manager/login",
     "= /lab-manager/access-policy",
     "/lab-manager/",
+    "~ ^/lab-admin/digital-twin-assets/(?<digital_twin_lab_id>[0-9]+)$",
+    "~ ^/lab-admin/digital-twin-assets/([0-9]+)/from-fmu$",
     "/lab-admin/",
     "/lab-content/",
+    "/digital-twin-scenes/",
+    "/digital-twin-apps/",
     "= /access-audit/internal/session-observed",
     "= /reservations/projection",
     "/auth",
@@ -93,6 +97,7 @@ EXPECTED_LOCATION_MATRIX = (
     "~ ^/aas-admin/lab/[^/]+/aas-link$",
     "/aas-admin/lab/",
     "= /internal/aas-resolve",
+    "= /fmu/api/v1/fmu/sessions",
     "/fmu/",
 )
 
@@ -121,8 +126,16 @@ EXPECTED_LAB_MANAGER_LOCATIONS = (
     "/lab-manager/",
 )
 
-EXPECTED_LAB_CONTENT_LOCATIONS = ("/lab-content/",)
-EXPECTED_LAB_ADMIN_LOCATIONS = ("/lab-admin/",)
+EXPECTED_LAB_CONTENT_LOCATIONS = (
+    "/lab-content/",
+    "/digital-twin-scenes/",
+    "/digital-twin-apps/",
+)
+EXPECTED_LAB_ADMIN_LOCATIONS = (
+    "~ ^/lab-admin/digital-twin-assets/(?<digital_twin_lab_id>[0-9]+)$",
+    "~ ^/lab-admin/digital-twin-assets/([0-9]+)/from-fmu$",
+    "/lab-admin/",
+)
 
 EXPECTED_BILLING_LOCATIONS = ("/billing/admin/", "/billing/")
 EXPECTED_WALLET_LOCATIONS = ("/wallet/",)
@@ -165,7 +178,7 @@ EXPECTED_AAS_RESOLVE_LOCATIONS = ("= /internal/aas-resolve",)
 
 EXPECTED_GATEWAY_MODE_LOCATIONS = ("/gateway/mode",)
 
-EXPECTED_FMU_LOCATIONS = ("/fmu/",)
+EXPECTED_FMU_LOCATIONS = ("= /fmu/api/v1/fmu/sessions", "/fmu/")
 
 
 def _read(path: Path) -> str:
@@ -691,6 +704,29 @@ def test_lab_admin_route_keeps_guard_headers_timeouts_and_proxy_contract():
     ):
         assert directive in block
     assert "proxy_add_x_forwarded_for" not in block
+
+    upload_block = _location_block(
+        include,
+        "~ ^/lab-admin/digital-twin-assets/(?<digital_twin_lab_id>[0-9]+)$",
+    )
+    assert "rewrite_by_lua_block" in upload_block
+    assert "access_by_lua_file /etc/openresty/lua/lab_manager_admin_access.lua;" in upload_block
+    assert 'proxy_set_header Authorization "";' in upload_block
+    assert 'proxy_set_header Cookie "";' in upload_block
+    assert 'proxy_set_header X-Lab-Manager-Token "";' in upload_block
+    assert "client_max_body_size 50m;" in upload_block
+
+    import_block = _location_block(
+        include,
+        "~ ^/lab-admin/digital-twin-assets/([0-9]+)/from-fmu$",
+    )
+    assert "rewrite_by_lua_block" in import_block
+    assert "access_by_lua_file /etc/openresty/lua/lab_manager_admin_access.lua;" in import_block
+    assert 'proxy_set_header Authorization "";' in import_block
+    assert 'proxy_set_header Cookie "";' in import_block
+    assert 'proxy_set_header X-Lab-Manager-Token "";' in import_block
+    assert "client_max_body_size 4k;" in import_block
+
     _assert_order(
         block,
         "access_by_lua_file /etc/openresty/lua/lab_manager_admin_access.lua;",
@@ -750,6 +786,21 @@ def test_lab_content_route_keeps_read_only_static_alias_and_cors_contract():
         "/etc/openresty/conf.d/gateway_lab_content.conf"
     ) in dockerfile
 
+    scene_block = _location_block(include, "/digital-twin-scenes/")
+    assert "if ($request_method !~ ^(GET|HEAD|OPTIONS)$)" in scene_block
+    assert 'if ($cors_allow_origin = "DENY")' in scene_block
+    assert 'add_header Access-Control-Allow-Origin $cors_allow_origin always;' in scene_block
+    assert "alias /var/www/digital-twin-assets/;" in scene_block
+    assert "disable_symlinks on from=/var/www/digital-twin-assets;" in scene_block
+    assert "immutable" in scene_block
+
+    app_block = _location_block(include, "/digital-twin-apps/")
+    assert "if ($request_method !~ ^(GET|HEAD|OPTIONS)$)" in app_block
+    assert 'add_header Access-Control-Allow-Origin "*" always;' in app_block
+    assert "sandbox allow-scripts" in app_block
+    assert "alias /var/www/digital-twin-assets/;" in app_block
+    assert "disable_symlinks on from=/var/www/digital-twin-assets;" in app_block
+
 
 def test_gateway_mode_route_keeps_public_full_lite_payload_and_options():
     conf = _read(ACCESS_CONF)
@@ -768,7 +819,7 @@ def test_gateway_mode_route_keeps_public_full_lite_payload_and_options():
     assert 'local mode = "full"' in block
     assert 'mode = "lite"' in block
     assert 'ngx.header["Content-Type"] = "application/json"' in block
-    assert "{\"mode\":\"%s\",\"lite\":%s}" in block
+    assert "{\"mode\":\"%s\",\"lite\":%s,\"aasEnabled\":%s,\"fmuRunnerEnabled\":%s}" in block
     assert "proxy_pass" not in block
     assert "access_by_lua" not in block
 
@@ -1067,8 +1118,8 @@ def test_aas_admin_routes_keep_full_lite_guards_auth_and_destinations():
 
     fmu_block = _location_block(include, "/aas-admin/fmu/")
     assert "rewrite_by_lua_block" in fmu_block
-    assert 'local lite_mode = ngx.shared.config:get("lite_mode")' in fmu_block
-    assert "Forbidden: AAS endpoints are not available in Lite mode." in fmu_block
+    assert 'local lite_mode = ngx.shared.config:get("lite_mode")' not in fmu_block
+    assert "Service unavailable: configure an AAS server to enable FMU AAS sync." in fmu_block
     assert "local fmu_runner_enabled = ngx.shared.config:get(\"fmu_runner_enabled\")" in fmu_block
     assert "Service unavailable: FMU runner integration is disabled on this gateway." in fmu_block
     assert "return ngx.exit(503)" in fmu_block
@@ -1233,7 +1284,7 @@ def test_fmu_route_keeps_availability_limits_cors_auth_and_proxy_contract():
         "proxy_connect_timeout 30s;",
         "proxy_send_timeout 600s;",
         "proxy_http_version 1.1;",
-        "client_max_body_size 10M;",
+        "client_max_body_size 20M;",
         "resolver 127.0.0.11 valid=30s ipv6=off;",
         "set $fmu_upstream http://fmu-runner:8090;",
         "rewrite ^/fmu/(.*)$ /$1 break;",
@@ -1254,6 +1305,30 @@ def test_fmu_route_keeps_availability_limits_cors_auth_and_proxy_contract():
         "COPY conf.d/gateway_fmu.conf "
         "/etc/openresty/conf.d/gateway_fmu.conf"
     ) in dockerfile
+
+    websocket_block = _location_block(include, "= /fmu/api/v1/fmu/sessions")
+    for directive in (
+        "if ($fmu_runner_enabled = 0)",
+        "limit_req zone=fmu_api burst=20 nodelay;",
+        'if ($http_origin = "null")',
+        'if ($fmu_ws_origin = "DENY")',
+        "if ($http_upgrade !~* ^websocket$)",
+        "proxy_set_header Authorization $http_authorization;",
+        'proxy_set_header Cookie "";',
+        "proxy_set_header Upgrade $http_upgrade;",
+        "proxy_pass $fmu_ws_upstream;",
+    ):
+        assert directive in websocket_block
+    _assert_order(
+        websocket_block,
+        'if ($fmu_ws_origin = "DENY")',
+        "if ($http_upgrade !~* ^websocket$)",
+    )
+    _assert_order(
+        websocket_block,
+        'proxy_set_header Cookie "";',
+        "proxy_pass $fmu_ws_upstream;",
+    )
 
 
 def test_auth_route_keeps_lite_guard_cors_and_backend_contract():

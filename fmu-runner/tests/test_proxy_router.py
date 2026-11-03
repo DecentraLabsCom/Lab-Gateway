@@ -121,6 +121,8 @@ def test_proxy_model_description_exposes_only_effectively_readable_or_writable_v
 
     metadata = {
         "fmiVersion": "2.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {"name": "command", "causality": "input", "variability": "continuous", "start": 2},
             {"name": "speed", "causality": "output", "variability": "continuous", "start": 0},
@@ -131,6 +133,7 @@ def test_proxy_model_description_exposes_only_effectively_readable_or_writable_v
         metadata,
         overrides={"command": {"read": False}, "secret": {"read": False}},
     )
+    policy["authorizedExecutionInterfaces"] = ["CoSimulation"]
     app, *_ = _build_test_app(
         claims={"sub": "user-1", "labId": "42", "accessKey": "model.fmu", "reservationKey": "0xabc"},
         access_policy=policy,
