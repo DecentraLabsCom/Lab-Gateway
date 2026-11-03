@@ -59,8 +59,12 @@ def _apply_internal_session_state(payload: dict[str, Any], session: Any | None) 
     restored_model_exchange_mode = payload.pop("_restoredModelExchangeMode", None)
     restored_initialization_mode = payload.pop("_restoredInitializationMode", None)
     deferred_initialization_exit = payload.pop("_deferredInitializationExit", None)
+    source_fmu_terminated = payload.pop("_sourceFmuTerminated", None)
     if payload.get("type") != "sim.state" or session is None:
         return
+
+    if type(source_fmu_terminated) is bool:
+        session.source_fmu_terminated = source_fmu_terminated
 
     if isinstance(restored_model_exchange_mode, str) and restored_model_exchange_mode in {
         "instantiated", "initialization", "event", "continuous",
@@ -100,6 +104,7 @@ class _GatewayStationSession:
     model_exchange_mode: str = "instantiated"
     execution_interface: Optional[str] = None
     deferred_initialization_exit: bool = False
+    source_fmu_terminated: bool = False
     close_handler: Optional[Callable[[], Awaitable[None]]] = None
 
     def matches_claims(self, claims: dict, get_claim_lab_id) -> bool:

@@ -181,6 +181,17 @@ class StationRealtimeWsProxyManager:
     ) -> None:
         """Authorize FMI variable reads/writes before forwarding a command."""
         msg_type = str(message.get("type") or "").strip()
+        if (
+            active_session is not None
+            and getattr(active_session, "source_fmu_terminated", False)
+            and msg_type not in {
+                "sim.captureFMUState",
+                "sim.restoreFMUState",
+                "sim.reset",
+                "session.terminate",
+            }
+        ):
+            raise AccessDenied
         if msg_type == "sim.initialize":
             parameters = message.get("parameters", {})
             options = message.get("options", {})
@@ -280,6 +291,16 @@ class StationRealtimeWsProxyManager:
                 active_session is None
                 or getattr(active_session, "execution_interface", None) != "CoSimulation"
                 or getattr(active_session, "deferred_initialization_exit", False) is not True
+            ):
+                raise AccessDenied
+        elif msg_type == "sim.terminateFMU":
+            authorized_interfaces = access_policy.get("authorizedExecutionInterfaces")
+            if (
+                active_session is None
+                or getattr(active_session, "execution_interface", None)
+                not in {"CoSimulation", "ModelExchange"}
+                or not isinstance(authorized_interfaces, list)
+                or active_session.execution_interface not in authorized_interfaces
             ):
                 raise AccessDenied
         elif msg_type == "sim.setInputs":

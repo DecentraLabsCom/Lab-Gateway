@@ -48,6 +48,7 @@ public:
                                bool model_exchange = false,
                                bool defer_initialization_exit = false);
     OperationResult ExitInitializationMode();
+    OperationResult TerminateFmu();
     ValueResult<JsonObject> ModelExchangeCall(const std::string& operation,
                                               const JsonObject& arguments = {});
     OperationResult Reconfigure(const std::map<std::string, ScalarValue>& values);

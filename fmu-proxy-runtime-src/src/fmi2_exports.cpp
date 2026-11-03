@@ -209,7 +209,15 @@ fmi2Component fmi2Instantiate(fmi2String instanceName,
 }
 
 void fmi2FreeInstance(fmi2Component c) {
-    delete AsInstance(c);
+    Fmi2Instance* instance = AsInstance(c);
+    if (instance == nullptr) {
+        return;
+    }
+    const auto status = instance->runtime.Close();
+    if (!status) {
+        Log(instance, fmi2Warning, "logStatusError", status.message);
+    }
+    delete instance;
 }
 
 fmi2Status fmi2SetupExperiment(fmi2Component c,
@@ -380,7 +388,11 @@ fmi2Status fmi2Terminate(fmi2Component c) {
     if (instance == nullptr) {
         return fmi2Fatal;
     }
-    return ToFmiStatus(instance, instance->runtime.Terminate());
+    const auto status = instance->runtime.Terminate();
+    if (status) {
+        instance->mode = Fmi2Instance::Mode::kTerminated;
+    }
+    return ToFmiStatus(instance, status);
 }
 
 fmi2Status fmi2Reset(fmi2Component c) {
@@ -388,7 +400,11 @@ fmi2Status fmi2Reset(fmi2Component c) {
     if (instance == nullptr) {
         return fmi2Fatal;
     }
-    return ToFmiStatus(instance, instance->runtime.Reset());
+    const auto status = instance->runtime.Reset();
+    if (status) {
+        instance->mode = Fmi2Instance::Mode::kInstantiated;
+    }
+    return ToFmiStatus(instance, status);
 }
 
 fmi2Status fmi2SetDebugLogging(fmi2Component c,

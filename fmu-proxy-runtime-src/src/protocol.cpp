@@ -12,6 +12,7 @@ const std::vector<std::string_view> kClientMessages = {
     kModelDescribe,
     kSimInitialize,
     kSimExitInitializationMode,
+    kSimTerminateFmu,
     kSimSetInputs,
     kSimReconfigure,
     kSimStep,

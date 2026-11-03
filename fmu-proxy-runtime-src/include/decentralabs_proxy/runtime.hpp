@@ -50,6 +50,7 @@ public:
     void SetEarlyReturnAllowed(bool allowed);
     OperationResult DoStep(double current_time, double step_size);
     OperationResult Terminate();
+    OperationResult Close();
     OperationResult Reset();
     OperationResult CaptureFmuState(std::string& serialized_state);
     OperationResult RestoreFmuState(const std::string& serialized_state);
@@ -138,6 +139,8 @@ private:
     bool early_return_allowed_ = false;
     bool model_exchange_mode_ = false;
     bool model_exchange_external_solver_active_ = false;
+    bool remote_fmu_initialized_ = false;
+    bool remote_fmu_terminated_ = false;
     std::string model_exchange_remote_mode_ = "instantiated";
     bool initialization_mode_entered_ = false;
     bool configuration_mode_ = false;

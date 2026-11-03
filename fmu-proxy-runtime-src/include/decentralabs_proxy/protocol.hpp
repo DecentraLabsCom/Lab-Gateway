@@ -10,6 +10,7 @@ inline constexpr std::string_view kSessionPing = "session.ping";
 inline constexpr std::string_view kModelDescribe = "model.describe";
 inline constexpr std::string_view kSimInitialize = "sim.initialize";
 inline constexpr std::string_view kSimExitInitializationMode = "sim.exitInitializationMode";
+inline constexpr std::string_view kSimTerminateFmu = "sim.terminateFMU";
 inline constexpr std::string_view kSimSetInputs = "sim.setInputs";
 inline constexpr std::string_view kSimReconfigure = "sim.reconfigure";
 inline constexpr std::string_view kSimStep = "sim.step";

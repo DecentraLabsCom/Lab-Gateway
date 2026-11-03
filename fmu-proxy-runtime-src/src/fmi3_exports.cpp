@@ -432,7 +432,15 @@ FMI3_Export fmi3Instance fmi3InstantiateScheduledExecution(...) {
 }
 
 void fmi3FreeInstance(fmi3Instance instance) {
-    delete AsInstance(instance);
+    Fmi3Instance* impl = AsInstance(instance);
+    if (impl == nullptr) {
+        return;
+    }
+    const auto status = impl->runtime.Close();
+    if (!status) {
+        Log(impl, fmi3Warning, "logStatusError", status.message);
+    }
+    delete impl;
 }
 
 fmi3Status fmi3EnterInitializationMode(

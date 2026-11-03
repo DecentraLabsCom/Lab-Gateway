@@ -303,6 +303,19 @@ OperationResult GatewayClient::ExitInitializationMode() {
     return EnsureResponseType(response.value, kSimState);
 }
 
+OperationResult GatewayClient::TerminateFmu() {
+    JsonObject request = {
+        {"type", JsonValue(std::string(kSimTerminateFmu))},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+    };
+    const auto response = SendRequest(request);
+    if (!response) {
+        return response.status;
+    }
+    return EnsureResponseType(response.value, kSimState);
+}
+
 ValueResult<JsonObject> GatewayClient::ModelExchangeCall(
     const std::string& operation,
     const JsonObject& arguments) {

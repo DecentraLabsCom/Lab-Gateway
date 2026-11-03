@@ -292,12 +292,57 @@ def test_restore_fmu_state_uses_opaque_token_and_waits_for_success_before_phase_
         "type": "sim.state",
         "_restoredModelExchangeMode": "initialization",
         "_restoredInitializationMode": True,
+        "_sourceFmuTerminated": False,
     }
     _apply_internal_session_state(restored, active_session)
     assert active_session.model_exchange_mode == "initialization"
     assert active_session.deferred_initialization_exit is True
+    assert active_session.source_fmu_terminated is False
     assert "_restoredModelExchangeMode" not in restored
     assert "_restoredInitializationMode" not in restored
+    assert "_sourceFmuTerminated" not in restored
+
+
+def test_terminated_source_allows_only_state_checkpoint_reset_and_close_operations():
+    policy = {"authorizedExecutionInterfaces": ["CoSimulation"], "variables": {}}
+    active_session = SimpleNamespace(
+        execution_interface="CoSimulation",
+        deferred_initialization_exit=False,
+        source_fmu_terminated=True,
+    )
+    for message in (
+        {"type": "sim.captureFMUState"},
+        {"type": "sim.restoreFMUState", "checkpoint": {}, "variables": []},
+        {"type": "sim.reset"},
+        {"type": "session.terminate"},
+    ):
+        StationRealtimeWsProxyManager._validate_session_message(message, policy, {}, active_session)
+
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message(
+            {"type": "sim.getOutputs", "variables": []}, policy, {}, active_session
+        )
+
+
+def test_source_terminate_requires_an_authorized_active_interface():
+    message = {"type": "sim.terminateFMU"}
+    session = SimpleNamespace(
+        execution_interface="CoSimulation",
+        source_fmu_terminated=False,
+    )
+    StationRealtimeWsProxyManager._validate_session_message(
+        message,
+        {"authorizedExecutionInterfaces": ["CoSimulation"], "variables": {}},
+        {},
+        session,
+    )
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message(
+            message,
+            {"authorizedExecutionInterfaces": ["ModelExchange"], "variables": {}},
+            {},
+            session,
+        )
 
 
 def test_cosimulation_initialization_exit_requires_a_successfully_deferred_session():

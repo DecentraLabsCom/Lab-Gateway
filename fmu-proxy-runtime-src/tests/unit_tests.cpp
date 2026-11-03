@@ -200,7 +200,7 @@ void TestProtocolAndSessionState() {
     CHECK(IsSupportedServerMessage(kSessionCreated));
     CHECK(IsSupportedServerMessage(kError));
     CHECK(!IsSupportedServerMessage("sim.unknown"));
-    CHECK(SupportedClientMessages().size() == 14);
+    CHECK(SupportedClientMessages().size() == 15);
     CHECK(SupportedServerMessages().size() == 11);
 
     CHECK(CanTransition(SessionState::kUnconfigured, SessionState::kInstantiated));
@@ -533,9 +533,12 @@ void TestProxyRuntimeLifecycle() {
     const JsonObject& reinitialize_options = *FindObjectValue(reinitialize_object, "options")->AsObject();
     CHECK(FindObjectValue(reinitialize_options, "inputs") == nullptr);
 
-    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-10","reason":"test complete"})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-10","state":"initialized","_sourceFmuTerminated":true})");
     CHECK_OK(runtime.Terminate());
     CHECK(runtime.State() == SessionState::kTerminated);
+    const auto terminate_request = ParseJson(scripted->SentPayloads().back());
+    CHECK(terminate_request);
+    CHECK(JsonString(*terminate_request.value.AsObject(), "type") == "sim.terminateFMU");
 }
 
 void TestInitializationGetsEvaluateAndRefreshOutputs() {
@@ -841,6 +844,142 @@ void TestCoSimulationStateCanBeCapturedDuringInitialization() {
     CHECK(runtime.State() == SessionState::kInitialized);
 }
 
+void TestInstantiatedConfigurationCheckpointStaysLocal() {
+    TemporaryDirectory directory;
+    WriteFile(directory.path / "config.json",
+              R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1","fmiVersion":"3.0"})");
+    WriteFile(directory.path / "modelDescription.xml", R"xml(
+        <fmiModelDescription fmiVersion="3.0" modelName="ConfigState" instantiationToken="config-state-token">
+          <CoSimulation/>
+          <ModelVariables>
+            <Boolean name="mode" valueReference="1" causality="structuralParameter" variability="tunable" start="true"/>
+          </ModelVariables>
+        </fmiModelDescription>
+    )xml");
+
+    ProxyRuntime runtime;
+    CHECK_OK(runtime.Configure("config-state-instance", directory.path.string()));
+    CHECK_OK(runtime.EnterConfigurationMode());
+    std::string state;
+    CHECK_OK(runtime.CaptureFmuState(state));
+    const auto parsed = ParseJson(state);
+    CHECK(parsed);
+    CHECK(!JsonBool(*parsed.value.AsObject(), "remote"));
+    CHECK(JsonBool(*parsed.value.AsObject(), "configurationMode"));
+
+    const bool disabled = false;
+    const std::uint32_t reference = 1;
+    CHECK_OK(runtime.SetBoolean(&reference, 1, &disabled));
+    CHECK_OK(runtime.RestoreFmuState(state));
+    bool restored_value = false;
+    CHECK_OK(runtime.GetBoolean(&reference, 1, &restored_value));
+    CHECK(restored_value);
+    const bool still_writable = false;
+    CHECK_OK(runtime.SetBoolean(&reference, 1, &still_writable));
+}
+
+void TestInstantiatedCheckpointResetsAStartedRemoteSession() {
+    TemporaryDirectory directory;
+    WriteFile(directory.path / "config.json",
+              R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1"})");
+    WriteFile(directory.path / "modelDescription.xml", R"xml(
+        <fmiModelDescription fmiVersion="2.0" modelName="StatefulCS" guid="stateful-cs-guid">
+          <CoSimulation canGetAndSetFMUstate="true" canSerializeFMUstate="true"/>
+          <ModelVariables>
+            <ScalarVariable name="output" valueReference="1" causality="output" variability="continuous"><Real start="0"/></ScalarVariable>
+          </ModelVariables>
+        </fmiModelDescription>
+    )xml");
+
+    ScriptedTransport* scripted = nullptr;
+    ProxyRuntime runtime([&]() {
+        auto transport = std::make_unique<ScriptedTransport>();
+        scripted = transport.get();
+        return transport;
+    });
+    CHECK_OK(runtime.Configure("local-state-reset-instance", directory.path.string()));
+    std::string instantiated_state;
+    CHECK_OK(runtime.CaptureFmuState(instantiated_state));
+    scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"local-state-reset-session"})");
+    CHECK_OK(runtime.EnterInitializationMode());
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-3","simTime":0.0,"values":{"output":0.0}})");
+    double output = -1.0;
+    const std::uint32_t output_reference = 1;
+    CHECK_OK(runtime.GetReal(&output_reference, 1, &output));
+    CHECK_NEAR(output, 0.0, 1e-12);
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-4","state":"loaded","simTime":0.0})");
+    CHECK_OK(runtime.RestoreFmuState(instantiated_state));
+    CHECK(runtime.State() == SessionState::kInstantiated);
+    const auto reset_request = ParseJson(scripted->SentPayloads().back());
+    CHECK(reset_request);
+    CHECK(JsonString(*reset_request.value.AsObject(), "type") == "sim.reset");
+}
+
+void TestRemoteCheckpointCaptureAndRestoreAroundTerminate() {
+    TemporaryDirectory directory;
+    WriteFile(directory.path / "config.json",
+              R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1"})");
+    WriteFile(directory.path / "modelDescription.xml", R"xml(
+        <fmiModelDescription fmiVersion="2.0" modelName="StatefulCS" guid="stateful-cs-guid">
+          <CoSimulation canGetAndSetFMUstate="true" canSerializeFMUstate="true"/>
+          <ModelVariables>
+            <ScalarVariable name="input" valueReference="1" causality="input" variability="continuous"><Real start="0"/></ScalarVariable>
+          </ModelVariables>
+        </fmiModelDescription>
+    )xml");
+
+    ScriptedTransport* scripted = nullptr;
+    ProxyRuntime runtime([&]() {
+        auto transport = std::make_unique<ScriptedTransport>();
+        scripted = transport.get();
+        return transport;
+    });
+    CHECK_OK(runtime.Configure("terminated-state-instance", directory.path.string()));
+    CHECK_OK(runtime.SetupExperiment(0.0, 1.0, 0.1));
+    scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"terminated-state-session"})");
+    CHECK_OK(runtime.EnterInitializationMode());
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.fmuState","requestId":"req-3","checkpoint":{"opaque":"before-terminate"}})");
+    std::string before_terminate;
+    CHECK_OK(runtime.CaptureFmuState(before_terminate));
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-4","state":"initialized","_sourceFmuTerminated":true})");
+    CHECK_OK(runtime.Terminate());
+    scripted->QueueResponse(R"({"type":"sim.fmuState","requestId":"req-5","checkpoint":{"opaque":"after-terminate"}})");
+    std::string after_terminate;
+    CHECK_OK(runtime.CaptureFmuState(after_terminate));
+    const auto terminated_state = ParseJson(after_terminate);
+    CHECK(terminated_state);
+    CHECK(JsonBool(*terminated_state.value.AsObject(), "sourceFmuTerminated"));
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-6","simTime":0.0,"outputs":{},"_restoredInitializationMode":true,"_deferredInitializationExit":true,"_sourceFmuTerminated":false})");
+    CHECK_OK(runtime.RestoreFmuState(before_terminate));
+    CHECK(runtime.State() == SessionState::kSessionCreated);
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-7","simTime":0.0,"outputs":{},"_restoredInitializationMode":true,"_deferredInitializationExit":true,"_sourceFmuTerminated":true})");
+    CHECK_OK(runtime.RestoreFmuState(after_terminate));
+    CHECK(runtime.State() == SessionState::kTerminated);
+
+    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-8","reason":"test complete"})");
+    CHECK_OK(runtime.Close());
+
+    const auto requests = scripted->SentPayloads();
+    CHECK(requests.size() == 8);
+    const auto terminate_request = ParseJson(requests[3]);
+    CHECK(terminate_request);
+    CHECK(JsonString(*terminate_request.value.AsObject(), "type") == "sim.terminateFMU");
+    const auto restore_request = ParseJson(requests[6]);
+    CHECK(restore_request);
+    CHECK(JsonString(*restore_request.value.AsObject(), "type") == "sim.restoreFMUState");
+    const auto close_request = ParseJson(requests[7]);
+    CHECK(close_request);
+    CHECK(JsonString(*close_request.value.AsObject(), "type") == "session.terminate");
+}
+
 void TestUpdateDiscreteStatesWritesInputsAndRefreshesOutputs() {
     TemporaryDirectory directory;
     WriteFile(directory.path / "config.json",
@@ -1018,6 +1157,9 @@ int main() {
     failures += RunTest("FMI 2 exact state can be set during initialization after a read", TestFmi2ExactStateCanBeSetDuringInitializationAfterARead);
     failures += RunTest("Model Exchange state can be captured and restored during initialization", TestModelExchangeStateCanBeCapturedAndRestoredDuringInitialization);
     failures += RunTest("Co-Simulation state can be captured during initialization", TestCoSimulationStateCanBeCapturedDuringInitialization);
+    failures += RunTest("instantiated Configuration Mode checkpoint stays local", TestInstantiatedConfigurationCheckpointStaysLocal);
+    failures += RunTest("instantiated checkpoint resets an active remote session", TestInstantiatedCheckpointResetsAStartedRemoteSession);
+    failures += RunTest("remote state checkpoint survives Terminate", TestRemoteCheckpointCaptureAndRestoreAroundTerminate);
     failures += RunTest("discrete-state updates write inputs and refresh outputs", TestUpdateDiscreteStatesWritesInputsAndRefreshesOutputs);
     failures += RunTest("undefined stop time", TestUndefinedStopTimeDoesNotUseDefaultExperimentAsALimit);
     failures += RunTest("FMI 3 runtime reconfiguration", TestFmi3TunableBooleanCanBeReconfiguredDuringCoSimulation);
