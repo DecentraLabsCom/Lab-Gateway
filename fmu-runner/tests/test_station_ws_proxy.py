@@ -103,6 +103,173 @@ def test_get_nominals_initialization_mode_matches_fmi_version(fmi_version, allow
             )
 
 
+def test_model_exchange_get_values_allows_only_declared_mathematical_variables():
+    variables = [
+        {"name": "x1", "valueReference": 1, "type": "Float64", "causality": "local"},
+        {"name": "der_x1", "valueReference": 2, "type": "Float64", "causality": "local"},
+        {"name": "x2", "valueReference": 3, "type": "Float64", "causality": "local"},
+        {"name": "der_x2", "valueReference": 4, "type": "Float64", "causality": "local"},
+        {"name": "z", "valueReference": 5, "type": "Float64", "causality": "local"},
+        {"name": "event", "valueReference": 6, "type": "Float64", "causality": "local"},
+        {"name": "private", "valueReference": 7, "type": "Float64", "causality": "local"},
+        {"name": "res1", "valueReference": 11, "type": "Float64", "causality": "local"},
+        {"name": "res2", "valueReference": 12, "type": "Float64", "causality": "local"},
+    ]
+    metadata = {
+        "fmiVersion": "3.0",
+        "modelVariables": variables,
+        "modelStructure": {
+            "derivatives": [
+                {"valueReference": 2, "stateValueReference": 1},
+                {"valueReference": 4, "stateValueReference": 3},
+            ],
+            "eventIndicators": [{"valueReference": 6}],
+        },
+        "fmiLsDae": {
+            "algebraicValueReferences": [5],
+            "residualVariables": [
+                {"name": "res1", "type": "Float64", "valueReference": 11},
+                {"name": "res2", "type": "Float64", "valueReference": 12},
+            ],
+        },
+    }
+    policy = {
+        "variables": {variable["name"]: {"read": False} for variable in variables},
+        "authorizedExecutionInterfaces": ["ModelExchange"],
+    }
+    active_session = SimpleNamespace(model_exchange_mode="continuous")
+
+    for references in ([1, 2, 3, 4, 5, 6, 11, 12], [2, 4], [11, 12]):
+        StationRealtimeWsProxyManager._validate_session_message(
+            {
+                "type": "sim.modelExchangeCall",
+                "operation": "getValues",
+                "arguments": {"valueType": "Float64", "valueReferences": references},
+            },
+            policy,
+            metadata,
+            active_session,
+        )
+
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message(
+            {
+                "type": "sim.modelExchangeCall",
+                "operation": "getValues",
+                "arguments": {"valueType": "Float64", "valueReferences": [7]},
+            },
+            policy,
+            metadata,
+            active_session,
+        )
+
+
+def test_fmi3_approx_state_can_be_initialized_from_instantiated_values():
+    metadata = {
+        "fmiVersion": "3.0",
+        "modelVariables": [
+            {"name": "x", "valueReference": 1, "type": "Float64", "causality": "local", "initial": "approx"},
+            {"name": "der_x", "valueReference": 2, "type": "Float64", "causality": "local"},
+        ],
+        "modelStructure": {"derivatives": [{"valueReference": 2, "stateValueReference": 1}]},
+    }
+    policy = {
+        "variables": {"x": {"read": False, "writeAt": []}},
+        "modelVariables": [],
+        "authorizedExecutionInterfaces": ["ModelExchange"],
+    }
+
+    StationRealtimeWsProxyManager._validate_session_message(
+        {
+            "type": "sim.initialize",
+            "parameters": {"x": 0.8},
+            "options": {
+                "executionInterface": "ModelExchange",
+                "externalSolver": True,
+                "deferInitializationExit": True,
+            },
+        },
+        policy,
+        metadata,
+    )
+
+
+def test_fmi2_exact_state_can_be_set_after_entering_initialization_mode():
+    metadata = {
+        "fmiVersion": "2.0",
+        "modelVariables": [
+            {"name": "h", "valueReference": 1, "type": "Real", "causality": "local", "initial": "exact"},
+            {"name": "der_h", "valueReference": 2, "type": "Real", "causality": "local"},
+        ],
+        "modelStructure": {"derivatives": [{"valueReference": 2, "stateValueReference": 1}]},
+    }
+    policy = {
+        "variables": {"h": {"read": False, "writeAt": []}},
+        "authorizedExecutionInterfaces": ["ModelExchange"],
+    }
+    active_session = SimpleNamespace(model_exchange_mode="initialization")
+
+    StationRealtimeWsProxyManager._validate_session_message(
+        {
+            "type": "sim.modelExchangeCall",
+            "operation": "setValues",
+            "arguments": {"valueType": "Real", "valueReferences": [1], "values": [0.8]},
+        },
+        policy,
+        metadata,
+        active_session,
+    )
+
+
+def test_fmi3_approx_state_cannot_be_set_after_entering_initialization_mode():
+    metadata = {
+        "fmiVersion": "3.0",
+        "modelVariables": [
+            {"name": "x", "valueReference": 1, "type": "Float64", "causality": "local", "initial": "approx"},
+            {"name": "der_x", "valueReference": 2, "type": "Float64", "causality": "local"},
+        ],
+        "modelStructure": {"derivatives": [{"valueReference": 2, "stateValueReference": 1}]},
+    }
+    policy = {
+        "variables": {"x": {"read": False, "writeAt": []}},
+        "authorizedExecutionInterfaces": ["ModelExchange"],
+    }
+    active_session = SimpleNamespace(model_exchange_mode="initialization")
+
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message(
+            {
+                "type": "sim.modelExchangeCall",
+                "operation": "setValues",
+                "arguments": {"valueType": "Float64", "valueReferences": [1], "values": [0.8]},
+            },
+            policy,
+            metadata,
+            active_session,
+        )
+
+
+def test_restore_fmu_state_restores_external_model_exchange_phase():
+    policy = {
+        "variables": {},
+        "authorizedExecutionInterfaces": ["ModelExchange"],
+    }
+    active_session = SimpleNamespace(model_exchange_mode="continuous")
+
+    StationRealtimeWsProxyManager._validate_session_message(
+        {
+            "type": "sim.restoreFMUState",
+            "checkpoint": {"simulation": {"externalSolver": {"mode": "initialization"}}},
+            "variables": [],
+        },
+        policy,
+        {"modelVariables": []},
+        active_session,
+    )
+
+    assert active_session.model_exchange_mode == "initialization"
+
+
 def _claims():
     return {
         "sub": "user-1",

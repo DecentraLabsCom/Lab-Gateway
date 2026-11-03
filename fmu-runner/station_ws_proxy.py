@@ -216,7 +216,6 @@ class StationRealtimeWsProxyManager:
                 if isinstance(entry, dict)
                 and type(entry.get("stateValueReference")) is int
             }
-            fmi_version = model_metadata.get("fmiVersion") if isinstance(model_metadata, dict) else None
             state_initial_names = {
                 variable.get("name")
                 for variable in metadata_variables
@@ -225,7 +224,7 @@ class StationRealtimeWsProxyManager:
                 and isinstance(variable.get("name"), str)
                 and (
                     variable.get("initial") == "exact"
-                    or (str(fmi_version).startswith("2.") and variable.get("initial") == "approx")
+                    or variable.get("initial") == "approx"
                 )
             } if isinstance(metadata_variables, list) else set()
             structural_parameter_names = {
@@ -269,7 +268,8 @@ class StationRealtimeWsProxyManager:
                     else "instantiated"
                 )
         elif msg_type == "sim.restoreFMUState":
-            StationRealtimeWsProxyManager._validate_state_checkpoint(message.get("checkpoint"))
+            checkpoint = message.get("checkpoint")
+            StationRealtimeWsProxyManager._validate_state_checkpoint(checkpoint)
             variables = message.get("variables", [])
             if (
                 not isinstance(variables, list)
@@ -279,6 +279,21 @@ class StationRealtimeWsProxyManager:
             ):
                 raise AccessDenied
             validate_reads(access_policy, variables)
+            checkpoint_simulation = checkpoint.get("simulation") if isinstance(checkpoint, dict) else None
+            external_solver = (
+                checkpoint_simulation.get("externalSolver")
+                if isinstance(checkpoint_simulation, dict)
+                else None
+            )
+            if isinstance(external_solver, dict):
+                restored_mode = external_solver.get("mode")
+                if (
+                    restored_mode not in {"initialization", "event", "continuous"}
+                    or "ModelExchange" not in access_policy.get("authorizedExecutionInterfaces", [])
+                ):
+                    raise AccessDenied
+                if active_session is not None:
+                    active_session.model_exchange_mode = restored_mode
         elif msg_type == "sim.setInputs":
             validate_writes(access_policy, message.get("values", {}), phase="runtime")
         elif msg_type == "sim.reconfigure":
@@ -443,21 +458,58 @@ class StationRealtimeWsProxyManager:
                 if any(reference not in variables_by_reference for reference in references):
                     raise AccessDenied
                 dae_metadata = model_metadata.get("fmiLsDae") if isinstance(model_metadata, dict) else None
-                dae_algebraic_references = set(dae_metadata.get("algebraicValueReferences", [])) if isinstance(dae_metadata, dict) else set()
-                dae_residual_references = set(dae_metadata.get("residualValueReferences", [])) if isinstance(dae_metadata, dict) else set()
+                dae_algebraic_references = set()
+                dae_residual_references = set()
+                if isinstance(dae_metadata, dict):
+                    dae_algebraic_references = {
+                        reference
+                        for reference in dae_metadata.get("algebraicValueReferences", [])
+                        if type(reference) is int and 0 <= reference <= 0xFFFFFFFF
+                    }
+                    dae_residual_references = {
+                        residual.get("valueReference")
+                        for residual in dae_metadata.get("residualVariables", [])
+                        if isinstance(residual, dict)
+                        and type(residual.get("valueReference")) is int
+                        and 0 <= residual["valueReference"] <= 0xFFFFFFFF
+                    }
                 model_structure = model_metadata.get("modelStructure", {}) if isinstance(model_metadata, dict) else {}
                 derivative_entries = model_structure.get("derivatives", []) if isinstance(model_structure, dict) else []
                 state_references = {
                     entry.get("stateValueReference")
                     for entry in derivative_entries
-                    if isinstance(entry, dict) and type(entry.get("stateValueReference")) is int
+                    if isinstance(entry, dict)
+                    and type(entry.get("stateValueReference")) is int
+                    and 0 <= entry["stateValueReference"] <= 0xFFFFFFFF
                 }
+                derivative_references = {
+                    entry.get("valueReference")
+                    for entry in derivative_entries
+                    if isinstance(entry, dict)
+                    and type(entry.get("valueReference")) is int
+                    and 0 <= entry["valueReference"] <= 0xFFFFFFFF
+                }
+                event_indicator_entries = model_structure.get("eventIndicators", []) if isinstance(model_structure, dict) else []
+                event_indicator_references = {
+                    entry.get("valueReference")
+                    for entry in event_indicator_entries
+                    if isinstance(entry, dict)
+                    and type(entry.get("valueReference")) is int
+                    and 0 <= entry["valueReference"] <= 0xFFFFFFFF
+                }
+                mathematical_references = (
+                    state_references
+                    | derivative_references
+                    | event_indicator_references
+                    | dae_algebraic_references
+                    | dae_residual_references
+                )
                 permissions = access_policy.get("variables", {})
                 mode = getattr(active_session, "model_exchange_mode", "continuous")
                 fmi_major = str(model_metadata.get("fmiVersion", "")).split(".", 1)[0]
                 if operation == "getValues":
                     for reference in references:
-                        if reference in dae_residual_references or reference in dae_algebraic_references or reference in state_references:
+                        if reference in mathematical_references:
                             continue
                         names = [item.get("name") for item in variables_by_reference[reference]]
                         if not any(

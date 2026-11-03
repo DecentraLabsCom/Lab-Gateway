@@ -1427,7 +1427,15 @@ OperationResult ProxyRuntime::CaptureFmuState(std::string& serialized_state) {
     if (gateway_client_ == nullptr || !gateway_client_->IsConnected()) {
         return OperationResult::Failure("RUNTIME_NOT_CONNECTED", "FMU state capture requires an active Gateway session");
     }
-    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning) {
+    const bool model_exchange_initialization_state =
+        state_ == SessionState::kSessionCreated
+        && model_exchange_mode_
+        && model_exchange_external_solver_active_
+        && model_exchange_remote_mode_ == "initialization"
+        && initialization_mode_entered_
+        && initialization_evaluated_;
+    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning
+        && !model_exchange_initialization_state) {
         return OperationResult::Failure("STATE_ERROR", "FMU state capture requires an initialized simulation");
     }
     if (configuration_mode_) {
@@ -1464,6 +1472,8 @@ OperationResult ProxyRuntime::CaptureFmuState(std::string& serialized_state) {
         {"initialInputs", JsonValue(scalar_value_codec::EncodeJsonObject(initial_inputs_))},
         {"pendingInputs", JsonValue(scalar_value_codec::EncodeJsonObject(pending_inputs_))},
         {"cachedValues", JsonValue(scalar_value_codec::EncodeJsonObject(cached_by_name))},
+        {"initializationMode", JsonValue(model_exchange_initialization_state)},
+        {"modelExchangeRemoteMode", JsonValue(model_exchange_external_solver_active_ ? model_exchange_remote_mode_ : "")},
     };
     serialized_state = SerializeJson(JsonValue(std::move(state)));
     return OperationResult::Success();
@@ -1473,7 +1483,15 @@ OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_stat
     if (gateway_client_ == nullptr || !gateway_client_->IsConnected()) {
         return OperationResult::Failure("RUNTIME_NOT_CONNECTED", "FMU state restore requires an active Gateway session");
     }
-    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning) {
+    const bool model_exchange_initialization_state =
+        state_ == SessionState::kSessionCreated
+        && model_exchange_mode_
+        && model_exchange_external_solver_active_
+        && model_exchange_remote_mode_ == "initialization"
+        && initialization_mode_entered_
+        && initialization_evaluated_;
+    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning
+        && !model_exchange_initialization_state) {
         return OperationResult::Failure("STATE_ERROR", "FMU state restore requires an initialized simulation");
     }
     const auto parsed = ParseJson(serialized_state);
@@ -1490,6 +1508,8 @@ OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_stat
     const JsonValue* early_return_value = FindObjectValue(*serialized_object, "lastStepEarlyReturn");
     const JsonValue* event_needed_value = FindObjectValue(*serialized_object, "lastStepEventHandlingNeeded");
     const JsonValue* terminated_value = FindObjectValue(*serialized_object, "lastStepTerminated");
+    const JsonValue* initialization_mode_value = FindObjectValue(*serialized_object, "initializationMode");
+    const JsonValue* model_exchange_remote_mode_value = FindObjectValue(*serialized_object, "modelExchangeRemoteMode");
     if (version == nullptr || !version->IsNumber() || version->AsNumber() != 2.0
         || checkpoint == nullptr || time_value == nullptr || !time_value->IsNumber()
         || running_value == nullptr || !running_value->IsBool()
@@ -1498,6 +1518,26 @@ OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_stat
         || event_needed_value == nullptr || !event_needed_value->IsBool()
         || terminated_value == nullptr || !terminated_value->IsBool()) {
         return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state is incomplete");
+    }
+    if ((initialization_mode_value != nullptr && !initialization_mode_value->IsBool())
+        || (model_exchange_remote_mode_value != nullptr
+            && (!model_exchange_remote_mode_value->IsString()
+                || (model_exchange_remote_mode_value->AsString() != ""
+                    && model_exchange_remote_mode_value->AsString() != "instantiated"
+                    && model_exchange_remote_mode_value->AsString() != "initialization"
+                    && model_exchange_remote_mode_value->AsString() != "event"
+                    && model_exchange_remote_mode_value->AsString() != "continuous")))) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU Model Exchange phase is invalid");
+    }
+    const bool restore_initialization_mode =
+        initialization_mode_value != nullptr && initialization_mode_value->AsBool();
+    const std::string serialized_model_exchange_remote_mode =
+        model_exchange_remote_mode_value == nullptr ? "" : model_exchange_remote_mode_value->AsString();
+    if (restore_initialization_mode
+        && (!model_exchange_mode_
+            || !model_exchange_external_solver_active_
+            || serialized_model_exchange_remote_mode != "initialization")) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state does not match the active Model Exchange phase");
     }
     const double serialized_time = time_value->AsNumber();
     if (!std::isfinite(serialized_time)) {
@@ -1571,7 +1611,21 @@ OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_stat
             cached_values_[variable->value_reference] = value;
         }
     }
-    state_ = running_value->AsBool() ? SessionState::kRunning : SessionState::kInitialized;
+    if (restore_initialization_mode) {
+        state_ = SessionState::kSessionCreated;
+        initialization_mode_entered_ = true;
+        initialization_evaluated_ = true;
+        initialization_evaluation_dirty_ = false;
+        model_exchange_external_solver_active_ = true;
+        model_exchange_remote_mode_ = "initialization";
+    } else {
+        state_ = running_value->AsBool() ? SessionState::kRunning : SessionState::kInitialized;
+        initialization_mode_entered_ = false;
+        if (model_exchange_mode_ && model_exchange_external_solver_active_
+            && !serialized_model_exchange_remote_mode.empty()) {
+            model_exchange_remote_mode_ = serialized_model_exchange_remote_mode;
+        }
+    }
     configuration_mode_ = false;
     configuration_mode_initialization_ = false;
     reconfiguration_values_.clear();
@@ -1589,28 +1643,30 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
         && std::find(model_.continuous_state_value_references.begin(),
                      model_.continuous_state_value_references.end(),
                      variable.value_reference) != model_.continuous_state_value_references.end();
+    const bool fmi3 = model_.fmi_version.rfind("3.", 0) == 0;
+    const bool fmi2 = model_.fmi_version.rfind("2.", 0) == 0;
     const bool writable_initial_state = is_continuous_state
-        && ((model_.fmi_version.rfind("3.", 0) == 0
-             && initialization_mode_entered_ && variable.initial == "exact")
-            || (model_.fmi_version.rfind("2.", 0) == 0
-                && (variable.initial == "exact"
-                    || (!initialization_mode_entered_ && variable.initial == "approx"))));
+        && ((fmi3 && (variable.initial == "exact"
+                      || (!initialization_mode_entered_ && variable.initial == "approx")))
+            || (fmi2 && (variable.initial == "exact"
+                         || (!initialization_mode_entered_ && variable.initial == "approx"))));
     const bool external_model_exchange_value = model_exchange_external_solver_active_
         && (initialization_state || runtime_state)
         && !configuration_mode_
         && variable.causality != "structuralParameter"
         && variable.causality != "independent";
     if (external_model_exchange_value) {
-        const bool fmi3_state_settable = model_.fmi_version.rfind("3.", 0) == 0
-            && ((model_exchange_remote_mode_ == "initialization"
-                 && initialization_mode_entered_ && variable.initial == "exact")
-                || model_exchange_remote_mode_ == "continuous"
-                || (model_exchange_remote_mode_ == "event" && variable.reinit == false));
-        if (is_continuous_state && !fmi3_state_settable) {
+        const bool state_settable =
+            (fmi2 && model_exchange_remote_mode_ == "initialization"
+             && initialization_mode_entered_ && variable.initial == "exact")
+            || (fmi3 && model_exchange_remote_mode_ == "initialization"
+                && initialization_mode_entered_ && variable.initial == "exact")
+            || (fmi3 && model_exchange_remote_mode_ == "continuous")
+            || (fmi3 && model_exchange_remote_mode_ == "event" && variable.reinit == false);
+        if (is_continuous_state && !state_settable) {
             return OperationResult::Failure(
                 "VARIABLE_NOT_SETTABLE",
-                "FMI 3 continuous states may be set in Initialization Mode when initial is exact, "
-                "in Continuous-Time Mode, or in Event Mode when reinit is false");
+                "Continuous states cannot be set in the current FMI Model Exchange mode");
         }
         const auto status = SetModelExchangeValue(variable, value);
         if (!status) {

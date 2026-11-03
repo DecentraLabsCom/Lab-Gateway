@@ -659,6 +659,132 @@ void TestModelExchangeInitializationReadsAndExactStateWritesAreOrderIndependent(
     CHECK(JsonString(*state_write.value.AsObject(), "operation") == "setValues");
 }
 
+void TestFmi3ExactAndApproxStatesCanBeSetWhileInstantiated() {
+    for (const std::string initial : {"exact", "approx"}) {
+        TemporaryDirectory directory;
+        WriteFile(directory.path / "config.json",
+                  R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1"})");
+        WriteFile(directory.path / "modelDescription.xml", "<fmiModelDescription fmiVersion=\"3.0\" modelName=\"InitialState\" instantiationToken=\"initial-state-token\">"
+                  "<ModelExchange modelIdentifier=\"initial_state\"/>"
+                  "<ModelVariables><Float64 name=\"x\" valueReference=\"1\" causality=\"local\" variability=\"continuous\" initial=\"" + initial + "\" start=\"0.25\"/>"
+                  "<Float64 name=\"der_x\" valueReference=\"2\" causality=\"local\" variability=\"continuous\" derivative=\"1\"/></ModelVariables>"
+                  "<ModelStructure><ContinuousStateDerivative valueReference=\"2\"/></ModelStructure></fmiModelDescription>");
+
+        ScriptedTransport* scripted = nullptr;
+        ProxyRuntime runtime([&]() {
+            auto transport = std::make_unique<ScriptedTransport>();
+            scripted = transport.get();
+            return transport;
+        });
+        CHECK_OK(runtime.Configure("initial-state-instance", directory.path.string()));
+        CHECK_OK(runtime.SetModelExchangeMode(true));
+        CHECK_OK(runtime.SetupExperiment(0.0, 1.0, 0.1));
+        const std::uint32_t state_reference = 1;
+        const double state_value = 0.8;
+        CHECK_OK(runtime.SetReal(&state_reference, 1, &state_value));
+        scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"initial-state-session"})");
+        CHECK_OK(runtime.EnterInitializationMode());
+        scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+        scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-3","result":{"mode":"event"}})");
+        CHECK_OK(runtime.ExitInitializationMode());
+
+        const auto initialize_request = ParseJson(scripted->SentPayloads()[1]);
+        CHECK(initialize_request);
+        const JsonObject& parameters = *FindObjectValue(*initialize_request.value.AsObject(), "parameters")->AsObject();
+        CHECK_NEAR(JsonNumber(parameters, "x"), 0.8, 1e-12);
+    }
+}
+
+void TestFmi2ExactStateCanBeSetDuringInitializationAfterARead() {
+    TemporaryDirectory directory;
+    WriteFile(directory.path / "config.json",
+              R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1"})");
+    WriteFile(directory.path / "modelDescription.xml", R"xml(
+        <fmiModelDescription fmiVersion="2.0" modelName="Fmi2InitialState" guid="fmi2-initial-state">
+          <ModelExchange modelIdentifier="fmi2_initial_state"/>
+          <ModelVariables>
+            <ScalarVariable name="h" valueReference="1" causality="local" variability="continuous" initial="exact"><Real start="1.0"/></ScalarVariable>
+            <ScalarVariable name="der_h" valueReference="2" causality="local" variability="continuous"><Real derivative="1" start="0.0"/></ScalarVariable>
+          </ModelVariables>
+          <ModelStructure><Derivatives><Unknown index="2"/></Derivatives></ModelStructure>
+        </fmiModelDescription>
+    )xml");
+
+    ScriptedTransport* scripted = nullptr;
+    ProxyRuntime runtime([&]() {
+        auto transport = std::make_unique<ScriptedTransport>();
+        scripted = transport.get();
+        return transport;
+    });
+    CHECK_OK(runtime.Configure("fmi2-initial-state-instance", directory.path.string()));
+    CHECK_OK(runtime.SetModelExchangeMode(true));
+    CHECK_OK(runtime.SetupExperiment(0.0, 2.0, 0.1));
+    scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"fmi2-initial-state-session"})");
+    CHECK_OK(runtime.EnterInitializationMode());
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-3","result":{"values":[1.0]}})");
+    double current_state = 0.0;
+    const std::uint32_t state_reference = 1;
+    CHECK_OK(runtime.GetReal(&state_reference, 1, &current_state));
+    CHECK_NEAR(current_state, 1.0, 1e-12);
+
+    const double new_state = 0.8;
+    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-4","result":{"values":[0.8]}})");
+    CHECK_OK(runtime.SetReal(&state_reference, 1, &new_state));
+    const auto write_request = ParseJson(scripted->SentPayloads().back());
+    CHECK(write_request);
+    CHECK(JsonString(*write_request.value.AsObject(), "operation") == "setValues");
+}
+
+void TestModelExchangeStateCanBeCapturedAndRestoredDuringInitialization() {
+    TemporaryDirectory directory;
+    WriteFile(directory.path / "config.json",
+              R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1"})");
+    WriteFile(directory.path / "modelDescription.xml", R"xml(
+        <fmiModelDescription fmiVersion="3.0" modelName="StatefulME" instantiationToken="stateful-me-token">
+          <ModelExchange modelIdentifier="stateful_me" canGetAndSetFMUState="true" canSerializeFMUState="true"/>
+          <ModelVariables>
+            <Float64 name="x" valueReference="1" causality="local" variability="continuous" initial="exact" start="0.25"/>
+            <Float64 name="der_x" valueReference="2" causality="local" variability="continuous" derivative="1"/>
+          </ModelVariables>
+          <ModelStructure><ContinuousStateDerivative valueReference="2"/></ModelStructure>
+        </fmiModelDescription>
+    )xml");
+
+    ScriptedTransport* scripted = nullptr;
+    ProxyRuntime runtime([&]() {
+        auto transport = std::make_unique<ScriptedTransport>();
+        scripted = transport.get();
+        return transport;
+    });
+    CHECK_OK(runtime.Configure("stateful-me-instance", directory.path.string()));
+    CHECK_OK(runtime.SetModelExchangeMode(true));
+    CHECK_OK(runtime.SetupExperiment(0.0, 1.0, 0.1));
+    scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"stateful-me-session"})");
+    CHECK_OK(runtime.EnterInitializationMode());
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-3","result":{"values":[0.25]}})");
+    const auto state_result = runtime.ModelExchangeCall("getContinuousStates");
+    CHECK(state_result);
+
+    scripted->QueueResponse(R"({"type":"sim.fmuState","requestId":"req-4","checkpoint":{"opaque":"state"}})");
+    std::string serialized_state;
+    CHECK_OK(runtime.CaptureFmuState(serialized_state));
+    const auto parsed_state = ParseJson(serialized_state);
+    CHECK(parsed_state);
+    CHECK(JsonBool(*parsed_state.value.AsObject(), "initializationMode"));
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-5","simTime":0.0,"outputs":{}})");
+    CHECK_OK(runtime.RestoreFmuState(serialized_state));
+    CHECK(runtime.State() == SessionState::kSessionCreated);
+
+    scripted->QueueResponse(R"({"type":"sim.modelExchangeResult","requestId":"req-6","result":{"mode":"event"}})");
+    CHECK_OK(runtime.ExitInitializationMode());
+    CHECK(runtime.State() == SessionState::kInitialized);
+}
+
 void TestUpdateDiscreteStatesWritesInputsAndRefreshesOutputs() {
     TemporaryDirectory directory;
     WriteFile(directory.path / "config.json",
@@ -829,6 +955,9 @@ int main() {
     failures += RunTest("proxy runtime lifecycle", TestProxyRuntimeLifecycle);
     failures += RunTest("initialization reads evaluate and refresh outputs", TestInitializationGetsEvaluateAndRefreshOutputs);
     failures += RunTest("Model Exchange initialization reads and exact state writes", TestModelExchangeInitializationReadsAndExactStateWritesAreOrderIndependent);
+    failures += RunTest("FMI 3 exact and approximate states can be set while instantiated", TestFmi3ExactAndApproxStatesCanBeSetWhileInstantiated);
+    failures += RunTest("FMI 2 exact state can be set during initialization after a read", TestFmi2ExactStateCanBeSetDuringInitializationAfterARead);
+    failures += RunTest("Model Exchange state can be captured and restored during initialization", TestModelExchangeStateCanBeCapturedAndRestoredDuringInitialization);
     failures += RunTest("discrete-state updates write inputs and refresh outputs", TestUpdateDiscreteStatesWritesInputsAndRefreshesOutputs);
     failures += RunTest("undefined stop time", TestUndefinedStopTimeDoesNotUseDefaultExperimentAsALimit);
     failures += RunTest("FMI 3 runtime reconfiguration", TestFmi3TunableBooleanCanBeReconfiguredDuringCoSimulation);
