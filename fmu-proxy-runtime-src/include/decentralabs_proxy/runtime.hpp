@@ -54,11 +54,11 @@ public:
     OperationResult SetBinary(const std::uint32_t* value_references, std::size_t count, const std::size_t* value_sizes, const std::uint8_t* const* values, std::optional<std::size_t> value_count = std::nullopt);
     OperationResult SetClock(const std::uint32_t* value_references, std::size_t count, const bool* values);
 
-    OperationResult GetReal(const std::uint32_t* value_references, std::size_t count, double* values, std::optional<std::size_t> value_count = std::nullopt) const;
-    OperationResult GetInteger(const std::uint32_t* value_references, std::size_t count, std::int32_t* values, std::optional<std::size_t> value_count = std::nullopt) const;
-    OperationResult GetSignedInteger(const std::uint32_t* value_references, std::size_t count, std::int64_t* values, std::optional<std::size_t> value_count = std::nullopt) const;
-    OperationResult GetUnsignedInteger(const std::uint32_t* value_references, std::size_t count, std::uint64_t* values, std::optional<std::size_t> value_count = std::nullopt) const;
-    OperationResult GetBoolean(const std::uint32_t* value_references, std::size_t count, bool* values, std::optional<std::size_t> value_count = std::nullopt) const;
+    OperationResult GetReal(const std::uint32_t* value_references, std::size_t count, double* values, std::optional<std::size_t> value_count = std::nullopt);
+    OperationResult GetInteger(const std::uint32_t* value_references, std::size_t count, std::int32_t* values, std::optional<std::size_t> value_count = std::nullopt);
+    OperationResult GetSignedInteger(const std::uint32_t* value_references, std::size_t count, std::int64_t* values, std::optional<std::size_t> value_count = std::nullopt);
+    OperationResult GetUnsignedInteger(const std::uint32_t* value_references, std::size_t count, std::uint64_t* values, std::optional<std::size_t> value_count = std::nullopt);
+    OperationResult GetBoolean(const std::uint32_t* value_references, std::size_t count, bool* values, std::optional<std::size_t> value_count = std::nullopt);
     OperationResult GetString(const std::uint32_t* value_references, std::size_t count, const char** values, std::optional<std::size_t> value_count = std::nullopt);
     OperationResult GetBinary(const std::uint32_t* value_references, std::size_t count, std::size_t* value_sizes, const std::uint8_t** values, std::optional<std::size_t> value_count = std::nullopt);
     OperationResult GetClock(const std::uint32_t* value_references, std::size_t count, bool* values);
@@ -82,6 +82,10 @@ private:
     OperationResult SetValue(const VariableInfo& variable, ScalarValue value);
     const ScalarValue* GetCachedValue(std::uint32_t value_reference) const;
     OperationResult ApplyOutputSnapshot(const OutputSnapshot& snapshot);
+    OperationResult EvaluateInitialization();
+    OperationResult EvaluateInitializationForValues(const std::uint32_t* value_references,
+                                                    std::size_t count,
+                                                    std::optional<std::size_t> value_count);
     void InvalidateArraysForStructuralParameter(const VariableInfo& variable, bool initialization_configuration);
     void SeedCacheFromModelDefaults();
     std::size_t ResolveVariableFlatSize(const VariableInfo& variable) const;
@@ -124,6 +128,8 @@ private:
     std::chrono::steady_clock::time_point realtime_wall_origin_{};
     double realtime_sim_origin_ = 0.0;
     bool realtime_clock_started_ = false;
+    bool initialization_evaluated_ = false;
+    bool initialization_evaluation_dirty_ = false;
     std::map<std::uint32_t, ScalarValue> cached_values_;
     std::map<std::string, ScalarValue> initial_inputs_;
     std::map<std::string, ScalarValue> pending_inputs_;

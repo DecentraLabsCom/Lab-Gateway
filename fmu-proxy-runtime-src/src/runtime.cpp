@@ -654,6 +654,8 @@ OperationResult ProxyRuntime::Configure(const std::string& instance_name, const 
     last_step_event_handling_needed_ = false;
     last_step_terminated_ = false;
     simulation_finished_ = false;
+    initialization_evaluated_ = false;
+    initialization_evaluation_dirty_ = false;
     gateway_client_ = std::make_unique<GatewayClient>(transport_factory_());
     SeedCacheFromModelDefaults();
     initial_inputs_.clear();
@@ -836,16 +838,48 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
         return OperationResult::Failure("STATE_ERROR", "Runtime is not in session_created state");
     }
 
+    const auto status = EvaluateInitialization();
+    if (!status) {
+        state_ = SessionState::kError;
+        SetError(status.message);
+        return status;
+    }
+    pending_inputs_.clear();
+    realtime_sim_origin_ = current_time_;
+    realtime_wall_origin_ = std::chrono::steady_clock::now();
+    realtime_clock_started_ = true;
+    return Transition(SessionState::kInitialized);
+}
+
+OperationResult ProxyRuntime::EvaluateInitialization() {
+    if (gateway_client_ == nullptr) {
+        return OperationResult::Failure("RUNTIME_NOT_CONFIGURED", "Runtime is not configured");
+    }
+    if (state_ != SessionState::kSessionCreated) {
+        return OperationResult::Failure("STATE_ERROR", "Initialization evaluation requires Initialization Mode");
+    }
+    if (initialization_evaluated_ && !initialization_evaluation_dirty_) {
+        return OperationResult::Success();
+    }
+    if (initialization_evaluated_) {
+        const auto reset_status = gateway_client_->Reset();
+        if (!reset_status) {
+            return reset_status;
+        }
+        SeedCacheFromModelDefaults();
+        for (const auto& [name, value] : initial_inputs_) {
+            const VariableInfo* variable = FindVariableByName(model_, name);
+            if (variable != nullptr) {
+                cached_values_[variable->value_reference] = value;
+            }
+        }
+        current_time_ = experiment_.start_time;
+    }
+
     std::map<std::string, ScalarValue> initialization_inputs;
     std::map<std::string, ScalarValue> initialization_parameters;
-    for (const auto& [name, value] : pending_inputs_) {
+    for (const auto& [name, value] : initial_inputs_) {
         const VariableInfo* variable = FindVariableByName(model_, name);
-        if (variable != nullptr && variable->causality != "structuralParameter"
-            && variable->start_value.has_value()
-            && *variable->start_value == value) {
-            initial_inputs_.erase(name);
-            continue;
-        }
         if (variable != nullptr && variable->causality == "input") {
             initialization_inputs.emplace(name, value);
         } else {
@@ -856,8 +890,6 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
     const auto status = gateway_client_->Initialize(
         config_, experiment_, initialization_inputs, initialization_parameters, early_return_allowed_);
     if (!status) {
-        state_ = SessionState::kError;
-        SetError(status.message);
         return status;
     }
     std::vector<std::string> output_variables;
@@ -868,17 +900,35 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
     }
     const auto initial_outputs = gateway_client_->GetOutputs(output_variables);
     if (!initial_outputs) {
-        state_ = SessionState::kError;
-        SetError(initial_outputs.status.message);
         return initial_outputs.status;
     }
     ApplyOutputSnapshot(initial_outputs.value);
-    pending_inputs_.clear();
-    current_time_ = experiment_.start_time;
-    realtime_sim_origin_ = current_time_;
-    realtime_wall_origin_ = std::chrono::steady_clock::now();
-    realtime_clock_started_ = true;
-    return Transition(SessionState::kInitialized);
+    initialization_evaluated_ = true;
+    initialization_evaluation_dirty_ = false;
+    return OperationResult::Success();
+}
+
+OperationResult ProxyRuntime::EvaluateInitializationForValues(
+    const std::uint32_t* value_references,
+    const std::size_t count,
+    const std::optional<std::size_t> value_count) {
+    if (state_ != SessionState::kSessionCreated || count == 0 || value_references == nullptr) {
+        return OperationResult::Success();
+    }
+    std::size_t expected_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &expected_count)
+        || expected_count != value_count.value_or(count)) {
+        return OperationResult::Success();
+    }
+    bool requests_output = false;
+    for (std::size_t index = 0; index < count; ++index) {
+        const VariableInfo* variable = FindVariableByValueReference(model_, value_references[index]);
+        if (variable == nullptr) {
+            return OperationResult::Success();
+        }
+        requests_output = requests_output || variable->causality == "output";
+    }
+    return requests_output ? EvaluateInitialization() : OperationResult::Success();
 }
 
 void ProxyRuntime::SetEarlyReturnAllowed(const bool allowed) {
@@ -1057,13 +1107,8 @@ OperationResult ProxyRuntime::Reset() {
         }
     }
     SeedCacheFromModelDefaults();
-    pending_inputs_ = initial_inputs_;
-    for (const auto& [name, value] : initial_inputs_) {
-        const VariableInfo* variable = FindVariableByName(model_, name);
-        if (variable != nullptr) {
-            cached_values_[variable->value_reference] = value;
-        }
-    }
+    initial_inputs_.clear();
+    pending_inputs_.clear();
     current_time_ = experiment_.start_time;
     last_step_early_return_ = false;
     last_step_event_handling_needed_ = false;
@@ -1072,6 +1117,8 @@ OperationResult ProxyRuntime::Reset() {
     configuration_mode_ = false;
     configuration_mode_initialization_ = false;
     realtime_clock_started_ = false;
+    initialization_evaluated_ = false;
+    initialization_evaluation_dirty_ = false;
     reconfiguration_values_.clear();
     state_ = SessionState::kInstantiated;
     return OperationResult::Success();
@@ -1259,6 +1306,9 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
     }
     if (simulation_finished_) {
         return OperationResult::Failure("SIMULATION_FINISHED", "Simulation has finished");
+    }
+    if (state_ == SessionState::kSessionCreated) {
+        initialization_evaluation_dirty_ = true;
     }
     if (writable_structural_parameter) {
         const bool defines_array_dimension = std::any_of(
@@ -1727,35 +1777,63 @@ OperationResult ProxyRuntime::GetNumericValues(const std::uint32_t* value_refere
 OperationResult ProxyRuntime::GetReal(const std::uint32_t* value_references,
                                       const std::size_t count,
                                       double* values,
-                                      const std::optional<std::size_t> value_count) const {
+                                      const std::optional<std::size_t> value_count) {
+    if (count > 0 && values == nullptr) {
+        return GetNumericValues(value_references, count, values, value_count, ScalarType::kReal);
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kReal);
 }
 
 OperationResult ProxyRuntime::GetInteger(const std::uint32_t* value_references,
                                          const std::size_t count,
                                          std::int32_t* values,
-                                         const std::optional<std::size_t> value_count) const {
+                                         const std::optional<std::size_t> value_count) {
+    if (count > 0 && values == nullptr) {
+        return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::GetSignedInteger(const std::uint32_t* value_references,
                                                const std::size_t count,
                                                std::int64_t* values,
-                                               const std::optional<std::size_t> value_count) const {
+                                               const std::optional<std::size_t> value_count) {
+    if (count > 0 && values == nullptr) {
+        return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::GetUnsignedInteger(const std::uint32_t* value_references,
                                                  const std::size_t count,
                                                  std::uint64_t* values,
-                                                 const std::optional<std::size_t> value_count) const {
+                                                 const std::optional<std::size_t> value_count) {
+    if (count > 0 && values == nullptr) {
+        return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::GetBoolean(const std::uint32_t* value_references,
                                          const std::size_t count,
                                          bool* values,
-                                         const std::optional<std::size_t> value_count) const {
+                                         const std::optional<std::size_t> value_count) {
     if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetBoolean received null buffers");
     }
@@ -1766,6 +1844,10 @@ OperationResult ProxyRuntime::GetBoolean(const std::uint32_t* value_references,
     }
     if (expected_count > 0 && values == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetBoolean received null buffers");
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1819,6 +1901,10 @@ OperationResult ProxyRuntime::GetString(const std::uint32_t* value_references,
     }
     if (expected_count > 0 && values == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetString received null buffers");
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
     }
     string_cache_.reserve(expected_count);
     std::size_t offset = 0;
@@ -1878,6 +1964,10 @@ OperationResult ProxyRuntime::GetBinary(const std::uint32_t* value_references,
     if (expected_count > 0 && (value_sizes == nullptr || values == nullptr)) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetBinary received null buffers");
     }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
         const VariableInfo* variable = FindVariableByValueReference(model_, value_references[index]);
@@ -1923,6 +2013,10 @@ OperationResult ProxyRuntime::GetClock(const std::uint32_t* value_references,
                                        bool* values) {
     if (count > 0 && (value_references == nullptr || values == nullptr)) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetClock received null buffers");
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, count);
+    if (!initialization_status) {
+        return initialization_status;
     }
     for (std::size_t index = 0; index < count; ++index) {
         const VariableInfo* variable = FindVariableByValueReference(model_, value_references[index]);

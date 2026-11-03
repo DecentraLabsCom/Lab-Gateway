@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #if defined(_WIN32)
 #define FMI3_Export __declspec(dllexport)
@@ -28,11 +29,11 @@ typedef int32_t fmi3Int32;
 typedef uint32_t fmi3UInt32;
 typedef int64_t fmi3Int64;
 typedef uint64_t fmi3UInt64;
-typedef int fmi3Boolean;
+typedef bool fmi3Boolean;
 typedef const char* fmi3String;
 typedef uint8_t fmi3Byte;
 typedef const fmi3Byte* fmi3Binary;
-typedef fmi3Boolean fmi3Clock;
+typedef bool fmi3Clock;
 
 enum {
     fmi3False = 0,

@@ -331,7 +331,7 @@ def _fmi_ls_struct_archive_entries(model_xml: bytes, value: Any) -> tuple[tuple[
         None,
     )
     names: set[str] = set()
-    for variable in model_variables or ():
+    for variable in model_variables if model_variables is not None else ():
         name = variable.get("name")
         if isinstance(name, str):
             names.add(name)

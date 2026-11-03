@@ -920,7 +920,7 @@ services:
         limits:
           memory: 1G
           cpus: '2.0'
-          pids: 96
+          pids: 128
         reservations:
           memory: 512M
           cpus: '0.5'
@@ -945,7 +945,7 @@ services:
   # local FMU data directory with the Gateway facade.
   fmu-executor-local:
     profiles: ["fmu-local-dev"]
-    image: ${FMU_EXECUTOR_IMAGE:-ghcr.io/decentralabscom/fmu-executor:0.3.5}
+    image: ${FMU_EXECUTOR_IMAGE:-ghcr.io/decentralabscom/fmu-executor:0.3.6}
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     environment:
       - FMU_EXECUTOR_HOST=0.0.0.0

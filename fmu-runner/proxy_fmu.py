@@ -710,6 +710,8 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
             output_indexes.append((written_index, value_reference))
         if fmi_major_version >= 3 and _is_fmi3_initial_unknown(var, initial):
             initial_unknown_indexes.append(value_reference)
+        elif fmi_major_version < 3 and _is_fmi2_initial_unknown(var, initial):
+            initial_unknown_indexes.append(written_index)
 
     model_structure = ET.SubElement(root, "ModelStructure")
     if fmi_major_version >= 3:
@@ -721,6 +723,10 @@ def _build_proxy_model_description_xml(model_metadata: dict) -> bytes:
         outputs = ET.SubElement(model_structure, "Outputs")
         for idx, _ in output_indexes:
             ET.SubElement(outputs, "Unknown", {"index": str(idx)})
+    if fmi_major_version < 3 and initial_unknown_indexes:
+        initial_unknowns = ET.SubElement(model_structure, "InitialUnknowns")
+        for idx in initial_unknown_indexes:
+            ET.SubElement(initial_unknowns, "Unknown", {"index": str(idx)})
 
     xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     return xml_bytes
@@ -759,6 +765,26 @@ def _is_fmi3_initial_unknown(variable: dict, initial: Any) -> bool:
         and not variable.get("clocks")
         and variability in {"discrete", "continuous"}
     )
+
+
+def _is_fmi2_initial_unknown(variable: dict, initial: Any) -> bool:
+    """Return whether FMI 2 requires this proxy variable in InitialUnknowns."""
+    causality = str(variable.get("causality") or "local").lower()
+    if causality == "calculatedparameter":
+        return True
+    if causality != "output":
+        return False
+
+    if initial is not None:
+        return str(initial).lower() in {"approx", "calculated"}
+
+    variable_type = str(variable.get("type") or "Real").lower()
+    variability = str(variable.get("variability") or "").lower()
+    if not variability:
+        variability = "continuous" if variable_type == "real" else "discrete"
+    # FMI 2 defaults output initial to "exact" for constant outputs and to
+    # "calculated" for discrete/continuous outputs.
+    return variability in {"discrete", "continuous"}
 
 
 def _collect_runtime_files(

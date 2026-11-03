@@ -21,6 +21,10 @@
 #include "decentralabs_proxy/runtime_config.hpp"
 #include "decentralabs_proxy/session_state.hpp"
 #include "decentralabs_proxy/transport.hpp"
+#include "fmi3/fmi3Functions.h"
+
+static_assert(sizeof(fmi3Boolean) == sizeof(bool));
+static_assert(sizeof(fmi3Clock) == sizeof(bool));
 
 namespace {
 
@@ -358,6 +362,7 @@ void TestProxyRuntimeLifecycle() {
           <DefaultExperiment startTime="0.0" stopTime="10.0" stepSize="0.5"/>
           <ModelVariables>
             <ScalarVariable name="input" valueReference="1" causality="input"><Real start="1.0"/></ScalarVariable>
+            <ScalarVariable name="time" valueReference="0" causality="independent"><Real/></ScalarVariable>
             <ScalarVariable name="output" valueReference="2" causality="output"><Real start="0.0"/></ScalarVariable>
             <ScalarVariable name="counter" valueReference="3" causality="output"><Integer start="0"/></ScalarVariable>
             <ScalarVariable name="label" valueReference="4" causality="output"><String start="initial"/></ScalarVariable>
@@ -375,7 +380,7 @@ void TestProxyRuntimeLifecycle() {
 
     CHECK_OK(runtime.Configure("instance-1", directory.path.string()));
     CHECK(runtime.State() == SessionState::kInstantiated);
-    CHECK(runtime.Model().variables.size() == 5);
+    CHECK(runtime.Model().variables.size() == 6);
     CHECK(runtime.Config().time_mode == TimeMode::kRealtime);
     CHECK_NEAR(runtime.CurrentTime(), 0.0, 1e-12);
 
@@ -406,6 +411,10 @@ void TestProxyRuntimeLifecycle() {
     CHECK(runtime.State() == SessionState::kRunning);
     CHECK_NEAR(runtime.CurrentTime(), 0.25, 1e-12);
     CHECK(runtime.SimulationFinished());
+    const std::uint32_t time_reference = 0;
+    double time_value = -1.0;
+    CHECK_OK(runtime.GetReal(&time_reference, 1, &time_value));
+    CHECK_NEAR(time_value, 0.25, 1e-12);
 
     const std::size_t sent_payload_count = scripted->SentPayloads().size();
     const double one_ulp_step = std::nextafter(0.25, 1.0) - 0.25;
@@ -442,9 +451,138 @@ void TestProxyRuntimeLifecycle() {
     CHECK_OK(runtime.GetReal(&output_reference, 1, &output_value));
     CHECK_NEAR(output_value, 0.0, 1e-12);
 
-    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-6","reason":"test complete"})");
+    double reset_input_value = 0.0;
+    CHECK_OK(runtime.GetReal(&input_reference, 1, &reset_input_value));
+    CHECK_NEAR(reset_input_value, 1.0, 1e-12);
+    CHECK_OK(runtime.EnterInitializationMode());
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-6","state":"initialized"})");
+    scripted->QueueResponse(
+        R"({"type":"sim.outputs","requestId":"req-7","simTime":0.0,"values":{"output":1.0,"counter":0,"label":"initial","enabled":false}})");
+    CHECK_OK(runtime.ExitInitializationMode());
+    const auto reinitialize_request = ParseJson(scripted->SentPayloads()[5]);
+    CHECK(reinitialize_request);
+    const JsonObject& reinitialize_object = *reinitialize_request.value.AsObject();
+    CHECK(JsonString(reinitialize_object, "type") == "sim.initialize");
+    const JsonObject& reinitialize_options = *FindObjectValue(reinitialize_object, "options")->AsObject();
+    CHECK(FindObjectValue(reinitialize_options, "inputs") == nullptr);
+
+    scripted->QueueResponse(R"({"type":"session.closed","requestId":"req-8","reason":"test complete"})");
     CHECK_OK(runtime.Terminate());
     CHECK(runtime.State() == SessionState::kTerminated);
+}
+
+void TestInitializationGetsEvaluateAndRefreshOutputs() {
+    TemporaryDirectory directory;
+    WriteFile(directory.path / "config.json",
+              R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1"})");
+    WriteFile(directory.path / "modelDescription.xml", R"xml(
+        <fmiModelDescription fmiVersion="2.0" modelName="InitializationModel" guid="initialization-guid">
+          <CoSimulation/>
+          <ModelVariables>
+            <ScalarVariable name="input" valueReference="1" causality="input"><Real start="1.0"/></ScalarVariable>
+            <ScalarVariable name="output" valueReference="2" causality="output"><Real start="0.0"/></ScalarVariable>
+          </ModelVariables>
+        </fmiModelDescription>
+    )xml");
+
+    ScriptedTransport* scripted = nullptr;
+    ProxyRuntime runtime([&]() {
+        auto transport = std::make_unique<ScriptedTransport>();
+        scripted = transport.get();
+        return transport;
+    });
+    CHECK_OK(runtime.Configure("initialization-instance", directory.path.string()));
+    const std::uint32_t input_reference = 1;
+    const std::uint32_t output_reference = 2;
+    double input_value = 2.5;
+    CHECK_OK(runtime.SetReal(&input_reference, 1, &input_value));
+    scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"initialization-session"})");
+    CHECK_OK(runtime.EnterInitializationMode());
+
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-3","simTime":0.0,"values":{"output":2.5}})");
+    double output_value = 0.0;
+    CHECK_OK(runtime.GetReal(&output_reference, 1, &output_value));
+    CHECK_NEAR(output_value, 2.5, 1e-12);
+
+    input_value = 3.5;
+    CHECK_OK(runtime.SetReal(&input_reference, 1, &input_value));
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-4","state":"reset"})");
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-5","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-6","simTime":0.0,"values":{"output":3.5}})");
+    CHECK_OK(runtime.GetReal(&output_reference, 1, &output_value));
+    CHECK_NEAR(output_value, 3.5, 1e-12);
+
+    const std::size_t requests_before_exit = scripted->SentPayloads().size();
+    CHECK_OK(runtime.ExitInitializationMode());
+    CHECK(runtime.State() == SessionState::kInitialized);
+    CHECK(scripted->SentPayloads().size() == requests_before_exit);
+
+    const auto initial_request = ParseJson(scripted->SentPayloads()[1]);
+    CHECK(initial_request);
+    const JsonObject& initial_object = *initial_request.value.AsObject();
+    const JsonObject& initial_options = *FindObjectValue(initial_object, "options")->AsObject();
+    const JsonObject& initial_inputs = *FindObjectValue(initial_options, "inputs")->AsObject();
+    CHECK(JsonNumber(initial_inputs, "input") == 2.5);
+
+    const auto refreshed_request = ParseJson(scripted->SentPayloads()[4]);
+    CHECK(refreshed_request);
+    const JsonObject& refreshed_object = *refreshed_request.value.AsObject();
+    const JsonObject& refreshed_options = *FindObjectValue(refreshed_object, "options")->AsObject();
+    const JsonObject& refreshed_inputs = *FindObjectValue(refreshed_options, "inputs")->AsObject();
+    CHECK(JsonNumber(refreshed_inputs, "input") == 3.5);
+}
+
+void TestUpdateDiscreteStatesWritesInputsAndRefreshesOutputs() {
+    TemporaryDirectory directory;
+    WriteFile(directory.path / "config.json",
+              R"({"gatewayWsUrl":"wss://gateway.example/fmu","labId":"lab-1","reservationKey":"reservation-1","sessionTicket":"ticket-1"})");
+    WriteFile(directory.path / "modelDescription.xml", R"xml(
+        <fmiModelDescription fmiVersion="3.0" modelName="EventModel" instantiationToken="event-guid">
+          <CoSimulation hasEventMode="true"/>
+          <ModelVariables>
+            <Float64 name="input" valueReference="1" causality="input" start="0.0"/>
+            <Float64 name="output" valueReference="2" causality="output" start="0.0"/>
+          </ModelVariables>
+        </fmiModelDescription>
+    )xml");
+
+    ScriptedTransport* scripted = nullptr;
+    ProxyRuntime runtime([&]() {
+        auto transport = std::make_unique<ScriptedTransport>();
+        scripted = transport.get();
+        return transport;
+    });
+    CHECK_OK(runtime.Configure("event-instance", directory.path.string()));
+    CHECK_OK(runtime.SetupExperiment(0.0, 1.0, 0.1));
+    scripted->QueueResponse(R"({"type":"session.created","requestId":"req-1","sessionId":"event-session"})");
+    CHECK_OK(runtime.EnterInitializationMode());
+    scripted->QueueResponse(R"({"type":"sim.state","requestId":"req-2","state":"initialized"})");
+    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-3","simTime":0.0,"values":{"output":0.0}})");
+    CHECK_OK(runtime.ExitInitializationMode());
+
+    const std::uint32_t input_reference = 1;
+    const double input_value = 4.0;
+    CHECK_OK(runtime.SetReal(&input_reference, 1, &input_value));
+    scripted->QueueResponse(R"({"type":"sim.inputs.updated","requestId":"req-4"})");
+    scripted->QueueResponse(R"({"type":"sim.outputs","requestId":"req-5","simTime":0.0,"values":{"output":4.0},"nextEventTimeDefined":false})");
+    bool terminate = false;
+    bool next_event_time_defined = true;
+    double next_event_time = -1.0;
+    CHECK_OK(runtime.UpdateDiscreteStates(&terminate, &next_event_time_defined, &next_event_time));
+    CHECK(!terminate);
+    CHECK(!next_event_time_defined);
+    CHECK_NEAR(next_event_time, 0.0, 1e-12);
+
+    double output_value = 0.0;
+    const std::uint32_t output_reference = 2;
+    CHECK_OK(runtime.GetReal(&output_reference, 1, &output_value));
+    CHECK_NEAR(output_value, 4.0, 1e-12);
+    const auto input_update = ParseJson(scripted->SentPayloads()[3]);
+    CHECK(input_update);
+    CHECK(JsonString(*input_update.value.AsObject(), "type") == "sim.setInputs");
+    const JsonObject& sent_values = *FindObjectValue(*input_update.value.AsObject(), "values")->AsObject();
+    CHECK_NEAR(JsonNumber(sent_values, "input"), 4.0, 1e-12);
 }
 
 void TestUndefinedStopTimeDoesNotUseDefaultExperimentAsALimit() {
@@ -562,6 +700,8 @@ int main() {
     failures += RunTest("transport implementations", TestTransportImplementations);
     failures += RunTest("gateway client protocol", TestGatewayClientProtocol);
     failures += RunTest("proxy runtime lifecycle", TestProxyRuntimeLifecycle);
+    failures += RunTest("initialization reads evaluate and refresh outputs", TestInitializationGetsEvaluateAndRefreshOutputs);
+    failures += RunTest("discrete-state updates write inputs and refresh outputs", TestUpdateDiscreteStatesWritesInputsAndRefreshesOutputs);
     failures += RunTest("undefined stop time", TestUndefinedStopTimeDoesNotUseDefaultExperimentAsALimit);
     failures += RunTest("FMI 3 runtime reconfiguration", TestFmi3TunableBooleanCanBeReconfiguredDuringCoSimulation);
     return failures == 0 ? 0 : 1;
