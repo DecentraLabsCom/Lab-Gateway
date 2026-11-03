@@ -487,7 +487,7 @@ def test_station_realtime_rejects_denied_writes_and_reads_and_filters_responses(
     manager.get_effective_policy = _get_policy
     original_send = fake_station.send
 
-    async def _send_with_outputs(raw_message: str, text=None):
+    async def _send_with_outputs(raw_message: str) -> None:
         await original_send(raw_message)
         message = json.loads(raw_message)
         if message.get("type") == "sim.getOutputs":
