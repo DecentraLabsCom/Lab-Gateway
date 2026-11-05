@@ -16,6 +16,7 @@ from simulation_access_policy import (
     available_execution_interfaces,
     build_effective_policy,
     compile_part4_access_rules,
+    fmi_interface_digest,
     normalize_authorized_execution_interfaces,
 )
 
@@ -52,6 +53,7 @@ class AasAccessPolicyResolver:
         self.cache_ttl_seconds = max(0.0, min(float(cache_ttl_seconds), 60.0))
         self.max_cache_entries = max(1, min(int(max_cache_entries), _MAX_CACHE_ENTRIES))
         self._cache: OrderedDict[str, tuple[float, dict[str, Any] | None]] = OrderedDict()
+        self._compiled_cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
 
     @staticmethod
     def _claim_text(claims: Mapping[str, Any], name: str) -> str:
@@ -340,29 +342,83 @@ class AasAccessPolicyResolver:
     def invalidate(self, lab_id: str | None = None) -> None:
         if lab_id is None:
             self._cache.clear()
+            self._compiled_cache.clear()
             return
         prefix = f"{lab_id}:"
         for key in list(self._cache):
             if key.startswith(prefix):
                 self._cache.pop(key, None)
+        for key in list(self._compiled_cache):
+            if key.startswith(prefix):
+                self._compiled_cache.pop(key, None)
+
+    @staticmethod
+    def _claims_fingerprint(claims: Mapping[str, Any]) -> str | None:
+        try:
+            encoded = json.dumps(
+                dict(claims), ensure_ascii=False, sort_keys=True,
+                separators=(",", ":"), allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError):
+            return None
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _compiled_policy_get(
+        self,
+        key: str,
+        *,
+        policy_data_cached: bool,
+    ) -> dict[str, Any] | None:
+        if not policy_data_cached or self.cache_ttl_seconds <= 0:
+            return None
+        entry = self._compiled_cache.get(key)
+        if entry is None:
+            return None
+        expires_at, policy = entry
+        if expires_at <= time.monotonic():
+            self._compiled_cache.pop(key, None)
+            return None
+        self._compiled_cache.move_to_end(key)
+        return policy
+
+    def _compiled_policy_set(
+        self,
+        key: str,
+        policy: dict[str, Any],
+    ) -> None:
+        if self.cache_ttl_seconds <= 0:
+            return
+        self._compiled_cache[key] = (time.monotonic() + self.cache_ttl_seconds, policy)
+        self._compiled_cache.move_to_end(key)
+        while len(self._compiled_cache) > self.max_cache_entries:
+            self._compiled_cache.popitem(last=False)
 
     async def resolve(self, claims: Mapping[str, Any], metadata: Mapping[str, Any]) -> dict[str, Any]:
-        fallback = build_effective_policy(metadata)
-        available_interfaces = available_execution_interfaces(metadata)
-        fallback["availableExecutionInterfaces"] = available_interfaces
-        fallback["authorizedExecutionInterfaces"] = normalize_authorized_execution_interfaces(metadata)
-        fallback["aasPolicyPresent"] = False
         lab_id = self._claim_text(claims, "labId")
         access_key = self._claim_text(claims, "accessKey")
         if not lab_id or not access_key:
             raise RuntimeError("authorized FMU claims are incomplete")
+        metadata_digest = fmi_interface_digest(metadata)
+        claims_fingerprint = self._claims_fingerprint(claims)
         link = self._read_link(claims)
         target_id = link["aasId"] if link else f"urn:decentralabs:lab:{lab_id}"
         basyx_url = str(self.get_basyx_url() or "").rstrip("/")
         if not basyx_url:
             if link:
                 raise RuntimeError("linked AAS access policy is unavailable")
-            return fallback
+            compiled_key = (
+                f"{lab_id}:fmi-default:{claims_fingerprint}:{metadata_digest}"
+                if claims_fingerprint
+                else ""
+            )
+            if compiled_key:
+                compiled = self._compiled_policy_get(compiled_key, policy_data_cached=True)
+                if compiled is not None:
+                    return compiled
+            policy = self._fallback_policy(metadata)
+            if compiled_key:
+                self._compiled_policy_set(compiled_key, policy)
+            return policy
 
         cache_key = f"{lab_id}:{target_id}"
         cached, policy_data = self._cache_get(cache_key)
@@ -383,10 +439,23 @@ class AasAccessPolicyResolver:
             except FileNotFoundError as exc:
                 if link:
                     raise RuntimeError("linked AAS access policy is unavailable") from exc
-                return fallback
+                policy_data = None
             self._cache_set(cache_key, policy_data)
+
+        compiled_key = f"{cache_key}:{claims_fingerprint}:{metadata_digest}" if claims_fingerprint else ""
+        if compiled_key:
+            compiled = self._compiled_policy_get(
+                compiled_key,
+                policy_data_cached=cached,
+            )
+            if compiled is not None:
+                return compiled
+
         if policy_data is None:
-            return fallback
+            policy = self._fallback_policy(metadata)
+            if compiled_key:
+                self._compiled_policy_set(compiled_key, policy)
+            return policy
         try:
             policy = compile_part4_access_rules(
                 policy_data["document"],
@@ -397,12 +466,15 @@ class AasAccessPolicyResolver:
                 source=policy_data["source"],
                 allowed_submodel_ids=set(policy_data["referencedSubmodelIds"]),
             )
+            available_interfaces = available_execution_interfaces(metadata)
             policy["availableExecutionInterfaces"] = available_interfaces
             policy["authorizedExecutionInterfaces"] = normalize_authorized_execution_interfaces(
                 metadata,
                 policy_data.get("authorizedExecutionInterfaces"),
             )
             policy["aasPolicyPresent"] = True
+            if compiled_key:
+                self._compiled_policy_set(compiled_key, policy)
             return policy
         except ValueError as exc:
             if "stale" in str(exc).lower():
@@ -410,6 +482,14 @@ class AasAccessPolicyResolver:
             raise RuntimeError("AAS FMI access policy is invalid") from exc
         except (KeyError, TypeError) as exc:
             raise RuntimeError("AAS FMI access policy is invalid") from exc
+
+    @staticmethod
+    def _fallback_policy(metadata: Mapping[str, Any]) -> dict[str, Any]:
+        policy = build_effective_policy(metadata)
+        policy["availableExecutionInterfaces"] = available_execution_interfaces(metadata)
+        policy["authorizedExecutionInterfaces"] = normalize_authorized_execution_interfaces(metadata)
+        policy["aasPolicyPresent"] = False
+        return policy
 
     async def update_authorized_execution_interfaces(
         self,

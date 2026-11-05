@@ -278,15 +278,16 @@ async def _simulation_effective_access_policy_for_metadata(claims: dict, metadat
         if not isinstance(metadata, dict) or not isinstance(metadata.get("modelVariables"), list):
             raise ValueError("authorized FMI metadata is invalid")
         policy = await _get_aas_access_policy_resolver().resolve(claims, metadata)
+        effective_policy = dict(policy)
         public_metadata = _public_model_metadata(metadata)
-        visible_description = filter_model_description(policy, public_metadata)
-        policy["modelDescription"] = visible_description
-        policy["modelVariables"] = visible_description.get("modelVariables", [])
+        visible_description = filter_model_description(effective_policy, public_metadata)
+        effective_policy["modelDescription"] = visible_description
+        effective_policy["modelVariables"] = visible_description.get("modelVariables", [])
         if "fmiLsStruct" in visible_description:
-            policy["fmiLsStruct"] = visible_description["fmiLsStruct"]
+            effective_policy["fmiLsStruct"] = visible_description["fmiLsStruct"]
         else:
-            policy.pop("fmiLsStruct", None)
-        return policy
+            effective_policy.pop("fmiLsStruct", None)
+        return effective_policy
     except HTTPException:
         raise
     except Exception as exc:
