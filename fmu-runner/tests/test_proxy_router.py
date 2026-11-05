@@ -149,3 +149,80 @@ def test_proxy_model_description_exposes_only_effectively_readable_or_writable_v
     model_description = app.state.model_description_builder.call_args.args[0]
     assert [variable["name"] for variable in model_description["modelVariables"]] == ["command", "speed"]
     assert "start" not in model_description["modelVariables"][0]
+
+
+def test_proxy_router_preserves_local_model_exchange_state_variables():
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationKind": "modelExchange",
+        "supportsModelExchange": True,
+        "availableExecutionInterfaces": ["ModelExchange"],
+        "modelVariables": [
+            {"name": "height", "causality": "local", "type": "Float64", "valueReference": 10},
+            {"name": "der_height", "causality": "local", "type": "Float64", "valueReference": 20},
+            {"name": "impact", "causality": "local", "type": "Float64", "valueReference": 30},
+            {"name": "internal_factor", "causality": "local", "type": "Float64", "valueReference": 50},
+            {"name": "algebraic_state", "causality": "local", "type": "Float64", "valueReference": 60},
+            {"name": "residual_value", "causality": "local", "type": "Float64", "valueReference": 70},
+            {"name": "unused_internal", "causality": "local", "type": "Float64", "valueReference": 80},
+            {"name": "ground", "causality": "parameter", "type": "Float64", "valueReference": 40},
+        ],
+        "modelStructure": {
+            "derivatives": [{
+                "name": "der_height", "valueReference": 20, "stateValueReference": 10,
+                "dependencies": [50], "dependencyNames": ["internal_factor"],
+            }],
+            "eventIndicators": [{"name": "impact", "valueReference": 30}],
+        },
+        "fmiLsDae": {
+            "algebraicVariables": ["algebraic_state"],
+            "algebraicValueReferences": [60],
+            "residualVariables": [{"name": "residual_value", "valueReference": 70}],
+            "modelStructure": {"residuals": [{"valueReference": 70, "dependencies": [60]}]},
+        },
+    }
+    app, *_ = _build_test_app(
+        claims={"sub": "user-1", "labId": "42", "accessKey": "model.fmu", "reservationKey": "0xabc"},
+        access_policy={"variables": {}, "authorizedExecutionInterfaces": ["ModelExchange"]},
+        model_metadata=metadata,
+    )
+
+    response = TestClient(app).get(
+        "/api/v1/fmu/proxy/42?reservationKey=0xabc",
+        headers={"Authorization": "Bearer booking-token"},
+    )
+
+    assert response.status_code == 200
+    proxy_metadata = app.state.model_description_builder.call_args.args[0]
+    assert [variable["name"] for variable in proxy_metadata["modelVariables"]] == [
+        "height", "der_height", "impact", "internal_factor", "algebraic_state", "residual_value", "ground",
+    ]
+    assert proxy_metadata["modelStructure"] == metadata["modelStructure"]
+    assert proxy_metadata["authorizedExecutionInterfaces"] == ["ModelExchange"]
+
+
+def test_proxy_router_omits_local_variables_for_cosimulation_only_proxy():
+    metadata = {
+        "fmiVersion": "2.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
+        "availableExecutionInterfaces": ["CoSimulation"],
+        "modelVariables": [
+            {"name": "command", "causality": "input", "type": "Real", "valueReference": 1},
+            {"name": "speed", "causality": "output", "type": "Real", "valueReference": 2},
+            {"name": "internal_state", "causality": "local", "type": "Real", "valueReference": 3},
+        ],
+    }
+    app, *_ = _build_test_app(
+        claims={"sub": "user-1", "labId": "42", "accessKey": "model.fmu", "reservationKey": "0xabc"},
+        model_metadata=metadata,
+    )
+
+    response = TestClient(app).get(
+        "/api/v1/fmu/proxy/42?reservationKey=0xabc",
+        headers={"Authorization": "Bearer booking-token"},
+    )
+
+    assert response.status_code == 200
+    proxy_metadata = app.state.model_description_builder.call_args.args[0]
+    assert [variable["name"] for variable in proxy_metadata["modelVariables"]] == ["command", "speed"]

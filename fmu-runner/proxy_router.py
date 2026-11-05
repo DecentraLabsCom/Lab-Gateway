@@ -5,7 +5,7 @@ ticket issuance, backend access, and artifact generation are injected so the
 application composition root keeps control of deployment-specific behavior.
 """
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -13,6 +13,62 @@ from fastapi.responses import Response
 from catalog_router import filter_authorized_experiments, filter_authorized_parameter_sets
 from proxy_artifact import ProxyFmiLsRefSizeLimitError
 from simulation_access_policy import filter_model_description
+
+
+def _model_exchange_local_variable_references(metadata: Mapping[str, Any]) -> tuple[set[int], set[str]]:
+    """Find local variables required by the authorized FMI ME description."""
+    references: set[int] = set()
+    names: set[str] = set()
+
+    def add_reference(value: Any) -> None:
+        if type(value) is int and value >= 0:
+            references.add(value)
+
+    def add_structure(raw_structure: Any) -> None:
+        if not isinstance(raw_structure, Mapping):
+            return
+        for entries in raw_structure.values():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, Mapping):
+                    continue
+                for field in ("valueReference", "stateValueReference"):
+                    add_reference(entry.get(field))
+                for field in ("name", "stateName"):
+                    name = entry.get(field)
+                    if isinstance(name, str) and name:
+                        names.add(name)
+                dependencies = entry.get("dependencies")
+                if isinstance(dependencies, list):
+                    for dependency in dependencies:
+                        add_reference(dependency)
+                dependency_names = entry.get("dependencyNames")
+                if isinstance(dependency_names, list):
+                    names.update(name for name in dependency_names if isinstance(name, str) and name)
+
+    add_structure(metadata.get("modelStructure"))
+    fmi_ls_dae = metadata.get("fmiLsDae")
+    if isinstance(fmi_ls_dae, Mapping):
+        raw_algebraic_names = fmi_ls_dae.get("algebraicVariables")
+        if isinstance(raw_algebraic_names, list):
+            names.update(name for name in raw_algebraic_names if isinstance(name, str) and name)
+        raw_algebraic_references = fmi_ls_dae.get("algebraicValueReferences")
+        if isinstance(raw_algebraic_references, list):
+            for reference in raw_algebraic_references:
+                add_reference(reference)
+        raw_residuals = fmi_ls_dae.get("residualVariables")
+        if isinstance(raw_residuals, list):
+            for residual in raw_residuals:
+                if not isinstance(residual, Mapping):
+                    continue
+                add_reference(residual.get("valueReference"))
+                name = residual.get("name")
+                if isinstance(name, str) and name:
+                    names.add(name)
+        add_structure(fmi_ls_dae.get("modelStructure"))
+
+    return references, names
 
 
 def create_proxy_router(
@@ -116,20 +172,47 @@ def create_proxy_router(
             access_policy = await get_effective_policy_for_metadata(claims, model_metadata)
         elif get_effective_policy is not None:
             access_policy = await get_effective_policy(claims)
-        model_metadata = {
-            **model_metadata,
-            "modelVariables": [
-                variable
-                for variable in model_metadata.get("modelVariables", [])
-                if isinstance(variable, dict) and variable.get("causality") != "local"
-            ],
-        }
         if access_policy is not None:
             if not isinstance(access_policy, dict) or not isinstance(access_policy.get("variables"), dict):
                 raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
             authorized_interfaces = access_policy.get("authorizedExecutionInterfaces")
             if not isinstance(authorized_interfaces, list) or not authorized_interfaces:
                 raise HTTPException(status_code=503, detail="Authorized FMI execution interfaces are unavailable")
+        else:
+            available_interfaces = model_metadata.get("availableExecutionInterfaces")
+            if not isinstance(available_interfaces, list) or not available_interfaces:
+                available_interfaces = ["CoSimulation"] if model_metadata.get("supportsCoSimulation") else ["ModelExchange"]
+            authorized_interfaces = (
+                ["CoSimulation"] if "CoSimulation" in available_interfaces else list(available_interfaces)
+            )
+
+        # Co-Simulation proxies expose external ports. Model Exchange also
+        # needs the local variables referenced by its ModelStructure (states,
+        # derivatives, event indicators and their declared dependencies).
+        # Keep those structural variables while excluding unrelated local
+        # implementation details from the downloaded FMI interface.
+        required_local_references, required_local_names = _model_exchange_local_variable_references(model_metadata)
+        model_variables = []
+        for variable in model_metadata.get("modelVariables", []):
+            if not isinstance(variable, dict):
+                continue
+            causality = str(variable.get("causality") or "local").lower()
+            if causality != "local":
+                model_variables.append(variable)
+                continue
+            reference = variable.get("valueReference")
+            name = variable.get("name")
+            if (
+                "ModelExchange" in authorized_interfaces
+                and (
+                    (type(reference) is int and reference in required_local_references)
+                    or (isinstance(name, str) and name in required_local_names)
+                )
+            ):
+                model_variables.append(variable)
+        model_metadata = {**model_metadata, "modelVariables": model_variables}
+
+        if access_policy is not None:
             model_metadata = filter_model_description(
                 access_policy,
                 model_metadata,
@@ -138,12 +221,7 @@ def create_proxy_router(
             )
             model_metadata["authorizedExecutionInterfaces"] = list(authorized_interfaces)
         else:
-            available_interfaces = model_metadata.get("availableExecutionInterfaces")
-            if not isinstance(available_interfaces, list) or not available_interfaces:
-                available_interfaces = ["CoSimulation"] if model_metadata.get("supportsCoSimulation") else ["ModelExchange"]
-            model_metadata["authorizedExecutionInterfaces"] = (
-                ["CoSimulation"] if "CoSimulation" in available_interfaces else list(available_interfaces)
-            )
+            model_metadata["authorizedExecutionInterfaces"] = list(authorized_interfaces)
         raw_parameter_sets = (
             await get_authorized_parameter_sets(claims=claims)
             if get_authorized_parameter_sets is not None
