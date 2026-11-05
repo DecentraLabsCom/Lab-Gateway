@@ -17,6 +17,7 @@ def create_catalog_router(
     public_model_metadata: Any,
     list_authorized_fmu: Any,
     get_effective_policy: Any = None,
+    get_effective_policy_for_metadata: Any = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -26,20 +27,28 @@ def create_catalog_router(
         claims: dict = Depends(verify_jwt),
     ):
         enforce_fmu_claim(claims, allow_provider_describe=True)
+        has_consumer_policy = all(
+            str(claims.get(name) or "").strip()
+            for name in ("labId", "reservationKey", "pucHash")
+        )
         metadata = await get_authorized_model_metadata(
             claims=claims,
             requested_fmu_filename=fmuFileName,
-            include_internal_variables=False,
+            # AAS interface-digest validation needs the complete FMI
+            # declaration. Project to public variables after policy resolution.
+            include_internal_variables=has_consumer_policy,
         )
         public = public_model_metadata(metadata)
         # Provider-describe tokens are issued during AAS synchronization and
         # do not represent a reservation-bound consumer session.
-        if (
-            get_effective_policy is None
-            or not all(str(claims.get(name) or "").strip() for name in ("labId", "reservationKey", "pucHash"))
-        ):
+        if not has_consumer_policy:
             return public
-        policy = await get_effective_policy(claims)
+        if get_effective_policy_for_metadata is not None:
+            policy = await get_effective_policy_for_metadata(claims, metadata)
+        elif get_effective_policy is not None:
+            policy = await get_effective_policy(claims)
+        else:
+            return public
         if not isinstance(policy, dict) or not isinstance(policy.get("variables"), dict):
             raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
         public = filter_model_description(policy, public)

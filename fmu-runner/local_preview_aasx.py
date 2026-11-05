@@ -51,6 +51,7 @@ class LocalPreviewAasxRegistry:
         get_link_path: Callable[[str], Path],
         build_aas_shell: Callable[..., dict],
         get_effective_policy: Callable[[dict], Any],
+        get_effective_policy_for_metadata: Callable[[dict, dict], Any] | None = None,
         invalidate_access_policy: Callable[..., Any],
         get_digital_twin_assets: Callable[[str, str], Any] | None = None,
         get_fmi_ls_related_resources: Callable[[str], Any] | None = None,
@@ -63,6 +64,7 @@ class LocalPreviewAasxRegistry:
         self.get_link_path = get_link_path
         self.build_aas_shell = build_aas_shell
         self.get_effective_policy = get_effective_policy
+        self.get_effective_policy_for_metadata = get_effective_policy_for_metadata
         self.invalidate_access_policy = invalidate_access_policy
         self.get_digital_twin_assets = get_digital_twin_assets
         self.get_fmi_ls_related_resources = get_fmi_ls_related_resources
@@ -98,6 +100,15 @@ class LocalPreviewAasxRegistry:
         if not isinstance(result, dict) or result.get("error") or result.get("disabled"):
             reason = str(result.get("error") or "unavailable") if isinstance(result, dict) else "unavailable"
             raise RuntimeError(f"Local AASX {operation} failed: {reason[:240]}")
+        return result
+
+    async def _resolve_policy(self, claims: dict, metadata: dict) -> Any:
+        if self.get_effective_policy_for_metadata is not None:
+            result = self.get_effective_policy_for_metadata(claims, metadata)
+        else:
+            result = self.get_effective_policy(claims)
+        if hasattr(result, "__await__"):
+            return await result
         return result
 
     async def ensure(self, claims: dict) -> dict:
@@ -138,6 +149,13 @@ class LocalPreviewAasxRegistry:
                 assets.append({"path": asset_path, "contentType": content_type})
             asset_urls = [asset["path"] for asset in assets]
 
+            # Load and normalize the FMU metadata once. Policy resolution and
+            # local-shell refresh both depend on this same snapshot; fetching
+            # it again is especially costly for large model descriptions.
+            metadata = await self.get_model_metadata(access_key)
+            if not isinstance(metadata, dict) or not isinstance(metadata.get("modelVariables"), list):
+                raise RuntimeError("Local FMU metadata is unavailable")
+
             link_path = self.get_link_path(lab_id)
             if link_path.exists():
                 if self.get_aasx_package(lab_id) is None:
@@ -162,7 +180,7 @@ class LocalPreviewAasxRegistry:
                     canonical_shell_id = f"{_SHELL_ID_PREFIX}{lab_id}"
                     owns_local_shell = existing_link.get("aasId") == canonical_shell_id
                     try:
-                        policy = await self.get_effective_policy(claims)
+                        policy = await self._resolve_policy(claims, metadata)
                     except Exception as exc:
                         if not owns_local_shell:
                             raise
@@ -177,11 +195,7 @@ class LocalPreviewAasxRegistry:
                         )
                         if has_aas_policy:
                             if owns_local_shell:
-                                try:
-                                    current_metadata = await self.get_model_metadata(access_key)
-                                    expected_variables = build_effective_policy(current_metadata).get("variables")
-                                except Exception:
-                                    expected_variables = None
+                                expected_variables = build_effective_policy(metadata).get("variables")
                                 if (
                                     isinstance(expected_variables, dict)
                                     and policy.get("variables") != expected_variables
@@ -200,9 +214,6 @@ class LocalPreviewAasxRegistry:
                                 "Regenerating local preview AAS because its saved policy is unavailable",
                             )
 
-            metadata = await self.get_model_metadata(access_key)
-            if not isinstance(metadata, dict) or not isinstance(metadata.get("modelVariables"), list):
-                raise RuntimeError("Local FMU metadata is unavailable")
             fmi_ls_resources = None
             if self.get_fmi_ls_related_resources is not None:
                 fmi_ls_resources = await self.get_fmi_ls_related_resources(access_key)
@@ -284,7 +295,10 @@ class LocalPreviewAasxRegistry:
                 temporary_path.unlink(missing_ok=True)
 
             self.invalidate_access_policy(lab_id)
-            policy = await self.get_effective_policy(claims)
+            # Reuse the exact metadata snapshot used to regenerate the AASX.
+            # The policy resolver validates it against the freshly imported
+            # AAS, so a second Station/Executor describe request is redundant.
+            policy = await self._resolve_policy(claims, metadata)
             if not isinstance(policy, dict) or not str(policy.get("policySource") or "").startswith("aas-"):
                 raise RuntimeError("Imported local AASX policy could not be resolved")
             return dict(policy)

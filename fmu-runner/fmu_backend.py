@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+from collections import OrderedDict
 from dataclasses import dataclass
 import json
 import logging
@@ -54,6 +56,24 @@ _SAFE_SIMULATION_ERRORS = {
     "FMU_WORKER_ISOLATION_UNAVAILABLE",
     "FMU_WORKER_START_FAILED",
 }
+
+# model.description can legitimately contain tens of thousands of FMI
+# variables. BOPTEST's public FMU description is about 25 MiB and takes more
+# than the ordinary Station request timeout to serialize, so give only that
+# metadata operation a larger minimum budget. Keep the configured timeout
+# behavior for every smaller request.
+_MIN_MODEL_DESCRIPTION_REQUEST_TIMEOUT_SECONDS = 30.0
+_MAX_CACHED_MODEL_DESCRIPTIONS = 2
+
+
+class _ModelDescriptionNotModified(dict[str, Any]):
+    """Internal signal that the Station's conditional metadata request was unchanged."""
+
+    def __init__(self, etag: str, metadata: ModelMetadata):
+        super().__init__()
+        self.etag = etag
+        self.metadata = metadata
+
 
 
 class BaseFmuBackend:
@@ -177,6 +197,11 @@ class StationFmuBackend(BaseFmuBackend):
         self.base_url = base_url.rstrip("/")
         self.internal_token = internal_token
         self.request_timeout = request_timeout
+        self._model_description_cache: OrderedDict[
+            tuple[str, bool], tuple[str, ModelMetadata]
+        ] = OrderedDict()
+        self._model_description_response_etags: dict[tuple[str, bool], str] = {}
+        self._model_description_locks: OrderedDict[tuple[str, bool], asyncio.Lock] = OrderedDict()
 
     def _headers(self) -> dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -388,16 +413,28 @@ class StationFmuBackend(BaseFmuBackend):
             raise ValueError("Unsupported Station GET operation")
 
         try:
-            async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
+            timeout = self.request_timeout
+            if operation == "describe":
+                timeout = max(timeout, _MIN_MODEL_DESCRIPTION_REQUEST_TIMEOUT_SECONDS)
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=timeout) as client:
                 request_kwargs: dict[str, Any] = {"headers": self._headers()}
                 if operation in {"describe", "catalog", "parameter-sets", "experiments", "related-resources"}:
                     request_kwargs["headers"]["X-FMU-Access-Key"] = key
                 if operation == "describe" and public_only:
                     request_kwargs["params"] = {"publicOnly": "true"}
+                cache_key = (key, public_only)
+                cached_description = self._model_description_cache.get(cache_key)
+                if operation == "describe" and cached_description is not None:
+                    request_kwargs["headers"]["If-None-Match"] = cached_description[0]
                 response = await client.get(path, **request_kwargs)
         except httpx.HTTPError as exc:
-            logger.warning("Station backend GET failed: %s", exc)
+            logger.warning("Station backend %s GET failed (%s)", operation, type(exc).__name__)
             raise HTTPException(status_code=503, detail="Station backend unavailable") from exc
+
+        if response.status_code == 304 and operation == "describe":
+            if cached_description is not None:
+                return _ModelDescriptionNotModified(*cached_description)
+            raise HTTPException(status_code=502, detail="Station returned an unexpected FMI metadata validator")
 
         if response.status_code >= 400:
             detail_text = response.text
@@ -418,6 +455,12 @@ class StationFmuBackend(BaseFmuBackend):
 
         if not isinstance(payload, dict):
             raise HTTPException(status_code=502, detail="Station backend returned invalid payload")
+        if operation == "describe":
+            etag = response.headers.get("ETag")
+            if isinstance(etag, str) and etag.strip() and len(etag) <= 256:
+                self._model_description_response_etags[(key, public_only)] = etag.strip()
+            else:
+                self._model_description_response_etags.pop((key, public_only), None)
         return payload
 
     async def _post_json(
@@ -781,11 +824,49 @@ class StationFmuBackend(BaseFmuBackend):
         include_internal_variables: bool = True,
     ) -> ModelMetadata:
         access_key = self.ensure_requested_access_key(claims, requested_fmu_filename)
-        if include_internal_variables:
-            payload = await self._request_json("describe", access_key=access_key)
-        else:
-            payload = await self._request_json("describe", access_key=access_key, public_only=True)
-        return normalize_model_metadata(payload)
+        cache_key = (access_key, not include_internal_variables)
+        lock = self._model_description_locks.get(cache_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._model_description_locks[cache_key] = lock
+        self._model_description_locks.move_to_end(cache_key)
+        for candidate_key, candidate_lock in list(self._model_description_locks.items()):
+            if len(self._model_description_locks) <= 32:
+                break
+            if candidate_key != cache_key and not candidate_lock.locked():
+                self._model_description_locks.pop(candidate_key, None)
+        async with lock:
+            if include_internal_variables:
+                payload = await self._request_json("describe", access_key=access_key)
+            else:
+                payload = await self._request_json("describe", access_key=access_key, public_only=True)
+
+            if isinstance(payload, _ModelDescriptionNotModified):
+                cached = payload.metadata
+                self._model_description_cache[cache_key] = (payload.etag, cached)
+                self._model_description_cache.move_to_end(cache_key)
+                return cached
+
+            etag = self._model_description_response_etags.get(cache_key)
+            try:
+                metadata = normalize_model_metadata(payload)
+            except Exception:
+                self._model_description_cache.pop(cache_key, None)
+                self._model_description_response_etags.pop(cache_key, None)
+                raise
+            if isinstance(etag, str):
+                self._model_description_cache[cache_key] = (etag, metadata)
+                self._model_description_cache.move_to_end(cache_key)
+                while len(self._model_description_cache) > _MAX_CACHED_MODEL_DESCRIPTIONS:
+                    evicted_key, _ = self._model_description_cache.popitem(last=False)
+                    self._model_description_response_etags.pop(evicted_key, None)
+                    evicted_lock = self._model_description_locks.get(evicted_key)
+                    if evicted_lock is not None and not evicted_lock.locked():
+                        self._model_description_locks.pop(evicted_key, None)
+            else:
+                self._model_description_cache.pop(cache_key, None)
+                self._model_description_response_etags.pop(cache_key, None)
+            return metadata
 
     async def get_authorized_parameter_sets(self, *, claims: dict) -> list[dict[str, Any]]:
         access_key = self.authorized_access_key(claims)

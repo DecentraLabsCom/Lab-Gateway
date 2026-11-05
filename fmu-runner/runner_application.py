@@ -435,6 +435,7 @@ _catalog_router = create_catalog_router(
     public_model_metadata=_catalog_public_model_metadata,
     list_authorized_fmu=_catalog_list_authorized_fmu,
     get_effective_policy=_simulation_effective_access_policy,
+    get_effective_policy_for_metadata=_simulation_effective_access_policy_for_metadata,
 )
 _aas_link_router = create_aas_link_router(
     get_link_path=_aas_link_path_for_router,
@@ -1028,6 +1029,9 @@ def _get_local_preview_aasx_registry() -> LocalPreviewAasxRegistry:
                 include_internal_variables=True,
             )
 
+        async def get_preview_effective_policy(claims: dict, metadata: dict) -> dict:
+            return await _simulation_effective_access_policy_for_metadata(claims, metadata)
+
         def get_local_preview_digital_twin_assets(lab_id: str, access_key: str):
             if FMU_BACKEND_MODE != "local":
                 return []
@@ -1048,6 +1052,7 @@ def _get_local_preview_aasx_registry() -> LocalPreviewAasxRegistry:
             get_link_path=_aas_link_path,
             build_aas_shell=fmu_aas_generator.build_aas_shell,
             get_effective_policy=_simulation_effective_access_policy,
+            get_effective_policy_for_metadata=get_preview_effective_policy,
             invalidate_access_policy=_invalidate_aas_access_policy,
             get_digital_twin_assets=get_local_preview_digital_twin_assets,
             get_fmi_ls_related_resources=_aas_fmu_related_resources,
@@ -1227,6 +1232,7 @@ _proxy_router = create_proxy_router(
     derive_gateway_ws_url=_proxy_derive_gateway_ws_url,
     get_authorized_model_metadata=_proxy_get_authorized_model_metadata,
     get_effective_policy=_simulation_effective_access_policy,
+    get_effective_policy_for_metadata=_simulation_effective_access_policy_for_metadata,
     get_authorized_parameter_sets=_catalog_get_authorized_parameter_sets,
     get_authorized_experiments=_catalog_get_authorized_experiments,
     build_proxy_model_description_xml=_proxy_build_model_description_xml,

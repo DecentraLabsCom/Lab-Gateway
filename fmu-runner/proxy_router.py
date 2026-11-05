@@ -28,6 +28,7 @@ def create_proxy_router(
     derive_gateway_ws_url: Any,
     get_authorized_model_metadata: Any,
     get_effective_policy: Any = None,
+    get_effective_policy_for_metadata: Any = None,
     get_authorized_parameter_sets: Any = None,
     get_authorized_experiments: Any = None,
     build_proxy_model_description_xml: Any,
@@ -108,10 +109,22 @@ def create_proxy_router(
         model_metadata = await get_authorized_model_metadata(
             claims=claims,
             requested_fmu_filename=str(fmu_filename),
+            include_internal_variables=True,
         )
         access_policy = None
-        if get_effective_policy is not None:
+        if get_effective_policy_for_metadata is not None:
+            access_policy = await get_effective_policy_for_metadata(claims, model_metadata)
+        elif get_effective_policy is not None:
             access_policy = await get_effective_policy(claims)
+        model_metadata = {
+            **model_metadata,
+            "modelVariables": [
+                variable
+                for variable in model_metadata.get("modelVariables", [])
+                if isinstance(variable, dict) and variable.get("causality") != "local"
+            ],
+        }
+        if access_policy is not None:
             if not isinstance(access_policy, dict) or not isinstance(access_policy.get("variables"), dict):
                 raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
             authorized_interfaces = access_policy.get("authorizedExecutionInterfaces")
