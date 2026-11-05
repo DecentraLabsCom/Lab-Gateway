@@ -92,6 +92,7 @@ from session_observation_service import (
     confirm_session_started as _confirm_session_started_service,
     confirm_session_started_with_retries as _confirm_session_started_with_retries,
     record_browser_session_started as _record_browser_session_started_service,
+    record_redeemed_session_started as _record_redeemed_session_started_service,
 )
 from session_observer_auth import (
     SessionObserverConfigurationError,
@@ -697,7 +698,7 @@ async def _stream_station_simulation(
     is_local_preview: bool = False,
 ):
     station_backend = _get_station_backend()
-    authorization = _extract_authorization_header(request)
+    authorization = _extract_authorization_header(request) or ""
     station_backend.build_authorized_context(
         claims=claims,
         requested_lab_id=req.labId,
@@ -707,11 +708,31 @@ async def _stream_station_simulation(
     # Only the local-preview route may skip production session observations.
     # A claim value alone is never sufficient to select this exception.
     if not is_local_preview:
-        await _record_browser_session_started(request, claims, sim_id)
+        if authorization.startswith("Bearer st_"):
+            await _record_redeemed_session_started_service(
+                authorization[7:].strip(),
+                claims,
+                sim_id,
+                observation_lock=_runner_runtime.observation_lock,
+                observed_credentials=_runner_runtime.observed_credentials,
+                retry_confirmation=_confirm_session_started_with_retries,
+                confirm_session=_confirm_fmu_session_started,
+                max_attempts=FMU_SESSION_OBSERVATION_MAX_ATTEMPTS,
+                sleep=asyncio.sleep,
+            )
+        else:
+            await _record_browser_session_started(request, claims, sim_id)
+    # The ticket is redeemed and the reservation claims are already embedded
+    # in Gateway's trusted Station context. Never forward browser capabilities
+    # to the private Station service.
+    station_authorization = (
+        None if is_local_preview or authorization.startswith(("Bearer st_", "Bearer preview_"))
+        else authorization
+    )
     client, response = await station_backend.open_authorized_simulation_stream(
         claims=claims,
         request_payload=_simulation_request_payload(req, sim_id),
-        authorization=authorization,
+        authorization=station_authorization,
     )
     media_type = response.headers.get("content-type") or "application/x-ndjson"
     normalized_media_type = media_type.split(";", 1)[0].strip().lower()
@@ -746,7 +767,11 @@ async def _stream_station_simulation(
             await response.aclose()
             await client.aclose()
 
-    return StreamingResponse(_forward_stream(), media_type=media_type)
+    return StreamingResponse(
+        _forward_stream(),
+        media_type=media_type,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _collect_runtime_files(*, fmi_version: str, model_identifier: str) -> list[tuple[Path, str]]:
@@ -1289,6 +1314,7 @@ _stream_router = create_stream_router(
     enforce_fmu_claim=_enforce_fmu_claim,
     stream_station_simulation=_stream_station_simulation,
     get_effective_policy=_simulation_effective_access_policy,
+    redeem_session_ticket=_redeem_session_ticket,
 )
 
 _lifespan = create_lifespan(

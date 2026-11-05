@@ -1,8 +1,9 @@
 """HTTP facade for a reservation-scoped FMU result stream."""
 
+import inspect
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from simulation_access_policy import AccessDenied, validate_writes
 from simulation_request import SimulationRequest
@@ -49,16 +50,38 @@ def create_stream_router(
     enforce_fmu_claim: Any,
     stream_station_simulation: Any,
     get_effective_policy: Any = None,
+    redeem_session_ticket: Any = None,
 ) -> APIRouter:
     """Build a streaming route that delegates execution to the Executor."""
     router = APIRouter()
+
+    async def authorize_request(request: Request, req: SimulationRequest) -> dict:
+        authorization = request.headers.get("Authorization", "")
+        token = authorization[7:].strip() if authorization.startswith("Bearer ") else ""
+        if token.startswith("st_"):
+            if redeem_session_ticket is None or not req.labId:
+                raise HTTPException(status_code=401, detail="A valid FMU session ticket and labId are required")
+            claims = await redeem_session_ticket(
+                session_ticket=token,
+                lab_id=req.labId,
+                reservation_key=req.reservationKey,
+            )
+            if not isinstance(claims, dict):
+                raise HTTPException(status_code=401, detail="Invalid FMU session ticket")
+            return claims
+
+        # Keep the existing server-to-server booking-JWT path. The optional
+        # zero-argument form also keeps router composition straightforward in
+        # isolated dependency injection contexts.
+        parameters = inspect.signature(verify_jwt).parameters
+        return await verify_jwt(request) if parameters else await verify_jwt()
 
     @router.post("/api/v1/simulations/stream")
     async def stream_simulation(
         req: SimulationRequest,
         request: Request,
-        claims: dict = Depends(verify_jwt),
     ):
+        claims = await authorize_request(request, req)
         return await stream_authorized_simulation(
             req=req,
             request=request,

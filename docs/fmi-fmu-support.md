@@ -334,6 +334,17 @@ results. Step negotiation, tunable FMI 2/3 parameters, scheduled writes, event h
 subscriptions and rate limits are part of the Executor's
 [runtime contract](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#runtime-capabilities).
 
+The browser batch route `POST /fmu/api/v1/simulations/stream` returns NDJSON.
+Marketplace SDK and generated GLB viewers connect to it directly from the
+browser with a short-lived reservation-bound session ticket in the Bearer
+header; the ticket is not sent to Station. Gateway redeems it, applies the
+effective AAS variable policy, filters streamed values and forwards execution
+through the private Station connection. Gateway CORS must allow the exact
+Marketplace origin. For sandboxed Three.js apps, the Marketplace host page
+makes the request and relays bounded, acknowledged samples to the iframe; the
+opaque-origin iframe does not receive the batch ticket. The generic no-scene
+SimulationRunner retains its same-origin Marketplace server-side stream path.
+
 ### 6. Jobs, batches, and history
 
 Clients can submit one asynchronous simulation or a small batch of parameter scenarios through the

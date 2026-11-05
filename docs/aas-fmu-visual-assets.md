@@ -130,13 +130,16 @@ content-addressed digest; it does not proxy arbitrary URLs. Gateway applies a
 restrictive CSP sandbox to the public app route, and Marketplace serves the app
 entry page in an isolated iframe with its own restrictive CSP and no
 credentials. For a Three.js app, Marketplace's postMessage integration handles
-iframe startup, the one-use connection grant and optional shared HMI controls.
-The app opens the provider Gateway's FMU session WebSocket; FMU requests and
-simulation samples travel directly between the app and Gateway, then to the
-private Station Executor. Marketplace never relays simulation requests or
-samples, and never sends the FMU, access key or reservation token. GLB scenes
-and generated interfaces retain their Marketplace execution path. Generated
-GLB viewers use the batch stream for scheduled runs. For reserved FMI 2/3
+iframe startup, connection authorization and optional shared HMI controls.
+Finite Fastest SDK runs are fetched by the Marketplace host page directly from
+Gateway using a short-lived reservation ticket. The host keeps that ticket out
+of the opaque-origin iframe and relays bounded, acknowledged sample batches
+back to it. Interactive SDK runs open the provider Gateway's FMU session
+WebSocket from the iframe. In both cases, execution continues through the
+private Station Executor; the Marketplace server does not proxy the simulation
+stream. GLB scenes and generated interfaces retain their Marketplace-owned UI
+and execution orchestration. Their Batch mode uses the same direct browser
+POST/NDJSON route. For reserved FMI 2/3
 Co-Simulation models, step-by-step and continuous live modes request the same
 reservation-scoped connection grant used by provider apps, then open the
 Gateway session WebSocket from the Marketplace page. Step mode sends one
@@ -155,8 +158,8 @@ variable-access policy on every write and filters output values returned to the
 browser. The page's exact
 origin must be allowed by the Gateway's `MARKETPLACE_URL` or
 `CORS_ALLOWED_ORIGINS` configuration, and the Marketplace operator must include
-this Gateway's WSS origin in `CSP_CONNECT_SRC` so its browser policy permits the
-direct session connection.
+this Gateway's HTTPS and WSS origins in `CSP_CONNECT_SRC` so its browser policy
+permits direct batch and interactive connections.
 This section documents the AAS asset reference and Gateway storage, validation
 and delivery responsibilities; message names, payloads and lifecycle belong in
 Marketplace's **Three.js digital twin app contract**. The app owns the complete
@@ -191,10 +194,12 @@ sequenceDiagram
     M-->>U: Render generated controls and GLB viewer
     alt Batch
         U->>M: Set inputs and schedule changes
-        M->>G: POST /fmu/api/v1/simulations/stream with reservation authorization
+        M->>G: POST /fmu/api/v1/fmu/connection/{labId} to issue a short-lived ticket
+        G-->>M: Return reservation-scoped ticket
+        M->>G: Browser POST /fmu/api/v1/simulations/stream with ticket in Authorization
         G->>S: Forward execution through the private Station connection
         S-->>G: Stream FMU output samples
-        G-->>M: Return output stream
+        G-->>M: Return output stream directly to the browser page
         M->>M: Apply output values using GLB extras.fmiBindings
         M-->>U: Update the scene, timeline and output indicators
     else Step by step or continuous live
@@ -224,7 +229,7 @@ sequenceDiagram
             end
         end
     end
-    Note over M,S: Batch samples pass through Marketplace. Interactive steps and samples travel directly between the browser and Gateway.
+    Note over M,S: Batch HTTP and interactive WebSocket requests travel from the browser directly to Gateway. For SDK batch, Marketplace's host page relays bounded samples to the isolated iframe; its server does not proxy the stream.
 ~~~
 
 ## AASX and public GLB constraints

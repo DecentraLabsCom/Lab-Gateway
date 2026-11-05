@@ -160,15 +160,24 @@ def create_preview_router(
         request: Request,
         x_local_preview_token: str = Header(default=""),
         x_fmu_access_key: str = Header(default=""),
+        authorization: str = Header(default=""),
     ):
         require_internal_token(x_local_preview_token)
-        claims, policy = await prepare_preview(x_fmu_access_key)
         if stream_simulation is None:
             raise HTTPException(503, "Local FMU simulation is unavailable")
         try:
             payload = await request.json()
         except Exception as exc:
             raise HTTPException(400, "Simulation request must be valid JSON") from exc
+        if authorization.startswith("Bearer preview_"):
+            lab_id = payload.get("labId") if isinstance(payload, dict) else None
+            reservation_key = payload.get("reservationKey") if isinstance(payload, dict) else None
+            if not isinstance(lab_id, str) or not isinstance(reservation_key, str):
+                raise HTTPException(400, "A local preview ticket requires its lab and reservation identity")
+            ticket_claims = tickets.redeem(authorization[7:].strip(), lab_id, reservation_key)
+            claims, policy = await prepare_preview(ticket_claims["accessKey"])
+        else:
+            claims, policy = await prepare_preview(x_fmu_access_key)
         return await stream_simulation(request, payload, claims, policy)
 
     return router
