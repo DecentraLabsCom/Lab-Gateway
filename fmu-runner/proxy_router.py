@@ -48,25 +48,6 @@ def _model_exchange_local_variable_references(metadata: Mapping[str, Any]) -> tu
                     names.update(name for name in dependency_names if isinstance(name, str) and name)
 
     add_structure(metadata.get("modelStructure"))
-    # FMI 3 dimensions may refer to a local UInt64 constant or structural
-    # parameter by value reference. Keep those variables in the proxy
-    # description so array dimensions remain resolvable after filtering.
-    model_variables = metadata.get("modelVariables")
-    if isinstance(model_variables, list):
-        for variable in model_variables:
-            if not isinstance(variable, Mapping):
-                continue
-            dimensions = variable.get("dimensions")
-            if not isinstance(dimensions, list):
-                continue
-            for dimension in dimensions:
-                if not isinstance(dimension, Mapping):
-                    continue
-                add_reference(dimension.get("valueReference"))
-                dimension_name = dimension.get("variableName") or dimension.get("name")
-                if isinstance(dimension_name, str) and dimension_name:
-                    names.add(dimension_name)
-
     fmi_ls_dae = metadata.get("fmiLsDae")
     if isinstance(fmi_ls_dae, Mapping):
         raw_algebraic_names = fmi_ls_dae.get("algebraicVariables")
@@ -88,6 +69,42 @@ def _model_exchange_local_variable_references(metadata: Mapping[str, Any]) -> tu
         add_structure(fmi_ls_dae.get("modelStructure"))
 
     return references, names
+
+
+def _fmi3_dimension_local_constant_references(metadata: Mapping[str, Any]) -> set[int]:
+    """Find local UInt64 constants needed to declare FMI 3 array dimensions.
+
+    These values are part of the proxy's structural description, not an access
+    grant. They must stay in the generated ModelDescription for both CS and ME.
+    """
+    model_variables = metadata.get("modelVariables")
+    if not isinstance(model_variables, list):
+        return set()
+
+    dimension_references: set[int] = set()
+    for variable in model_variables:
+        if not isinstance(variable, Mapping):
+            continue
+        dimensions = variable.get("dimensions")
+        if not isinstance(dimensions, list):
+            continue
+        for dimension in dimensions:
+            if not isinstance(dimension, Mapping):
+                continue
+            reference = dimension.get("valueReference")
+            if type(reference) is int and reference >= 0:
+                dimension_references.add(reference)
+
+    return {
+        reference
+        for variable in model_variables
+        if isinstance(variable, Mapping)
+        and str(variable.get("causality") or "local").lower() == "local"
+        and str(variable.get("type") or "").lower() == "uint64"
+        and str(variable.get("variability") or "").lower() == "constant"
+        and type(reference := variable.get("valueReference")) is int
+        and reference in dimension_references
+    }
 
 
 def create_proxy_router(
@@ -208,9 +225,11 @@ def create_proxy_router(
         # Co-Simulation proxies expose external ports. Model Exchange also
         # needs the local variables referenced by its ModelStructure (states,
         # derivatives, event indicators and their declared dependencies).
-        # Keep those structural variables while excluding unrelated local
-        # implementation details from the downloaded FMI interface.
+        # FMI 3 array dimensions can independently refer to local UInt64
+        # constants; preserve those for either interface without granting
+        # variable access. Exclude unrelated local implementation details.
         required_local_references, required_local_names = _model_exchange_local_variable_references(model_metadata)
+        dimension_constant_references = _fmi3_dimension_local_constant_references(model_metadata)
         model_variables = []
         for variable in model_metadata.get("modelVariables", []):
             if not isinstance(variable, dict):
@@ -222,10 +241,13 @@ def create_proxy_router(
             reference = variable.get("valueReference")
             name = variable.get("name")
             if (
-                "ModelExchange" in authorized_interfaces
-                and (
-                    (type(reference) is int and reference in required_local_references)
-                    or (isinstance(name, str) and name in required_local_names)
+                (type(reference) is int and reference in dimension_constant_references)
+                or (
+                    "ModelExchange" in authorized_interfaces
+                    and (
+                        (type(reference) is int and reference in required_local_references)
+                        or (isinstance(name, str) and name in required_local_names)
+                    )
                 )
             ):
                 model_variables.append(variable)
@@ -237,6 +259,7 @@ def create_proxy_router(
                 model_metadata,
                 include_proxy_dae_selector=True,
                 include_proxy_model_exchange="ModelExchange" in authorized_interfaces,
+                preserve_local_value_references=dimension_constant_references,
             )
             model_metadata["authorizedExecutionInterfaces"] = list(authorized_interfaces)
         else:

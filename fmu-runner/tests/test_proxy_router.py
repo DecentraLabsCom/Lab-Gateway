@@ -238,3 +238,59 @@ def test_proxy_router_omits_local_variables_for_cosimulation_only_proxy():
     assert response.status_code == 200
     proxy_metadata = app.state.model_description_builder.call_args.args[0]
     assert [variable["name"] for variable in proxy_metadata["modelVariables"]] == ["command", "speed"]
+
+
+def test_proxy_router_preserves_local_dimension_constants_for_cosimulation_without_permissions():
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
+        "availableExecutionInterfaces": ["CoSimulation"],
+        "modelVariables": [
+            {"name": "command", "causality": "input", "type": "Float64", "valueReference": 1},
+            {"name": "speed", "causality": "output", "type": "Float64", "valueReference": 2},
+            {"name": "unused_internal", "causality": "local", "type": "Float64", "valueReference": 3},
+            {"name": "m", "causality": "local", "type": "UInt64", "variability": "constant", "valueReference": 90, "start": 2},
+            {"name": "n", "causality": "local", "type": "UInt64", "variability": "constant", "valueReference": 91, "start": 2},
+            {"name": "r", "causality": "local", "type": "UInt64", "variability": "constant", "valueReference": 92, "start": 1},
+            {
+                "name": "state_matrix", "causality": "parameter", "type": "Float64",
+                "valueReference": 41, "dimensions": [{"valueReference": 90}, {"valueReference": 91}],
+            },
+            {
+                "name": "input_vector", "causality": "input", "type": "Float64",
+                "valueReference": 42, "dimensions": [{"valueReference": 92}],
+            },
+        ],
+        "modelStructure": {"outputs": [{"name": "speed", "valueReference": 2, "dependencies": [3]}]},
+    }
+    access_policy = {
+        "variables": {
+            "command": {"read": False, "writeAt": ["initialization"]},
+            "speed": {"read": True, "writeAt": []},
+            "state_matrix": {"read": False, "writeAt": ["initialization"]},
+            "input_vector": {"read": False, "writeAt": ["initialization"]},
+        },
+        "authorizedExecutionInterfaces": ["CoSimulation"],
+    }
+    app, *_ = _build_test_app(
+        claims={"sub": "user-1", "labId": "42", "accessKey": "model.fmu", "reservationKey": "0xabc"},
+        access_policy=access_policy,
+        model_metadata=metadata,
+    )
+
+    response = TestClient(app).get(
+        "/api/v1/fmu/proxy/42?reservationKey=0xabc",
+        headers={"Authorization": "Bearer booking-token"},
+    )
+
+    assert response.status_code == 200
+    proxy_metadata = app.state.model_description_builder.call_args.args[0]
+    variables = proxy_metadata["modelVariables"]
+    assert [variable["name"] for variable in variables] == [
+        "command", "speed", "m", "n", "r", "state_matrix", "input_vector",
+    ]
+    assert {variable["name"]: variable["start"] for variable in variables if variable["name"] in {"m", "n", "r"}} == {
+        "m": 2, "n": 2, "r": 1,
+    }
+    assert not {"m", "n", "r"} & access_policy["variables"].keys()

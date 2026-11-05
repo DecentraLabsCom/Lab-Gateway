@@ -104,11 +104,18 @@ def validate_read_value_references(policy: Mapping[str, Any], value_references: 
 def visible_model_variables(
     policy: Mapping[str, Any],
     metadata: Mapping[str, Any],
+    *,
+    preserve_local_value_references: Collection[int] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return only variable descriptors needed for allowed reads or writes."""
+    """Return accessible variables plus required local dimension descriptors.
+
+    Preserving an immutable descriptor for array-shape metadata does not add
+    read or write permissions for that variable.
+    """
     permissions = policy.get("variables")
     if not isinstance(permissions, Mapping):
-        return []
+        permissions = {}
+    preserved_references = preserve_local_value_references or ()
     visible = []
     for variable in metadata.get("modelVariables", []):
         if not isinstance(variable, Mapping):
@@ -116,11 +123,19 @@ def visible_model_variables(
         name = variable.get("name")
         permission = permissions.get(name) if isinstance(name, str) else None
         if not isinstance(permission, Mapping):
-            continue
+            permission = {}
         readable = permission.get("read") is True
         write_at = permission.get("writeAt")
         writable = isinstance(write_at, list) and bool(write_at)
-        if readable or writable:
+        reference = variable.get("valueReference")
+        required_local_dimension_constant = (
+            str(variable.get("causality") or "local").lower() == "local"
+            and str(variable.get("type") or "").lower() == "uint64"
+            and str(variable.get("variability") or "").lower() == "constant"
+            and type(reference) is int
+            and reference in preserved_references
+        )
+        if readable or writable or required_local_dimension_constant:
             visible.append(dict(variable))
     return visible
 
@@ -131,8 +146,9 @@ def filter_model_description(
     *,
     include_proxy_dae_selector: bool = False,
     include_proxy_model_exchange: bool = False,
+    preserve_local_value_references: Collection[int] | None = None,
 ) -> Any:
-    """Retain readable and writable variables in a realtime description reply."""
+    """Retain accessible variables and explicitly required dimension constants."""
     if not isinstance(payload, Mapping) or not isinstance(payload.get("modelVariables"), list):
         return filter_fmi_values(policy, payload)
     filtered = dict(payload)
@@ -146,12 +162,30 @@ def filter_model_description(
     safe_variables = (
         [dict(variable) for variable in payload.get("modelVariables", []) if isinstance(variable, Mapping)]
         if include_proxy_model_exchange
-        else visible_model_variables(policy, payload)
+        else visible_model_variables(
+            policy,
+            payload,
+            preserve_local_value_references=preserve_local_value_references,
+        )
     )
     for variable in safe_variables:
         name = variable.get("name")
-        permission = policy.get("variables", {}).get(name, {})
-        if not include_proxy_model_exchange and permission.get("read") is not True:
+        permission = permissions.get(name) if isinstance(name, str) else None
+        if not isinstance(permission, Mapping):
+            permission = {}
+        reference = variable.get("valueReference")
+        required_local_dimension_constant = (
+            str(variable.get("causality") or "local").lower() == "local"
+            and str(variable.get("type") or "").lower() == "uint64"
+            and str(variable.get("variability") or "").lower() == "constant"
+            and type(reference) is int
+            and reference in (preserve_local_value_references or ())
+        )
+        if (
+            not include_proxy_model_exchange
+            and permission.get("read") is not True
+            and not required_local_dimension_constant
+        ):
             variable.pop("start", None)
     filtered["modelVariables"] = safe_variables
     if include_proxy_model_exchange:

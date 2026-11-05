@@ -926,6 +926,31 @@ def test_proxy_model_description_with_structural_arrays_passes_fmpy_validation(t
     read_model_description(str(fmu_path), validate=True)
 
 
+def test_proxy_model_description_with_local_dimension_constants_passes_fmpy_validation(tmp_path):
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyLocalDimensionConstantsFmi3",
+        "instantiationToken": "{proxy-guid}",
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
+        "modelVariables": [
+            {"name": "time", "type": "Float64", "causality": "independent", "variability": "continuous", "valueReference": 0},
+            {"name": "m", "type": "UInt64", "causality": "local", "variability": "constant", "valueReference": 90, "start": 2},
+            {"name": "n", "type": "UInt64", "causality": "local", "variability": "constant", "valueReference": 91, "start": 2},
+            {"name": "r", "type": "UInt64", "causality": "local", "variability": "constant", "valueReference": 92, "start": 1},
+            {"name": "A", "type": "Float64", "causality": "parameter", "variability": "tunable", "valueReference": 41, "dimensions": [{"valueReference": 90}, {"valueReference": 91}], "start": [1.0, 0.0, 0.0, 1.0]},
+            {"name": "u", "type": "Float64", "causality": "input", "variability": "continuous", "valueReference": 42, "dimensions": [{"valueReference": 92}], "start": [0.0]},
+        ],
+    })
+    fmu_path = tmp_path / "proxy-local-dimension-constants.fmu"
+    with zipfile.ZipFile(fmu_path, "w") as archive:
+        archive.writestr("modelDescription.xml", xml_bytes)
+
+    model_description = read_model_description(str(fmu_path), validate=True)
+
+    assert [variable.name for variable in model_description.modelVariables] == ["time", "m", "n", "r", "A", "u"]
+
+
 def test_proxy_generation_supports_tunable_structural_dimension_parameters():
     _validate_proxy_generation_supported({
         "fmiVersion": "3.0",
