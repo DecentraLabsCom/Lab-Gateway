@@ -165,6 +165,17 @@ def test_proxy_router_preserves_local_model_exchange_state_variables():
             {"name": "algebraic_state", "causality": "local", "type": "Float64", "valueReference": 60},
             {"name": "residual_value", "causality": "local", "type": "Float64", "valueReference": 70},
             {"name": "unused_internal", "causality": "local", "type": "Float64", "valueReference": 80},
+            {"name": "m", "causality": "local", "type": "UInt64", "variability": "constant", "valueReference": 90, "start": 2},
+            {"name": "n", "causality": "local", "type": "UInt64", "variability": "constant", "valueReference": 91, "start": 2},
+            {"name": "r", "causality": "local", "type": "UInt64", "variability": "constant", "valueReference": 92, "start": 1},
+            {
+                "name": "state_matrix", "causality": "parameter", "type": "Float64",
+                "valueReference": 41, "dimensions": [{"valueReference": 90}, {"valueReference": 91}],
+            },
+            {
+                "name": "input_vector", "causality": "input", "type": "Float64",
+                "valueReference": 42, "dimensions": [{"valueReference": 92}],
+            },
             {"name": "ground", "causality": "parameter", "type": "Float64", "valueReference": 40},
         ],
         "modelStructure": {
@@ -195,7 +206,8 @@ def test_proxy_router_preserves_local_model_exchange_state_variables():
     assert response.status_code == 200
     proxy_metadata = app.state.model_description_builder.call_args.args[0]
     assert [variable["name"] for variable in proxy_metadata["modelVariables"]] == [
-        "height", "der_height", "impact", "internal_factor", "algebraic_state", "residual_value", "ground",
+        "height", "der_height", "impact", "internal_factor", "algebraic_state", "residual_value",
+        "m", "n", "r", "state_matrix", "input_vector", "ground",
     ]
     assert proxy_metadata["modelStructure"] == metadata["modelStructure"]
     assert proxy_metadata["authorizedExecutionInterfaces"] == ["ModelExchange"]

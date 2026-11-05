@@ -48,6 +48,25 @@ def _model_exchange_local_variable_references(metadata: Mapping[str, Any]) -> tu
                     names.update(name for name in dependency_names if isinstance(name, str) and name)
 
     add_structure(metadata.get("modelStructure"))
+    # FMI 3 dimensions may refer to a local UInt64 constant or structural
+    # parameter by value reference. Keep those variables in the proxy
+    # description so array dimensions remain resolvable after filtering.
+    model_variables = metadata.get("modelVariables")
+    if isinstance(model_variables, list):
+        for variable in model_variables:
+            if not isinstance(variable, Mapping):
+                continue
+            dimensions = variable.get("dimensions")
+            if not isinstance(dimensions, list):
+                continue
+            for dimension in dimensions:
+                if not isinstance(dimension, Mapping):
+                    continue
+                add_reference(dimension.get("valueReference"))
+                dimension_name = dimension.get("variableName") or dimension.get("name")
+                if isinstance(dimension_name, str) and dimension_name:
+                    names.add(dimension_name)
+
     fmi_ls_dae = metadata.get("fmiLsDae")
     if isinstance(fmi_ls_dae, Mapping):
         raw_algebraic_names = fmi_ls_dae.get("algebraicVariables")

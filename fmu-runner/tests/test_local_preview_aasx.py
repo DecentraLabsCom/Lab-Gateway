@@ -68,7 +68,7 @@ def test_registry_refuses_a_missing_or_non_aas_policy(tmp_path):
     link_path = tmp_path / f"{claims['labId']}.aas-link.json"
     link_path.write_text("{}", encoding="utf-8")
     registry = LocalPreviewAasxRegistry(
-        get_model_metadata=AsyncMock(),
+        get_model_metadata=AsyncMock(return_value={"modelVariables": []}),
         sync_fmu_to_basyx=AsyncMock(),
         serialize_aasx_resources=AsyncMock(),
         record_aasx=MagicMock(),
