@@ -381,7 +381,7 @@ docker compose --profile fmu-runner up -d --build
 ```
 
 Para ejecución FMU local exclusiva de desarrollo usa `fmu-local-dev`; nunca
-arranques los dos perfiles FMU a la vez. El perfil descarga la imagen versionada del FMU-Executor configurada por `FMU_EXECUTOR_IMAGE` (por defecto `ghcr.io/decentralabscom/fmu-executor:0.3.5`) y delega allí las simulaciones. No hace falta clonar otro repositorio:
+arranques los dos perfiles FMU a la vez. El perfil descarga la imagen versionada del FMU-Executor configurada por `FMU_EXECUTOR_IMAGE` (por defecto `ghcr.io/decentralabscom/fmu-executor:0.3.7`) y delega allí las simulaciones. No hace falta clonar otro repositorio:
 
 `setup.sh` crea `fmu-executor-state/` como directorio privado y persistente
 para el historial y los resultados asociados a cada reserva. La instalación

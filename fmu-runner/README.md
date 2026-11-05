@@ -153,7 +153,7 @@ docker compose --profile fmu-runner up --build fmu-runner
 FMU_RUNNER_ENABLED=true docker compose --profile fmu-local-dev up --build fmu-runner-local
 ```
 
-The local profile pulls `ghcr.io/decentralabscom/fmu-executor:0.3.4` by default.
+The local profile pulls `ghcr.io/decentralabscom/fmu-executor:0.3.7` by default.
 Set `FMU_EXECUTOR_IMAGE` in `.env` to select another released image tag. No
 FMU-Executor source checkout is required. Station mode and the local profile
 require FMU Executor 0.3.4 or newer for the asynchronous job, batch, status,
