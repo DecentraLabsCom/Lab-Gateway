@@ -129,16 +129,27 @@ prepares the Windows host and cleans the session, while Guacamole launches
 | --- | --- |
 | Program | The Lab Station launcher, for example `AppControl.exe`, or its full path. |
 | Working directory | The folder that contains the Lab Station executable. |
-| Parameters | Lab Station window-class and application-path arguments, followed by any lab-application-specific arguments. |
+| Parameters, one application | The existing `AppControl.exe` form: window class, executable path, and optional application arguments. |
+| Parameters, workspace | `@workspace=<id>`, where `<id>` names an administrator-managed manifest on the station. |
+
+The single-application form is unchanged. A workspace manifest defines two to
+five applications in tabs and is stored at
+`%ProgramData%\DecentraLabs\Lab Station\RemoteApp\workspaces\<id>.json`.
+Run `LabStation.exe remoteapp` or the setup wizard as an administrator to
+create and protect the manifest directory before adding workspace files.
+`LABUSER` receives read-only access. See the Lab Station
+[AppControl guide](https://github.com/DecentraLabsCom/Lab-Station/blob/main/remote-app/README.md)
+for the manifest fields and limitations.
 
 Do not rely on Lab Station Windows Run entries to launch AppControl. A plain
 desktop RDP connection is suitable for station diagnostics or maintenance; an
 end-user laboratory connection must provide the Remote App parameters so the
 application starts inside the Guacamole session.
 
-Use the [Lab Station documentation](https://github.com/DecentraLabsCom/Lab-Station/blob/main/README.md)
-to determine the exact window class and supported launch parameters. Test this
-configuration with the dedicated lab account, not an administrator account.
+Use the [Lab Station documentation](https://github.com/DecentraLabsCom/Lab-Station/blob/main/remote-app/README.md)
+to determine the exact window class or workspace ID and supported launch
+parameters. Test this configuration with the dedicated lab account, not an
+administrator account.
 
 ## Validate and publish
 

@@ -70,6 +70,15 @@ reservation-specific Windows account. For a Lab Station connection, the RDP
 credentials (including `LABUSER`) and RemoteApp parameters come from that
 connection.
 
+RemoteApp parameters and the selected workspace are connection-scoped. The
+current reservation provisioner grants each temporary Guacamole user access to
+the selected existing connection; it does not create a reservation-specific
+RemoteApp configuration or Windows workspace. Therefore, reservations using
+the same connection launch the same `AppControl.exe` parameters and workspace
+manifest. To assign different applications or a different workspace to each
+reservation, the Gateway would need to select or provision a separate
+Guacamole connection for each workspace.
+
 Guacamole's `drive-path` is a connection parameter, and Guacamole supports
 per-user tokens in connection parameter values. With **Drive path** set to
 `/tmp/${GUAC_USERNAME}`, Guacamole resolves a separate path for each
