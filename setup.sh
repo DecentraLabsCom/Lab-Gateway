@@ -414,7 +414,9 @@ configure_station_lan_overlay() {
     fi
     read -p "Reserved Docker macvlan range [${current_ip_range:-required, e.g. 10.192.38.240/28}]: " station_ip_range
     station_ip_range="${station_ip_range:-$current_ip_range}"
-    echo "Choose two unused host IPs excluded from DHCP; these addresses must stay reserved for the Gateway services."
+    echo "Exclude the complete range ${station_ip_range} from the actual DHCP server (router or dnsmasq on this host)."
+    echo "setup.sh configures Compose only; it does not edit DHCP. Check leases before changing the pool."
+    echo "Choose two unused host IPs inside the excluded range; keep them reserved for the Gateway services."
     read -p "Fixed guacd IPv4 inside the reserved range [${current_guacd_ipv4:-required, e.g. 10.192.38.241}]: " station_guacd_ipv4
     station_guacd_ipv4="${station_guacd_ipv4:-$current_guacd_ipv4}"
     read -p "Fixed ops-worker IPv4 inside the reserved range [${current_ops_worker_ipv4:-required, e.g. 10.192.38.242}]: " station_ops_worker_ipv4

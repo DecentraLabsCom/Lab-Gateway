@@ -210,8 +210,13 @@ WOL_LAN_OPS_WORKER_IPV4=10.192.38.242
 # WOL_LAN_GATEWAY=10.192.38.1
 ```
 
-Reserve `WOL_LAN_IP_RANGE` from the LAN's DHCP server. Choose two distinct,
-unused host addresses inside that range for `WOL_LAN_GUACD_IPV4` and
+Exclude `WOL_LAN_IP_RANGE` from the dynamic pool of the actual DHCP server,
+whether it runs on the router or as `dnsmasq` on the Gateway host. Docker IPAM
+does not coordinate with DHCP, and Compose/setup.sh do not change the DHCP
+service. Check leases before changing an existing pool. For the example `/24`
+and `.240/28` range, reserve hosts `.240–.254` for macvlan, end DHCP at `.239`
+or earlier, and keep `.255` as broadcast. Choose two distinct unused host
+addresses inside the reserved range for `WOL_LAN_GUACD_IPV4` and
 `WOL_LAN_OPS_WORKER_IPV4`; Compose keeps those service addresses stable when
 the containers are recreated. The overlay always gives WoL broadcasts and
 Station management (WinRM/SSH) or RDP targets in

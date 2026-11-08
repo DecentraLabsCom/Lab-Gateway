@@ -124,10 +124,17 @@ WOL_LAN_OPS_WORKER_IPV4=10.192.38.242
 # WOL_LAN_GATEWAY=10.192.38.1
 ```
 
-Reserve `WOL_LAN_IP_RANGE` from the VLAN's DHCP server. Choose two distinct,
-unused host addresses inside that range for `guacd` and `ops-worker`. Compose
-pins them so the RDP and WinRM source addresses remain stable after container
-recreation. `WOL_LAN_GATEWAY` is optional for an isolated VLAN; if configured,
+Exclude `WOL_LAN_IP_RANGE` from the dynamic pool of the actual DHCP server,
+whether that is the router or `dnsmasq` running on the Gateway host. Docker IPAM
+does not coordinate with DHCP, and neither Compose nor `setup.sh` modifies that
+service. Check leases before changing an existing pool. For example, with a
+`/24` subnet and `WOL_LAN_IP_RANGE=10.192.38.240/28`, reserve hosts `.240–.254`
+for macvlan and end the DHCP pool at `.239` or earlier; `.255` is broadcast. If
+`dnsmasq` loads `/etc/dnsmasq.d` through `conf-dir`, keep backup files outside
+that directory. Choose two distinct unused host addresses inside the reserved
+range for `guacd` and `ops-worker`. Compose pins them so the RDP and WinRM source
+addresses remain stable after container recreation. `WOL_LAN_GATEWAY` is
+optional for an isolated VLAN; if configured,
 it must be the Station VLAN router. The overlay is Linux-only and preserves
 the services' existing private Compose networks. Validate it with
 `docker compose config --quiet` before starting the stack.

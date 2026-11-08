@@ -1,6 +1,8 @@
 # Linux-only overlay for Wake-on-LAN and Guacamole targets on the physical
 # laboratory LAN. Keep the base Compose file portable; activate this overlay
 # on gateways whose parent interface reaches the station VLAN.
+# Docker IPAM does not reserve addresses in DHCP; exclude WOL_LAN_IP_RANGE from
+# the DHCP scope configured on the router or on the Linux host.
 # The Station VLAN is directly attached to the parent interface. The optional
 # gateway is left empty for an isolated VLAN; when configured, it provides the
 # route for targets outside the directly connected subnet. WoL broadcasts and

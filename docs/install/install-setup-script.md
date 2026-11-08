@@ -115,8 +115,11 @@ The script guides you through the following steps automatically:
    inside the reserved range. It writes `COMPOSE_FILE`, `WOL_LAN_PARENT`,
    `WOL_LAN_SUBNET`, `WOL_LAN_IP_RANGE`, `WOL_LAN_GUACD_IPV4`, and
    `WOL_LAN_OPS_WORKER_IPV4` to `.env`, plus `WOL_LAN_GATEWAY` when routed mode
-   is selected. Reserve the range from DHCP. Leave the gateway empty for an
-   isolated VLAN. On Windows,
+   is selected. Exclude `WOL_LAN_IP_RANGE` from the actual DHCP server's dynamic
+   pool; that may be the router or dnsmasq on the Gateway host. The wizard only
+   configures Compose and does not edit host/router DHCP. Check existing leases
+   before changing a pool. Leave `WOL_LAN_GATEWAY` empty for an isolated VLAN.
+   On Windows,
    `setup.bat` leaves this Linux-only overlay disabled. The script then
    configures FMU access and, for Full Gateways, bundled, external, or disabled
    AAS support. Leave the CIDR empty only when no Ops hosts are configured yet.

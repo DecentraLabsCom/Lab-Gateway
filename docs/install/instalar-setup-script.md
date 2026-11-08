@@ -116,7 +116,11 @@ El script te guía automáticamente por los siguientes pasos:
    entre sí. Escribe `COMPOSE_FILE`, `WOL_LAN_PARENT`, `WOL_LAN_SUBNET`,
    `WOL_LAN_IP_RANGE`, `WOL_LAN_GUACD_IPV4` y `WOL_LAN_OPS_WORKER_IPV4` en
    `.env`, además de `WOL_LAN_GATEWAY` cuando se selecciona el modo con gateway.
-   Reserva el rango en DHCP. Déjalo vacío para una VLAN aislada. En Windows,
+   Excluye `WOL_LAN_IP_RANGE` del pool dinámico del servidor DHCP real, que
+   puede ser el router o `dnsmasq` del propio Gateway. El wizard solo configura
+   Compose; no modifica el servicio DHCP del host/router. Comprueba leases antes
+   de cambiar un pool existente. Deja `WOL_LAN_GATEWAY` vacío para una VLAN
+   aislada. En Windows,
    `setup.bat` deja desactivado este
    overlay exclusivo de Linux. Después configura FMU y, únicamente en Full,
    AAS integrado, externo o deshabilitado. Déjala vacía solo si todavía no se
