@@ -308,11 +308,15 @@ configure_station_lan_overlay() {
     local current_subnet
     local current_ip_range
     local current_gateway
+    local current_guacd_ipv4
+    local current_ops_worker_ipv4
     local station_parent
     local station_subnet
     local station_ip_range
     local station_gateway_answer
     local station_gateway
+    local station_guacd_ipv4
+    local station_ops_worker_ipv4
 
     system_name="$(uname -s 2>/dev/null || true)"
     if [ "$system_name" != "Linux" ]; then
@@ -324,6 +328,8 @@ configure_station_lan_overlay() {
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET"
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE"
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GUACD_IPV4"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_OPS_WORKER_IPV4"
         echo
         return
     fi
@@ -333,6 +339,8 @@ configure_station_lan_overlay() {
     current_subnet="$(get_env_default "WOL_LAN_SUBNET" "$ROOT_ENV_FILE")"
     current_ip_range="$(get_env_default "WOL_LAN_IP_RANGE" "$ROOT_ENV_FILE")"
     current_gateway="$(get_env_default "WOL_LAN_GATEWAY" "$ROOT_ENV_FILE")"
+    current_guacd_ipv4="$(get_env_default "WOL_LAN_GUACD_IPV4" "$ROOT_ENV_FILE")"
+    current_ops_worker_ipv4="$(get_env_default "WOL_LAN_OPS_WORKER_IPV4" "$ROOT_ENV_FILE")"
     station_lan_overlay="N"
     if compose_file_contains_wol_overlay "$current_compose_file"; then
         station_lan_overlay="Y"
@@ -366,6 +374,8 @@ configure_station_lan_overlay() {
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET"
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE"
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GUACD_IPV4"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_OPS_WORKER_IPV4"
         echo "   * Physical Station LAN overlay disabled."
         echo
         return
@@ -404,12 +414,18 @@ configure_station_lan_overlay() {
     fi
     read -p "Reserved Docker macvlan range [${current_ip_range:-required, e.g. 10.192.38.240/28}]: " station_ip_range
     station_ip_range="${station_ip_range:-$current_ip_range}"
-    if [ -z "$station_subnet" ] || [ -z "$station_ip_range" ]; then
-        echo "The Station subnet and reserved Docker range are required when the overlay is enabled." >&2
+    echo "Choose two unused host IPs excluded from DHCP; these addresses must stay reserved for the Gateway services."
+    read -p "Fixed guacd IPv4 inside the reserved range [${current_guacd_ipv4:-required, e.g. 10.192.38.241}]: " station_guacd_ipv4
+    station_guacd_ipv4="${station_guacd_ipv4:-$current_guacd_ipv4}"
+    read -p "Fixed ops-worker IPv4 inside the reserved range [${current_ops_worker_ipv4:-required, e.g. 10.192.38.242}]: " station_ops_worker_ipv4
+    station_ops_worker_ipv4="${station_ops_worker_ipv4:-$current_ops_worker_ipv4}"
+    if [ -z "$station_subnet" ] || [ -z "$station_ip_range" ] \
+        || [ -z "$station_guacd_ipv4" ] || [ -z "$station_ops_worker_ipv4" ]; then
+        echo "The Station subnet, reserved Docker range, and both static service IPs are required when the overlay is enabled." >&2
         exit 1
     fi
 
-    if ! "$setup_python_cmd" - "$station_subnet" "$station_ip_range" "$station_gateway" <<'PY'
+    if ! "$setup_python_cmd" - "$station_subnet" "$station_ip_range" "$station_gateway" "$station_guacd_ipv4" "$station_ops_worker_ipv4" <<'PY'
 import ipaddress
 import sys
 
@@ -417,12 +433,14 @@ try:
     subnet = ipaddress.ip_network(sys.argv[1], strict=True)
     ip_range = ipaddress.ip_network(sys.argv[2], strict=True)
     gateway = ipaddress.ip_address(sys.argv[3]) if sys.argv[3] else None
+    guacd_ipv4 = ipaddress.ip_address(sys.argv[4])
+    ops_worker_ipv4 = ipaddress.ip_address(sys.argv[5])
 except ValueError as exc:
-    print(f"Invalid Station subnet, Docker range or gateway: {exc}", file=sys.stderr)
+    print(f"Invalid Station subnet, Docker range, gateway or static service IP: {exc}", file=sys.stderr)
     raise SystemExit(1)
 
-if subnet.version != 4 or ip_range.version != 4:
-    print("The Station subnet and Docker range must be IPv4 networks.", file=sys.stderr)
+if subnet.version != 4 or ip_range.version != 4 or guacd_ipv4.version != 4 or ops_worker_ipv4.version != 4:
+    print("The Station subnet, Docker range and static service IPs must use IPv4.", file=sys.stderr)
     raise SystemExit(1)
 if not ip_range.subnet_of(subnet):
     print("The Docker macvlan range must be contained in the Station subnet.", file=sys.stderr)
@@ -440,6 +458,19 @@ if gateway is not None:
     if gateway in ip_range:
         print("The Station gateway cannot be inside the reserved Docker range.", file=sys.stderr)
         raise SystemExit(1)
+if guacd_ipv4 == ops_worker_ipv4:
+    print("guacd and ops-worker must use different static IP addresses.", file=sys.stderr)
+    raise SystemExit(1)
+for label, address in (("guacd", guacd_ipv4), ("ops-worker", ops_worker_ipv4)):
+    if address not in subnet or address in (subnet.network_address, subnet.broadcast_address):
+        print(f"The {label} static IP must be a usable address inside the Station subnet.", file=sys.stderr)
+        raise SystemExit(1)
+    if address not in ip_range or address in (ip_range.network_address, ip_range.broadcast_address):
+        print(f"The {label} static IP must be a usable address inside the reserved Docker range.", file=sys.stderr)
+        raise SystemExit(1)
+    if gateway == address:
+        print(f"The {label} static IP cannot equal the Station gateway.", file=sys.stderr)
+        raise SystemExit(1)
 PY
     then
         exit 1
@@ -449,6 +480,8 @@ PY
     update_env_var "$ROOT_ENV_FILE" "WOL_LAN_PARENT" "$station_parent"
     update_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET" "$station_subnet"
     update_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE" "$station_ip_range"
+    update_env_var "$ROOT_ENV_FILE" "WOL_LAN_GUACD_IPV4" "$station_guacd_ipv4"
+    update_env_var "$ROOT_ENV_FILE" "WOL_LAN_OPS_WORKER_IPV4" "$station_ops_worker_ipv4"
     if [ -n "$station_gateway" ]; then
         update_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY" "$station_gateway"
     else
@@ -456,6 +489,8 @@ PY
     fi
     echo "   * Physical Station LAN overlay enabled."
     echo "   * COMPOSE_FILE includes docker-compose.wol.yml."
+    echo "   * guacd static IPv4: $station_guacd_ipv4."
+    echo "   * ops-worker static IPv4: $station_ops_worker_ipv4."
     if [ -n "$station_gateway" ]; then
         echo "   * Station LAN gateway configured: $station_gateway."
     else

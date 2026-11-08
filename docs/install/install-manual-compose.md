@@ -108,6 +108,30 @@ For several Stations on the same `/24`, use that actual subnet instead, for
 example `10.192.38.0/24`. On a Lite gateway, configure the CIDR of the local
 Stations managed by that Lite gateway.
 
+### Optional Linux physical Station LAN overlay
+
+If the Linux Gateway's physical NIC reaches the Station VLAN and `guacd` needs
+direct RDP access or `ops-worker` needs WoL/management access, enable the
+macvlan overlay in `.env`:
+
+```env
+COMPOSE_FILE=docker-compose.yml:docker-compose.wol.yml
+WOL_LAN_PARENT=eno3
+WOL_LAN_SUBNET=10.192.38.0/24
+WOL_LAN_IP_RANGE=10.192.38.240/28
+WOL_LAN_GUACD_IPV4=10.192.38.241
+WOL_LAN_OPS_WORKER_IPV4=10.192.38.242
+# WOL_LAN_GATEWAY=10.192.38.1
+```
+
+Reserve `WOL_LAN_IP_RANGE` from the VLAN's DHCP server. Choose two distinct,
+unused host addresses inside that range for `guacd` and `ops-worker`. Compose
+pins them so the RDP and WinRM source addresses remain stable after container
+recreation. `WOL_LAN_GATEWAY` is optional for an isolated VLAN; if configured,
+it must be the Station VLAN router. The overlay is Linux-only and preserves
+the services' existing private Compose networks. Validate it with
+`docker compose config --quiet` before starting the stack.
+
 For a Full gateway, configure the credentials used by opaque access-code
 redemption and FMU session observation. The JSON values must be valid JSON
 objects. `SERVER_NAME` remains hostname-only for URL construction; the

@@ -8,11 +8,13 @@
 services:
   guacd:
     networks:
-      - wol_lan
+      wol_lan:
+        ipv4_address: ${WOL_LAN_GUACD_IPV4:?WOL_LAN_GUACD_IPV4 must be configured}
 
   ops-worker:
     networks:
-      - wol_lan
+      wol_lan:
+        ipv4_address: ${WOL_LAN_OPS_WORKER_IPV4:?WOL_LAN_OPS_WORKER_IPV4 must be configured}
 
 networks:
   wol_lan:

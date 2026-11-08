@@ -1235,6 +1235,8 @@ call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_PARENT"
 call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_SUBNET"
 call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_IP_RANGE"
 call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_GATEWAY"
+call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_GUACD_IPV4"
+call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_OPS_WORKER_IPV4"
 exit /b
 
 :RemoveWolOverlayFromComposeFile

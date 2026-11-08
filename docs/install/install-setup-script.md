@@ -111,9 +111,12 @@ The script guides you through the following steps automatically:
    on Linux, whether to activate the direct physical Station LAN WoL overlay.
    When enabled, it asks for the parent NIC, Station subnet, whether the VLAN
    has a router, the optional gateway address, and the reserved macvlan range.
-   It writes `COMPOSE_FILE`, `WOL_LAN_PARENT`, `WOL_LAN_SUBNET`, and
-   `WOL_LAN_IP_RANGE` to `.env`, plus `WOL_LAN_GATEWAY` when routed mode is
-   selected. Leave the gateway empty for an isolated VLAN. On Windows,
+   It also asks for distinct fixed IPv4 addresses for `guacd` and `ops-worker`
+   inside the reserved range. It writes `COMPOSE_FILE`, `WOL_LAN_PARENT`,
+   `WOL_LAN_SUBNET`, `WOL_LAN_IP_RANGE`, `WOL_LAN_GUACD_IPV4`, and
+   `WOL_LAN_OPS_WORKER_IPV4` to `.env`, plus `WOL_LAN_GATEWAY` when routed mode
+   is selected. Reserve the range from DHCP. Leave the gateway empty for an
+   isolated VLAN. On Windows,
    `setup.bat` leaves this Linux-only overlay disabled. The script then
    configures FMU access and, for Full Gateways, bundled, external, or disabled
    AAS support. Leave the CIDR empty only when no Ops hosts are configured yet.
