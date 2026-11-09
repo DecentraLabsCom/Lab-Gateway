@@ -1834,6 +1834,7 @@ test('renders the complete station status card with truthful empty and configure
           winrmConfigured: true,
           winrmTrustConfigured: true,
           winrmTrustStatus: 'ready',
+          contractVersion: '2.x',
           guacamole: {
             status: 'multiple',
             connections: [
@@ -1861,7 +1862,9 @@ test('renders the complete station status card with truthful empty and configure
   assert.match(row.rawInnerHTML, /WinRM TLS trust: <button type="button" class="host-status-action" data-action="manage-winrm-trust"[^>]*>[\s\S]*<span class="host-status-text good">ready<\/span>/);
   assert.match(row.rawInnerHTML, /Forced logoff: not available/);
   assert.match(row.rawInnerHTML, /Power action: not available/);
-  assert.match(row.rawInnerHTML, /class="pill bad ready-indicator"[^>]*>Not ready/);
+  assert.match(row.rawInnerHTML, /class="pill warn ready-indicator"[^>]*>Readiness unknown/);
+  assert.doesNotMatch(row.rawInnerHTML, />Not ready/);
+  assert.match(row.rawInnerHTML, /Station contract: not reported \(configured: 2\.x\)/);
   assert.match(row.rawInnerHTML, /No connector readiness reported by Lab Station\./);
   assert.doesNotMatch(row.rawInnerHTML, /Ready:/);
   assert.match(row.rawInnerHTML, /Active session: n\/a/);

@@ -267,8 +267,8 @@
                 };
             }
             return {
-                label: 'Not ready',
-                className: 'bad',
+                label: 'Readiness unknown',
+                className: 'warn',
                 tooltip: 'No connector readiness reported by Lab Station.',
             };
         }
@@ -294,6 +294,11 @@
             const transport = String(meta.managementTransport || 'winrm').toLowerCase();
             const transportLabel = transport === 'ssh' ? 'SSH' : 'WinRM';
             const platformLabel = String(meta.platform || (transport === 'ssh' ? 'linux' : 'windows')).toUpperCase();
+            const reportedContractVersion = data.normalized?.contractVersion
+                || heartbeat.schemaVersion || status.schemaVersion || 'not reported';
+            const configuredContractMarkup = meta.contractVersion
+                ? ` (configured: ${escapeHtml(meta.contractVersion)})`
+                : '';
             const credentialsConfigured = meta.managementCredentials?.configured === true
                 || (transport === 'winrm' && Boolean(meta.winrmConfigured));
             const readiness = getReadinessDisplay(heartbeat, summary);
@@ -375,7 +380,7 @@
                 </div>
                 <div class="host-meta host-address">Address: <span class="mono">${safeAddress}</span></div>
                 <div class="host-meta">Connections: ${guacamoleStatusMarkup}</div>
-                <div class="host-meta">Platform: ${escapeHtml(platformLabel)} · Station contract: ${escapeHtml(meta.contractVersion || 'unknown')}</div>
+                <div class="host-meta">Platform: ${escapeHtml(platformLabel)} · Station contract: ${escapeHtml(reportedContractVersion)}${configuredContractMarkup}</div>
                 <div class="host-meta">Management: ${escapeHtml(transportLabel)}:${escapeHtml(meta.managementPort || (transport === 'ssh' ? 22 : 5986))}</div>
                 <div class="host-meta">${escapeHtml(transportLabel)} credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update ${escapeHtml(transportLabel)} management credentials" aria-label="Set or update ${escapeHtml(transportLabel)} management credentials"><span class="host-status-text ${credentialsConfigured ? 'good' : 'warn'}">${credentialsConfigured ? 'configured' : 'missing'}</span></button></div>
                 <div class="host-meta">${escapeHtml(transport === 'ssh' ? 'SSH host-key trust' : 'WinRM TLS trust')}: <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage ${escapeHtml(transportLabel)} trust" aria-label="Manage ${escapeHtml(transportLabel)} trust"><span class="host-status-text ${winrmTrust.className}">${escapeHtml(winrmTrust.label)}</span></button></div>

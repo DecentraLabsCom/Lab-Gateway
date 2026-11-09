@@ -322,6 +322,8 @@ test('host row renderer keeps missing heartbeat and trust states public', () => 
 
   assert.match(html, /Address: <span class="mono">n\/a<\/span>/);
   assert.match(html, /Heartbeat: not available/);
+  assert.match(html, /class="pill warn ready-indicator"[^>]*>Readiness unknown/);
+  assert.doesNotMatch(html, />Not ready/);
   assert.doesNotMatch(html, /Last heartbeat:/);
   assert.match(html, /class="ready-indicator-tooltip"/);
   assert.doesNotMatch(html, /ready-indicator-tooltip-good/);
@@ -332,6 +334,33 @@ test('host row renderer keeps missing heartbeat and trust states public', () => 
   assert.match(html, /WinRM credentials:[\s\S]*class="host-status-text warn">missing/);
   assert.match(html, /WinRM TLS trust:[\s\S]*class="host-status-text warn">missing/);
   assert.doesNotMatch(html, /data-action="edit-host"/);
+});
+
+test('host row renderer does not infer readiness from an incomplete heartbeat', () => {
+  const renderer = loadRenderers().createController(dependencies());
+  const html = renderer.renderHostRowMarkup('PC-Siemens', {
+    heartbeat: { timestamp: '2026-11-09T10:00:00Z', status: {} },
+  });
+
+  assert.match(html, /class="pill warn ready-indicator"[^>]*>Readiness unknown/);
+  assert.doesNotMatch(html, />Not ready/);
+});
+
+test('host row renderer separates configured and reported Station contracts', () => {
+  const renderer = loadRenderers().createController(dependencies());
+  const meta = { contractVersion: '2.x', winrmConfigured: true, winrmTrustStatus: 'ready' };
+  const unreported = renderer.renderHostRowMarkup('PC-Siemens', {}, meta);
+
+  assert.match(unreported, /Station contract: not reported \(configured: 2\.x\)/);
+
+  for (const data of [
+    { heartbeat: { schemaVersion: '3.0.0' } },
+    { heartbeat: { status: { schemaVersion: '3.0.0' } } },
+    { heartbeat: {}, normalized: { contractVersion: '3.0.0' } },
+  ]) {
+    const html = renderer.renderHostRowMarkup('PC-Siemens', data, meta);
+    assert.match(html, /Station contract: 3\.0\.0 \(configured: 2\.x\)/);
+  }
 });
 
 test('candidate renderer preserves discovery statuses and provisioning guard', () => {
