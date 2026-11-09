@@ -243,7 +243,10 @@ test('host row renderer shows concrete connector states and scoped readiness rea
         fmu: { ready: false, issues: ['FMU executor is not running'] },
       },
     },
-  }, {});
+  }, { hasStationFmuLab: false }, {
+    backendMode: 'station',
+    stationHost: 'station-remote-app',
+  });
   assert.match(remoteAppHtml, /class="pill good ready-indicator"[^>]*>Physical lab/);
   assert.match(
     remoteAppHtml,
@@ -262,12 +265,15 @@ test('host row renderer shows concrete connector states and scoped readiness rea
         fmu: { ready: true, issues: [] },
       },
     },
-  }, {});
-  assert.match(fmuHtml, /class="pill good ready-indicator"[^>]*>FMI\/FMU/);
-  assert.match(fmuHtml, /FMI\/FMU ready\./);
-  assert.doesNotMatch(fmuHtml, /Physical lab: WinRM not ready/);
+  }, { hasStationFmuLab: true }, {
+    backendMode: 'station',
+    stationHost: 'station-fmu',
+  });
+  assert.match(fmuHtml, /class="pill bad ready-indicator"[^>]*>Not ready/);
+  assert.match(fmuHtml, /Physical lab: WinRM not ready/);
+  assert.doesNotMatch(fmuHtml, /FMI\/FMU: FMU executor/);
   assert.doesNotMatch(fmuHtml, /Ready:/);
-  assert.match(fmuHtml, /class="ready-indicator-tooltip ready-indicator-tooltip-good"/);
+  assert.doesNotMatch(fmuHtml, /ready-indicator-tooltip-good/);
 
   const allConnectorsHtml = renderer.renderHostRowMarkup('station-all-connectors', {
     heartbeat: {
@@ -278,7 +284,10 @@ test('host row renderer shows concrete connector states and scoped readiness rea
         fmu: { ready: true, issues: [] },
       },
     },
-  }, {});
+  }, { hasStationFmuLab: true }, {
+    backendMode: 'station',
+    stationHost: 'station-all-connectors',
+  });
   assert.match(allConnectorsHtml, /class="pill good">Physical lab · FMI\/FMU/);
   assert.doesNotMatch(allConnectorsHtml, /ready-indicator-tooltip/);
 
@@ -300,7 +309,10 @@ test('host row renderer shows concrete connector states and scoped readiness rea
         fmu: { ready: false, issues: ['FMU executor is not running'] },
       },
     },
-  }, {});
+  }, { hasStationFmuLab: true }, {
+    backendMode: 'station',
+    stationHost: 'station-unavailable',
+  });
   assert.match(unavailableHtml, /class="pill bad ready-indicator"[^>]*>Not ready/);
   assert.match(
     unavailableHtml,
