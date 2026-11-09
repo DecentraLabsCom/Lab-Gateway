@@ -175,12 +175,14 @@ Ops Worker credential store, not in `hosts.json`.
 Until both credentials and certificate trust are ready, heartbeat streaming is
 not started for that host.
 
-The host card reports credentials and certificate trust separately:
+The host card groups both statuses in one row, for example
+`WinRM credentials / TLS: configured / ready`. Click the first status to manage
+credentials or the second to manage TLS trust:
 
-- `WinRM credentials: missing` means no user/password is stored;
-- `WinRM TLS trust: missing` means credentials exist but no valid Station
+- credentials `missing` means no user/password is stored;
+- TLS `missing` means credentials exist but no valid Station
   certificate has been saved in the Gateway's per-host trust store;
-- `WinRM TLS trust: ready` means the Gateway can parse the local certificate and
+- TLS `ready` means the Gateway can parse the local certificate and
   it is currently within its validity period; and
 - `expired`, `not yet valid`, or `invalid` identify a certificate that cannot be
   used.
@@ -191,7 +193,7 @@ served by the Station matches the trusted certificate.
 
 ### Manage WinRM TLS trust
 
-Click the `WinRM TLS trust` status in the host card to open its certificate
+Click the TLS status in the `WinRM credentials / TLS` row to open its certificate
 panel. The panel is the single entry point for this host's trust lifecycle:
 
 1. Select the public certificate exported by Lab Station, normally

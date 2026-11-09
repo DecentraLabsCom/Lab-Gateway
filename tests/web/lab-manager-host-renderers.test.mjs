@@ -343,8 +343,7 @@ test('host row renderer keeps missing heartbeat and trust states public', () => 
   assert.doesNotMatch(html, /<div class="host-meta host-history">\s*<span class="host-history-item">Heartbeat:/);
   assert.match(html, /Forced logoff: not available/);
   assert.match(html, /Connections: <span class="host-status-text bad">No connections<\/span>/);
-  assert.match(html, /WinRM credentials:[\s\S]*class="host-status-text warn">missing/);
-  assert.match(html, /WinRM TLS trust:[\s\S]*class="host-status-text warn">missing/);
+  assert.match(html, /WinRM credentials \/ TLS: <button[^>]*data-action="set-winrm-credentials"[^>]*><span class="host-status-text warn">missing<\/span><\/button> \/ <button[^>]*data-action="manage-winrm-trust"[^>]*><span class="host-status-text warn">missing<\/span><\/button><\/div>/);
   assert.doesNotMatch(html, /data-action="edit-host"/);
 });
 
