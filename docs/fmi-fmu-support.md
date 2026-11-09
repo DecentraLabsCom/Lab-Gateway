@@ -342,8 +342,9 @@ effective AAS variable policy, filters streamed values and forwards execution
 through the private Station connection. Gateway CORS must allow the exact
 Marketplace origin. For sandboxed Three.js apps, the Marketplace host page
 makes the request and relays bounded, acknowledged samples to the iframe; the
-opaque-origin iframe does not receive the batch ticket. The generic no-scene
-SimulationRunner retains its same-origin Marketplace server-side stream path.
+opaque-origin iframe does not receive the batch ticket. For FMUs without a
+linked GLB scene or Three.js app, Marketplace provides a proxy-FMU download
+guide; an external FMI tool drives execution through the generated proxy.
 
 ### 6. Jobs, batches, and history
 

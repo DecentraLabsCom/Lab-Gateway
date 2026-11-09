@@ -22,9 +22,10 @@ MIME type and therefore Marketplace's viewer:
 POST /aas-admin/fmu/{accessKey}/sync?labId={labId}&digitalTwinAssetUrl={encoded-Gateway-asset-path}
 ~~~
 
-The visual link is optional: FMU simulation and the standard results viewer
-continue to work when it is omitted or AAS is unavailable. Lab Manager defaults
-to automatic discovery. It reads local visual assets declared in the
+The visual link is optional. When no GLB scene or Three.js app is linked or
+discoverable, Marketplace provides a proxy-FMU download guide for execution
+with an external FMI tool. Lab Manager defaults to automatic discovery. It
+reads local visual assets declared in the
 FMI-LS-REF manifest at
 `extra/org.fmi-standard.fmi-ls-ref/fmi-ls-manifest.xml`. A Three.js webapp ZIP
 is preferred whenever one is declared or available as the same-stem
