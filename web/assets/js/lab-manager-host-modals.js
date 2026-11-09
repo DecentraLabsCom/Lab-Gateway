@@ -94,6 +94,7 @@
             provision.provisionHostMac.value = draft.mac || '';
             provision.provisionHostBroadcast.value = draft.broadcast || '';
             if (provision.provisionHostPlatform) provision.provisionHostPlatform.value = draft.platform || 'windows';
+            if (provision.provisionContractMajor) provision.provisionContractMajor.value = String(draft.contract?.major || 3);
             if (provision.provisionManagementPort) provision.provisionManagementPort.value = draft.management?.port || draft.management_port || (draft.platform === 'linux' ? 22 : 5986);
             if (provision.provisionProfile) provision.provisionProfile.value = draft.profile || 'dedicated';
             if (provision.provisionStationCommand) provision.provisionStationCommand.value = draft.station?.command || '/usr/bin/labstationctl';
@@ -105,6 +106,7 @@
         function updateProvisionFields() {
             const isLinux = fields.provisionHostPlatform?.value === 'linux';
             if (fields.provisionLabstationPath?.closest('.field')) fields.provisionLabstationPath.closest('.field').hidden = isLinux;
+            if (fields.provisionContractMajor?.closest('.field')) fields.provisionContractMajor.closest('.field').hidden = isLinux;
             ['provisionManagementPort', 'provisionProfile', 'provisionStationCommand'].forEach(key => {
                 const input = fields[key];
                 if (input?.closest('.field')) input.closest('.field').hidden = !isLinux;
@@ -141,6 +143,9 @@
                 stationCommand: provision.provisionStationCommand?.value.trim() || '/usr/bin/labstationctl',
                 labstationPath: provision.provisionLabstationPath?.value.trim() || '',
             };
+            if (payload.platform === 'windows' && provision.provisionContractMajor) {
+                payload.contractMajor = Number(provision.provisionContractMajor.value || 3);
+            }
             if (payload.platform === 'windows' && !payload.labstationPath) {
                 showToast('Lab Station path is required', 'error');
                 return;

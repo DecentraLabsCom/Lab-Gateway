@@ -101,6 +101,11 @@ def build_provisioned_host(
     if platform != "windows":
         return None, "platform must be windows or linux"
 
+    raw_contract_major = payload.get("contractMajor", 3)
+    if isinstance(raw_contract_major, bool) or raw_contract_major not in (2, 3, "2", "3"):
+        return None, "contractMajor must be 2 or 3"
+    contract_major = int(raw_contract_major)
+
     credential_ref = str(payload.get("credentialRef") or address).strip()
     labstation_path = str(payload.get("labstationPath") or "").strip()
     if labstation_path and (len(labstation_path) > 1024 or any(ord(char) < 32 for char in labstation_path)):
@@ -133,6 +138,7 @@ def build_provisioned_host(
         "winrm_use_ssl": True,
         "winrm_port": 5986,
         "platform": "windows",
+        "contract": {"major": contract_major},
         "management": {
             "transport": "winrm",
             "port": 5986,

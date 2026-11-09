@@ -41,7 +41,7 @@ lab to a Lite `accessURI` until those three conditions are true.
 | Full Gateway | Embedded `blockchain-services` issues/validates local credentials, handles provider operations and signs institutional transactions. | OpenResty, Guacamole, FMU Runner and Ops Worker serve local labs. |
 | Lite Gateway | Does not become the primary issuer. It validates credentials from the configured remote issuer and can delegate `/lab-admin`. | Owns its local OpenResty, Guacamole, FMU Runner and Ops Worker. |
 | Standalone `blockchain-services` | Can be the remote provider/consumer backend and JWT issuer without a local browser access plane. | No local Guacamole or Station plane. It provisions configured remote gateways. |
-| Lab Station | No public auth role. | Windows v2 uses WinRM; Linux v3 uses the Station contract over pinned SSH. Both provide telemetry and may host the optional FMU backend. |
+| Lab Station | No public auth role. | Windows uses WinRM with Station Contract v3 by default and v2 compatibility; Linux v3 uses the Station contract over pinned SSH. Both provide telemetry and may host the optional FMU backend. |
 
 The root Compose project keeps the embedded `blockchain-services` container
 dormant when a Gateway is Lite (`BLOCKCHAIN_SERVICES_ENABLED=false` or the

@@ -89,11 +89,15 @@ FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
 ```
 
 `STATION_MANAGEMENT_CIDRS` is the private management-network allowlist for the
-Ops Worker to reach configured Lab Stations. Windows v2 uses WinRM HTTPS on
-port 5986; Linux v3 uses SSH on the host's configured port. It is required
-before configuring any Ops host, and every configured Station address must
-belong to one of these networks. `WINRM_MANAGEMENT_CIDRS` remains a compatibility
-alias. This value is a security policy, not a value inferred from Guacamole:
+Ops Worker to reach configured Lab Stations. Windows Stations use WinRM HTTPS
+on port 5986; Lab Manager provisions new Windows hosts with Station Contract
+v3 by default and keeps v2 available for legacy Stations. Linux v3 uses SSH on
+the host's configured port. This allowlist is required before configuring any
+Ops host, and every configured Station address must belong to one of these
+networks. If a host is entered directly in the static catalog, set
+`contract.major` to `3` for a current Station or `2` for a legacy Station.
+`WINRM_MANAGEMENT_CIDRS` remains a compatibility alias. This value is a
+security policy, not a value inferred from Guacamole:
 Guacamole may also contain administration-only desktop connections and does
 not provide the authorized network mask.
 

@@ -1,6 +1,6 @@
 # Lab Gateway and Lab Station Operations
 
-This guide describes the current operational integration between a Lab Gateway and a **Lab Station** that controls a physical laboratory. Windows stations use the v2 compatibility contract over WinRM; Linux stations use Station Contract v3 over pinned SSH. The Gateway normalizes both transports before persisting telemetry or running reservation operations.
+This guide describes the current operational integration between a Lab Gateway and a **Lab Station** that controls a physical laboratory. Windows stations use WinRM and default to Station Contract v3, while legacy v2 Stations remain supported; Linux stations use Station Contract v3 over pinned SSH. The Gateway normalizes the reported contract before persisting telemetry or running reservation operations.
 
 For the network topology around these components, see [Laboratory Connectivity](laboratory-connectivity.md). For the on-chain reservation lifecycle, see [Institutional Reservation Workflow](institutional-reservation-workflow.md).
 
@@ -28,9 +28,9 @@ each Lite owns the complete local management path.
 
 `/ops/health` remains available for service readiness. Every other Ops route is gateway-proxied and subject to the Lab Manager access policy. OpenResty injects the separate `OPS_INTERNAL_AUTH_TOKEN` only after that edge check; the worker rejects direct `/api/*` and `/aas-admin/*` calls without it. The ops worker itself should not be published directly outside the container network.
 
-### Windows v2: WinRM credentials and TLS trust
+### Windows stations: WinRM credentials and TLS trust
 
-The following credentials and certificate guidance applies to Windows v2.
+Both current Windows v3 and legacy Windows v2 Stations use WinRM over HTTPS.
 WinRM credentials are deliberately separate from `hosts.json`. A host refers
 to a `credential_ref`; the ops worker encrypts the corresponding credentials
 using the required `OPS_SECRETS_KEY`.
@@ -83,8 +83,8 @@ does not satisfy WinRM/OpenSSL hostname verification.
 An ops host records the managed address, optional MAC address, optional
 directed WoL broadcast, credential reference, and telemetry settings. It does
 not contain laboratory IDs; the provider catalog and Guacamole are the source
-of the lab-to-host association. The following example shows a Windows v2
-entry:
+of the lab-to-host association. New Windows Station entries use contract major
+3. Set major 2 for a legacy Station that still uses the v2 contract:
 
 ```json
 {
@@ -93,6 +93,7 @@ entry:
   "mac": "00:11:22:33:44:55",
   "broadcast": "10.192.38.255",
   "credential_ref": "lab-ws-01",
+  "contract": { "major": 3 },
   "winrm_transport": "ntlm",
   "winrm_use_ssl": true,
   "winrm_port": 5986,
@@ -103,9 +104,9 @@ entry:
 }
 ```
 
-Windows v2 periodically writes `heartbeat.json` and session-event files at the
-configured Windows paths. Ops Worker reads them through WinRM and persists the
-raw payload alongside its normalized Station model. Linux v3 exposes the
+Windows Stations periodically write `heartbeat.json` and session-event files
+at the configured Windows paths. Ops Worker reads them through WinRM and
+persists the raw payload alongside its normalized Station model. Linux v3 exposes the
 logical `heartbeat` and `session-events` artifacts through the pinned SSH
 dispatcher; it does not use Windows paths. Both feeds are available through
 the heartbeat and timeline APIs. The normalized model includes
@@ -114,11 +115,12 @@ local-mode state, recent operations, power state, and Wake-on-LAN diagnostics.
 FMU Executor health is relevant to FMU resources, but does not by itself make a
 physical lab unavailable.
 
-For Windows v2 discovery, the worker derives the executable, local-mode flag,
+For Windows discovery, the worker derives the executable, local-mode flag,
 heartbeat, and event paths from the installed scheduled task. It keeps legacy
 `C:\LabStation` and current `C:\Lab Station` roots compatible; a mixed catalog
-is normalized to the root identified by the heartbeat or executable. Linux v3
-host entries instead declare `platform: linux`, `contract.major: 3`,
+is normalized to the root identified by the heartbeat or executable. New Windows
+provisioning defaults to `contract.major: 3`; choose major 2 for legacy Stations.
+Linux v3 host entries declare `platform: linux`, `contract.major: 3`,
 `management.transport: ssh`, and the Station command; their telemetry uses the
 logical artifact names above.
 

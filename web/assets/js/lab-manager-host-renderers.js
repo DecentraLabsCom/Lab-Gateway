@@ -321,7 +321,11 @@
             const platformLabel = String(meta.platform || (transport === 'ssh' ? 'linux' : 'windows')).toUpperCase();
             const reportedContractVersion = data.normalized?.contractVersion
                 || heartbeat.schemaVersion || status.schemaVersion || 'not reported';
-            const configuredContractMarkup = meta.contractVersion
+            const configuredContractMajor = String(meta.contractVersion || '').match(/^\s*(\d+)(?:\.|$)/)?.[1] || '';
+            const reportedContractMajor = String(reportedContractVersion).match(/^\s*(\d+)(?:\.|$)/)?.[1] || '';
+            const showConfiguredContract = meta.contractVersion
+                && (!configuredContractMajor || !reportedContractMajor || configuredContractMajor !== reportedContractMajor);
+            const configuredContractMarkup = showConfiguredContract
                 ? ` (configured: ${escapeHtml(meta.contractVersion)})`
                 : '';
             const credentialsConfigured = meta.managementCredentials?.configured === true

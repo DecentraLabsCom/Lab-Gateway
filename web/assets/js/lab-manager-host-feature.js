@@ -90,6 +90,7 @@
         const provisionHostBroadcast = $('#provisionHostBroadcast');
         const provisionLabstationPath = $('#provisionLabstationPath');
         const provisionHostPlatform = $('#provisionHostPlatform');
+        const provisionContractMajor = $('#provisionContractMajor');
         const provisionManagementPort = $('#provisionManagementPort');
         const provisionProfile = $('#provisionProfile');
         const provisionStationCommand = $('#provisionStationCommand');
@@ -402,6 +403,7 @@
                 provisionHostBroadcast,
                 provisionLabstationPath,
                 provisionHostPlatform,
+                provisionContractMajor,
                 provisionManagementPort,
                 provisionProfile,
                 provisionStationCommand,
