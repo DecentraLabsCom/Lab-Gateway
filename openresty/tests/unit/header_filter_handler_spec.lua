@@ -3,25 +3,14 @@ local ngx_factory = require "tests.helpers.ngx_stub"
 local handler = require "modules.header_filter_handler"
 
 runner.describe("Header filter clean redirects", function()
-    runner.it("does not perform websocket persistence in the header filter phase", function()
-        local reported = false
+    runner.it("leaves a websocket handshake status unchanged", function()
         local ngx = ngx_factory.new({
             status = 101,
             var = { uri = "/guacamole/websocket-tunnel", args = "token=guac-token" },
             header = {}
         })
 
-        handler.run(ngx, {
-            access_audit_reporter = {
-                report_guacamole_session_observed = function(context)
-                    runner.assert.equals(ngx, context)
-                    reported = true
-                    return true
-                end
-            }
-        })
-
-        runner.assert.equals(false, reported)
+        handler.run(ngx)
         runner.assert.equals(101, ngx.status)
     end)
 

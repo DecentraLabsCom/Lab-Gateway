@@ -10,7 +10,7 @@ import platform
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Optional, Sequence
 from urllib.parse import urlsplit
 
 from simulation_access_policy import (

@@ -8,7 +8,7 @@ import os
 import re
 import socket
 from datetime import datetime, timezone
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 import paramiko
 

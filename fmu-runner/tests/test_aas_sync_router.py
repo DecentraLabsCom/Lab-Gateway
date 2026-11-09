@@ -170,8 +170,6 @@ def test_sync_route_rejects_policy_regeneration_with_aasx_upload():
 
 
 def test_access_policy_status_is_admin_safe_and_not_cached():
-    from fastapi import FastAPI
-
     status = {"state": "generated", "policySource": "aas-generated", "regenerationAvailable": True}
     get_policy_status = AsyncMock(return_value=status)
     client, *_ = _client(access_policy_status=get_policy_status)

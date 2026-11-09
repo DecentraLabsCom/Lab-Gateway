@@ -1,6 +1,6 @@
 // ─── FMU Access Panel ────────────────────────────────────────────────────────
 // Handles the ?jwt= redirect from the Marketplace for FMU reservations.
-// Loaded after app.js; functions are called from app.js DOMContentLoaded.
+// Exposes the helpers called by app.js during DOMContentLoaded.
 
 /**
  * Decode a JWT payload without verification (display only — the server validates the sig).
@@ -129,7 +129,7 @@ function showFmuAccessPanel(claims, rawJwt) {
     // Wire download button
     if (downloadUrl) {
         document.getElementById('fmu-download-btn').addEventListener('click', function () {
-            triggerFmuDownload(downloadUrl, rawJwt, modelName);
+            triggerFmuDownload(downloadUrl, rawJwt);
         });
     }
 
@@ -178,7 +178,7 @@ function startFmuCountdown(expTs) {
     tick();
 }
 
-function triggerFmuDownload(url, jwt, modelName) {
+function triggerFmuDownload(url, jwt) {
     const btn = document.getElementById('fmu-download-btn');
     const statusEl = document.getElementById('fmu-download-status');
 

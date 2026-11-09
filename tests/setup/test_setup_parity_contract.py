@@ -165,6 +165,8 @@ def test_setup_scripts_keep_the_environment_key_contract():
         "WOL_LAN_SUBNET",
         "WOL_LAN_IP_RANGE",
         "WOL_LAN_GATEWAY",
+        "WOL_LAN_GUACD_IPV4",
+        "WOL_LAN_OPS_WORKER_IPV4",
     }
     assert windows.env_keys - shell.env_keys == set()
 

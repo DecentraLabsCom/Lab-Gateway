@@ -8,8 +8,8 @@ from fmu_aas_generator import (
     _aas_id_for_lab,
     _encode_id,
     _submodel_id_for_access_control,
-    build_simulation_access_control_submodel,
 )
+from aas_model_builders import build_simulation_access_control_submodel
 from simulation_access_policy import build_part4_access_rules
 
 

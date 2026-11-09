@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.full-lite-integration.yml"
 PROJECT_NAME="decentralabs-full-lite-integration-$$"
 TMP_DIR="$(mktemp -d)"

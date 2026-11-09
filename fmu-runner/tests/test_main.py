@@ -30,8 +30,6 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
     import runner_application
     from auth import verify_jwt as _original_verify_jwt
 
-from config import CONFIG
-
 app = runner_application.app
 _build_proxy_model_description_xml = runner_application._build_proxy_model_description_xml
 _model_metadata_from_model_description = runner_application._model_metadata_from_model_description

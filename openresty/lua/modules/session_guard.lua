@@ -105,7 +105,7 @@ end
 
 local function request_guac_token(self, httpc)
     local ngx = self.ngx
-    local res, err = httpc:request_uri(self.guac_api .. "/tokens", {
+    local res = httpc:request_uri(self.guac_api .. "/tokens", {
         method = "POST",
         body = "username=" .. self.admin_user .. "&password=" .. self.admin_pass,
         headers = { ["Content-Type"] = "application/x-www-form-urlencoded" }
@@ -276,7 +276,7 @@ function SessionGuard:check_expired_sessions()
         return
     end
 
-    local res, err = httpc:request_uri(self.guac_api .. "/session/data/" .. data_source ..
+    local res = httpc:request_uri(self.guac_api .. "/session/data/" .. data_source ..
         "/activeConnections?token=" .. auth_token, {
         method = "GET",
         headers = { ["Accept"] = "application/json" }
@@ -309,7 +309,7 @@ function SessionGuard:check_expired_sessions()
                 { op = "remove", path = "/" .. identifier }
             })
 
-            res, err = httpc:request_uri(self.guac_api .. "/session/data/" .. data_source ..
+            res = httpc:request_uri(self.guac_api .. "/session/data/" .. data_source ..
                 "/activeConnections?token=" .. auth_token, {
                 method = "PATCH",
                 body = patch_body,
@@ -376,7 +376,7 @@ function SessionGuard:check_demo_sessions()
         return
     end
 
-    local res, err = httpc:request_uri(self.guac_api .. "/session/data/" .. data_source
+    local res = httpc:request_uri(self.guac_api .. "/session/data/" .. data_source
         .. "/activeConnections?token=" .. auth_token, {
         method = "GET",
         headers = { ["Accept"] = "application/json" }

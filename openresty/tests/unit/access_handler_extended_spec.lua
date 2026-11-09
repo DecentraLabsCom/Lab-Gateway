@@ -70,8 +70,7 @@ runner.describe("Access handler one-time cookie policy", function()
         runner.assert.equals(nil, ngx.ctx.demo_authenticated)
     end)
 
-    runner.it("does not turn an access-phase websocket request into SessionStarted evidence", function()
-        local reported = false
+    runner.it("accepts an authenticated websocket handshake before an upstream session exists", function()
         local ngx = ngx_factory.new({
             cache = {
                 ["username:jti"] = "dlabs-res-user",
@@ -87,49 +86,13 @@ runner.describe("Access handler one-time cookie policy", function()
             now = 100,
         })
 
-        handler.run(ngx, {
-            access_audit_reporter = {
-                report_guacamole_session_observed = function(context)
-                    runner.assert.equals(ngx, context)
-                    reported = true
-                    return true
-                end,
-            },
-        })
-
-        runner.assert.equals(false, reported)
+        handler.run(ngx)
         runner.assert.equals(nil, ngx.status)
     end)
 
-    runner.it("does not fail a valid request because no real upstream session exists yet", function()
-        local ngx = ngx_factory.new({
-            cache = {
-                ["username:jti"] = "dlabs-res-user",
-                ["exp:dlabs-res-user"] = "500",
-                ["reservation:jti"] = "0xabc",
-            },
-            var = {
-                http_cookie = "JTI=jti",
-                uri = "/guacamole/websocket-tunnel",
-                args = "token=guac-token",
-                arg_token = "guac-token",
-            },
-            now = 100,
-        })
 
-        handler.run(ngx, {
-            access_audit_reporter = {
-                report_guacamole_session_observed = function()
-                    return false, "outbox unavailable"
-                end,
-            },
-        })
 
-        runner.assert.equals(nil, ngx.status)
-        runner.assert.equals(nil, ngx._exit_code)
-    end)
-
-    runner.it("never invokes the economic observation reporter during access phase", function()
+    runner.it("accepts an authenticated websocket handshake without reservation metadata", function()
         local ngx = ngx_factory.new({
             cache = {
                 ["username:jti"] = "dlabs-res-user",
@@ -144,19 +107,12 @@ runner.describe("Access handler one-time cookie policy", function()
             now = 100,
         })
 
-        handler.run(ngx, {
-            access_audit_reporter = {
-                report_guacamole_session_observed = function()
-                    error("unexpected reporter failure")
-                end,
-            },
-        })
+        handler.run(ngx)
 
         runner.assert.equals(nil, ngx.status)
     end)
 
     runner.it("does not require reservation observation for manual websocket sessions", function()
-        local reported = false
         local ngx = ngx_factory.new({
             var = {
                 uri = "/guacamole/websocket-tunnel",
@@ -165,16 +121,7 @@ runner.describe("Access handler one-time cookie policy", function()
             },
         })
 
-        handler.run(ngx, {
-            access_audit_reporter = {
-                report_guacamole_session_observed = function()
-                    reported = true
-                    return false
-                end,
-            },
-        })
-
-        runner.assert.equals(false, reported)
+        handler.run(ngx)
         runner.assert.equals(nil, ngx.status)
     end)
 end)

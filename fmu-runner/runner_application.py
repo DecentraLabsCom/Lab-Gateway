@@ -81,7 +81,6 @@ from session_ticket_service import (
     redeem_session_ticket as _redeem_session_ticket_service,
 )
 from session_ticket_transport import (
-    build_session_ticket_headers as _build_session_ticket_headers_transport,
     post_session_ticket_request as _post_session_ticket_request_transport,
 )
 from session_ticket_values import normalize_ticket_id as _normalize_ticket_id_value
@@ -887,13 +886,6 @@ async def _record_browser_session_started(request: Request, claims: dict, sim_id
         confirm_session=_confirm_fmu_session_started,
         max_attempts=FMU_SESSION_OBSERVATION_MAX_ATTEMPTS,
         sleep=asyncio.sleep,
-    )
-
-
-def _build_session_ticket_headers(*, authorization: Optional[str] = None) -> dict[str, str]:
-    return _build_session_ticket_headers_transport(
-        authorization=authorization,
-        internal_token=AUTH_SESSION_TICKET_INTERNAL_TOKEN,
     )
 
 

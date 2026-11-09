@@ -1,6 +1,5 @@
 """Host catalog loading orchestration with explicit dependencies."""
 
-import os
 import re
 from collections.abc import Callable
 from typing import Any, Dict, List, Optional, Protocol, Tuple

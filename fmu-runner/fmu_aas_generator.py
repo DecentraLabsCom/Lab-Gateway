@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
@@ -14,38 +13,12 @@ from urllib.parse import urlsplit
 import httpx
 from aas_model_builders import (
     _AAS_LAB_ID_RE,
-    _FMI_VARIABLE_METADATA_EXTENSION,
-    _IDSHORT_UNSAFE_RE,
-    _MAX_FMI_VARIABLE_METADATA_BYTES,
-    _SEMANTIC_ID_ACCESS_GENERATED_DIGEST,
-    _SEMANTIC_ID_ACCESS_INTERFACE_DIGEST,
     _SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES,
-    _SEMANTIC_ID_ARBITRARY,
-    _SEMANTIC_ID_ASSET_INTERFACES,
-    _SEMANTIC_ID_CAPABILITY_DESCRIPTION,
-    _SEMANTIC_ID_CONTACT_INFORMATION,
     _SEMANTIC_ID_FMI_LS_RELATED_RESOURCES,
     _SEMANTIC_ID_FMI_LS_STRUCT,
-    _SEMANTIC_ID_HANDOVER_DOCUMENTATION,
-    _SEMANTIC_ID_SIMULATION_ACCESS_CONTROL,
-    _SEMANTIC_ID_SIMULATION_MODEL,
-    _SEMANTIC_ID_SIMULATION_MODELS,
-    _SEMANTIC_ID_TECHNICAL_DATA,
-    _SIMULATION_SEMANTICS,
     _aas_id_for_lab,
-    _arbitrary_property,
-    _asset_interface_action,
-    _causality_to_port_type,
-    _documentation_urls,
     _encode_id,
-    _fmi_causality_to_idta,
-    _fmi_type_to_idta,
-    _fmi_variable_metadata_extension,
     _fmu_digest as _model_fmu_digest,
-    _non_negative_int,
-    _sanitize_idshort,
-    _semantic_id,
-    _standard_mlp,
     _standard_property,
     _submodel_id_for_access_control,
     _submodel_id_for_contact,
@@ -65,8 +38,6 @@ from aas_model_builders import (
     build_fmi_ls_related_resources_submodel,
     build_fmi_ls_struct_submodel,
     build_handover_documentation_submodel,
-    build_simulation_access_control_submodel,
-    build_simulation_ports,
     build_simulation_submodel as _build_simulation_submodel,
     build_technical_data_submodel,
 )
@@ -76,16 +47,14 @@ from aas_access_control_sync import (
     _is_simulation_access_control_submodel,
     _sync_simulation_access_control,
 )
-from aasx_import import _parse_aasx_xml_environment, parse_aasx as _parse_aasx_package
+from aasx_import import parse_aasx as _parse_aasx_package
 from aasx_limits import (
     MAX_AASX_ENVIRONMENT_PART_BYTES,
     MAX_AASX_RELATIONSHIP_PART_BYTES,
     MAX_AASX_UPLOAD_BYTES,
 )
 from simulation_access_policy import (
-    build_part4_access_rules,
     compile_part4_access_rules,
-    fmi_interface_digest,
     normalize_authorized_execution_interfaces,
 )
 
@@ -453,7 +422,7 @@ async def get_handover_visual_assets(lab_id: str) -> list[dict[str, str]]:
             continue
         for element in elements:
             visited += 1
-            if visited > 2048:
+            if visited > 2048 or len(visual_assets) >= 32:
                 break
             if not isinstance(element, dict):
                 continue
@@ -1279,8 +1248,6 @@ async def sync_fmu_to_basyx(
     interfaces_id = _submodel_id_for_interfaces(lab_id)
     contact_id = _submodel_id_for_contact(lab_id)
     handover_id = _submodel_id_for_handover(lab_id)
-    related_resources_id = _submodel_id_for_fmi_ls_related_resources(lab_id)
-
     result: dict = {
         "aasId": aas_id,
         "submodelId": submodel_id,

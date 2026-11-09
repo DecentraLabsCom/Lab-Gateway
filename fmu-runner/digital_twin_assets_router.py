@@ -135,27 +135,6 @@ def _draggable_target_keys(target: Any) -> tuple[str, ...]:
     return ("position.x", "position.y", "position.z") if target == "translation" else ()
 
 
-def _valid_whole_vector_shape(
-    variable: dict[str, Any],
-    target: str,
-    variables_by_reference: dict[Any, dict[str, Any]],
-) -> bool:
-    dimensions = _fmi_array_dimensions(variable)
-    if len(dimensions) != 1 or str(variable.get("type", "")).lower() not in _NUMERIC_FMI_INPUT_TYPES:
-        return False
-    dimension = dimensions[0]
-    expected_size = _FMI_VECTOR_TARGET_LENGTHS[target]
-    dimension_size = dimension.get("start")
-    if dimension_size is None and dimension.get("valueReference") is not None:
-        structural_parameter = variables_by_reference.get(dimension.get("valueReference"))
-        dimension_size = structural_parameter.get("max") if structural_parameter else None
-    if isinstance(dimension_size, bool) or not isinstance(dimension_size, int):
-        return True
-    if dimension.get("start") is not None:
-        return dimension_size == expected_size
-    return dimension_size >= expected_size
-
-
 def _node_morph_target_count(document: dict[str, Any], node: dict[str, Any]) -> int | None:
     meshes = document.get("meshes")
     mesh_index = node.get("mesh")

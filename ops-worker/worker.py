@@ -260,16 +260,16 @@ from reservation_runtime import create_reservation_orchestrator_class
 from reservation_context import ReservationRuntimeContext
 from winrm_runtime import create_winrm_runtime
 from station_credentials import (
-    delete_ssh_credential,
-    generate_ssh_credential,
+    delete_ssh_credential as delete_ssh_credential,
+    generate_ssh_credential as generate_ssh_credential,
     load_ssh_credential,
-    public_ssh_credential,
+    public_ssh_credential as public_ssh_credential,
 )
 from station_transport_factory import create_station_transport_runtime
 from station_ssh_trust import (
-    confirm_ssh_host_key,
-    delete_ssh_trust,
-    probe_ssh_host_key,
+    confirm_ssh_host_key as confirm_ssh_host_key,
+    delete_ssh_trust as delete_ssh_trust,
+    probe_ssh_host_key as probe_ssh_host_key,
     ssh_trust_status,
 )
 from winrm_context import WinRMContext

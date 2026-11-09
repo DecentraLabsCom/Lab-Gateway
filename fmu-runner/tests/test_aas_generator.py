@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
+from aasx_import import _parse_aasx_xml_environment
 
 # ── Pure generator tests ─────────────────────────────────────────────
 
@@ -25,13 +26,7 @@ from fmu_aas_generator import (
     _submodel_id_for_handover,
     _encode_id,
     _aas_resource_path,
-    _fmi_type_to_idta,
-    _fmi_causality_to_idta,
-    _causality_to_port_type,
-    _sanitize_idshort,
-    build_simulation_ports,
     build_simulation_submodel,
-    build_simulation_access_control_submodel,
     build_technical_data_submodel,
     build_execution_capabilities_submodel,
     build_asset_interfaces_description_submodel,
@@ -42,6 +37,7 @@ from fmu_aas_generator import (
     discover_basyx_shells,
     serialize_aasx_resources,
 )
+from aas_model_builders import _fmi_type_to_idta, _fmi_causality_to_idta, _causality_to_port_type, _sanitize_idshort, build_simulation_ports, build_simulation_access_control_submodel
 
 _aas_mod: Any = sys.modules["fmu_aas_generator"]
 
@@ -1202,7 +1198,6 @@ class TestSyncFmuToBasyxGenerated:
 
 
 import io
-import json
 import zipfile
 
 
@@ -1297,7 +1292,7 @@ class TestParseAasx:
 
         xml = '<!DOCTYPE environment [<!ENTITY x "expanded">]><environment />'.encode(encoding)
         with pytest.raises(aasx_limits.AasxInvalidContentError, match="DTD and entity"):
-            _aas_mod._parse_aasx_xml_environment(xml)
+            _parse_aasx_xml_environment(xml)
 
     def test_fallback_scan_without_rels(self):
         """If _rels/.rels is absent, should still find JSON via filesystem scan."""

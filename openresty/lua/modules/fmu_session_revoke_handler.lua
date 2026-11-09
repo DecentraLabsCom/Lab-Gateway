@@ -33,7 +33,7 @@ function _M.run(ngx_ctx, dependencies)
     end
 
     if session_id then
-        local removed, remove_err = store:remove(session_id)
+        local removed = store:remove(session_id)
         if not removed then
             ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
             ngx.say("FMU access session unavailable")

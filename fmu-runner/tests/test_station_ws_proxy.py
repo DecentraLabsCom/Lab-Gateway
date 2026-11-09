@@ -11,7 +11,8 @@ from typing import cast
 
 from fmu_backend import StationFmuBackend
 from simulation_access_policy import AccessDenied, build_effective_policy
-from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSession, _public_http_detail
+from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSession
+from station_ws_connection import _public_http_detail
 from station_ws_connection import _apply_internal_session_state
 
 

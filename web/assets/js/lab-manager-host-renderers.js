@@ -249,9 +249,7 @@
                 return {
                     label: readyLabels,
                     className: 'good',
-                    tooltip: readyConnectors.length < connectorStates.length
-                        ? `${readyLabels} ready.`
-                        : '',
+                    tooltip: '',
                 };
             }
 

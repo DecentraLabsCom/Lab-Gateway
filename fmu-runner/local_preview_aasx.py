@@ -17,16 +17,6 @@ from simulation_access_policy import build_effective_policy
 
 _LAB_ID_RE = re.compile(r"local_demo_[a-f0-9]{24}")
 _SHELL_ID_PREFIX = "urn:decentralabs:lab:"
-_SUBMODEL_ID_FIELDS = (
-    "submodelId",
-    "technicalDataSubmodelId",
-    "executionSubmodelId",
-    "interfacesSubmodelId",
-    "contactSubmodelId",
-    "handoverSubmodelId",
-    "fmiLsRelatedResourcesSubmodelId",
-    "accessControlSubmodelId",
-)
 
 logger = logging.getLogger(__name__)
 

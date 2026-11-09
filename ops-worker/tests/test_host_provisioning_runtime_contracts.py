@@ -44,6 +44,7 @@ def test_host_provisioning_runtime_uses_explicit_context_dependencies():
             "winrm_use_ssl": True,
             "winrm_port": 5986,
             "platform": "windows",
+            "contract": {"major": 3},
             "management": {
                 "transport": "winrm",
                 "port": 5986,

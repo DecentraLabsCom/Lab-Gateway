@@ -3,7 +3,7 @@
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import re
-from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol
+from typing import Any, Dict, List, Mapping, Optional, Protocol
 from uuid import uuid4
 
 from station_errors import StationCommandRejected

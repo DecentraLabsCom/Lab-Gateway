@@ -98,6 +98,7 @@ EXPECTED_LOCATION_MATRIX = (
     "/aas-admin/lab/",
     "= /internal/aas-resolve",
     "= /fmu/api/v1/fmu/sessions",
+    "= /fmu/api/v1/simulations/stream",
     "/fmu/",
 )
 
@@ -178,7 +179,11 @@ EXPECTED_AAS_RESOLVE_LOCATIONS = ("= /internal/aas-resolve",)
 
 EXPECTED_GATEWAY_MODE_LOCATIONS = ("/gateway/mode",)
 
-EXPECTED_FMU_LOCATIONS = ("= /fmu/api/v1/fmu/sessions", "/fmu/")
+EXPECTED_FMU_LOCATIONS = (
+    "= /fmu/api/v1/fmu/sessions",
+    "= /fmu/api/v1/simulations/stream",
+    "/fmu/",
+)
 
 
 def _read(path: Path) -> str:

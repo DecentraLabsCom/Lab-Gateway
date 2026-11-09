@@ -2,7 +2,6 @@ import base64
 import math
 import xml.etree.ElementTree as ET
 import zipfile
-from pathlib import Path
 from typing import Any, Optional
 from fmi_ls_struct import normalize_fmi_ls_struct
 
@@ -681,9 +680,10 @@ def _model_metadata_from_model_description(
                     declared_type_entry[attribute] = value
             items = []
             for item in getattr(declared_type, "items", []) or []:
+                item_value = getattr(item, "value", None)
                 item_entry = {
                     "name": str(getattr(item, "name", "") or ""),
-                    "value": str(getattr(item, "value", "") or ""),
+                    "value": str(item_value) if item_value is not None else "",
                 }
                 if getattr(item, "description", None):
                     item_entry["description"] = item.description

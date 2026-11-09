@@ -247,15 +247,10 @@ test('host row renderer shows concrete connector states and scoped readiness rea
     backendMode: 'station',
     stationHost: 'station-remote-app',
   });
-  assert.match(remoteAppHtml, /class="pill good ready-indicator"[^>]*>Physical lab/);
-  assert.match(
-    remoteAppHtml,
-    /Physical lab ready\./,
-  );
+  assert.match(remoteAppHtml, /class="pill good">Physical lab/);
   assert.doesNotMatch(remoteAppHtml, /FMI\/FMU|FMU executor is not running/);
   assert.doesNotMatch(remoteAppHtml, /Ready:/);
-  assert.match(remoteAppHtml, /role="tooltip"/);
-  assert.match(remoteAppHtml, /class="ready-indicator-tooltip ready-indicator-tooltip-good"/);
+  assert.doesNotMatch(remoteAppHtml, /ready-indicator-tooltip|role="tooltip"/);
 
   const fmuHtml = renderer.renderHostRowMarkup('station-fmu', {
     heartbeat: {
