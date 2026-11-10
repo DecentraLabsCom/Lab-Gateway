@@ -225,15 +225,30 @@ def _fmi_ls_ref_archive_entries(
             if isinstance(description, str) and description.strip():
                 case_attributes["description"] = description[:2048]
             valid_case = True
-            for option_name in ("startTime", "stopTime", "stepSize"):
+            for option_name in ("startTime", "stopTime", "stepSize", "tolerance"):
                 option_value = options.get(option_name)
                 if option_value is None:
                     continue
+                if (
+                    isinstance(option_value, bool)
+                    or not isinstance(option_value, (int, float))
+                    or not math.isfinite(option_value)
+                    or (option_name in {"stepSize", "tolerance"} and option_value <= 0)
+                ):
+                    valid_case = False
+                    break
                 option_text = _fmi_value_text(option_value)
                 if option_text is None:
                     valid_case = False
                     break
                 case_attributes[option_name] = option_text
+            if (
+                valid_case
+                and "startTime" in case_attributes
+                and "stopTime" in case_attributes
+                and float(case_attributes["stopTime"]) <= float(case_attributes["startTime"])
+            ):
+                valid_case = False
 
             parameter_source = None
             if valid_case and parameters:
@@ -259,7 +274,7 @@ def _fmi_ls_ref_archive_entries(
 
             if not valid_case or (
                 not parameters
-                and not any(option_name in case_attributes for option_name in ("startTime", "stopTime", "stepSize"))
+                and not any(option_name in case_attributes for option_name in ("startTime", "stopTime", "stepSize", "tolerance"))
                 and not schedule
             ):
                 continue

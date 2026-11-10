@@ -1,10 +1,147 @@
 import math
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from fmu_state_capabilities import normalize_fmu_state_capabilities
 from simulation_access_policy import filter_model_description
+
+
+_ACCESS_MODEL_CAPABILITIES = {
+    "needsExecutionTool", "canBeInstantiatedOnlyOncePerProcess", "canNotUseMemoryManagementFunctions",
+    "canGetAndSetFMUstate", "canSerializeFMUstate", "canHandleVariableCommunicationStepSize",
+    "canInterpolateInputs", "canRunAsynchronuously", "hasEventMode", "providesIntermediateUpdate",
+    "canReturnEarlyAfterIntermediateUpdate", "providesEvaluateDiscreteStates",
+    "providesDirectionalDerivative", "providesAdjointDerivatives", "providesPerElementDependencies",
+    "needsCompletedIntegratorStep",
+}
+_MODEL_EXCHANGE_CAPABILITIES = {
+    "needsExecutionTool", "canBeInstantiatedOnlyOncePerProcess", "canNotUseMemoryManagementFunctions",
+    "canGetAndSetFMUstate", "canSerializeFMUstate", "providesDirectionalDerivative",
+    "providesAdjointDerivatives", "completedIntegratorStepNotNeeded", "needsCompletedIntegratorStep",
+}
+
+
+def _visible_model_structure(raw_structure: Any, variables: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Expose dependency edges only when both ends are readable or writable."""
+    if not isinstance(raw_structure, Mapping):
+        return {}
+    allowed_names = {item.get("name") for item in variables if isinstance(item.get("name"), str)}
+    allowed_references = {
+        str(item.get("valueReference"))
+        for item in variables
+        if item.get("valueReference") is not None
+    }
+    name_by_reference = {
+        str(item.get("valueReference")): item.get("name")
+        for item in variables
+        if isinstance(item.get("name"), str) and item.get("valueReference") is not None
+    }
+    result: dict[str, list[dict[str, Any]]] = {}
+    for section in ("outputs", "derivatives", "clockedStates", "initialUnknowns", "eventIndicators"):
+        entries = raw_structure.get(section)
+        if not isinstance(entries, list):
+            continue
+        visible_entries: list[dict[str, Any]] = []
+        for entry in entries[:100_000]:
+            if not isinstance(entry, Mapping):
+                continue
+            name = entry.get("name") if isinstance(entry.get("name"), str) else None
+            reference = entry.get("valueReference")
+            if name not in allowed_names and (reference is None or str(reference) not in allowed_references):
+                continue
+            if name not in allowed_names:
+                name = name_by_reference.get(str(reference))
+            visible: dict[str, Any] = {}
+            if name:
+                visible["name"] = name[:512]
+            for field in ("stateName",):
+                value = entry.get(field)
+                if isinstance(value, str) and value in allowed_names:
+                    visible[field] = value[:512]
+            if "stateName" not in visible:
+                state_name = name_by_reference.get(str(entry.get("stateValueReference")))
+                if isinstance(state_name, str):
+                    visible["stateName"] = state_name[:512]
+            raw_dependencies = entry.get("dependencies")
+            raw_names = entry.get("dependencyNames")
+            raw_kinds = entry.get("dependenciesKind")
+            if isinstance(raw_dependencies, list):
+                selected_dependencies: list[tuple[str, str | None]] = []
+                for index, dependency in enumerate(raw_dependencies):
+                    dependency_name = raw_names[index] if isinstance(raw_names, list) and index < len(raw_names) else None
+                    if dependency_name not in allowed_names:
+                        dependency_name = name_by_reference.get(str(dependency))
+                    if isinstance(dependency_name, str) and dependency_name in allowed_names:
+                        dependency_kind = raw_kinds[index] if isinstance(raw_kinds, list) and index < len(raw_kinds) else None
+                        selected_dependencies.append((dependency_name[:512], dependency_kind[:64] if isinstance(dependency_kind, str) else None))
+                selected_dependencies = selected_dependencies[:4096]
+                selected_names = [name for name, _kind in selected_dependencies]
+                selected_kinds = [kind for _name, kind in selected_dependencies]
+                if selected_names:
+                    visible["dependencyNames"] = selected_names
+                if selected_kinds and all(kind is not None for kind in selected_kinds):
+                    visible["dependenciesKind"] = selected_kinds
+            visible_entries.append(visible)
+        if visible_entries:
+            result[section] = visible_entries
+    return result
+
+
+def _authorized_model_description(policy: Mapping[str, Any], variables: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Project run defaults and model relationships without identity metadata."""
+    raw = policy.get("modelDescription")
+    if not isinstance(raw, Mapping):
+        return None
+    result: dict[str, Any] = {}
+    for field in ("defaultStartTime", "defaultStopTime", "defaultStepSize", "defaultTolerance"):
+        value = raw.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
+            result[field] = float(value)
+    for field in ("supportsCoSimulation", "supportsModelExchange"):
+        value = raw.get(field)
+        if isinstance(value, bool):
+            result[field] = value
+    independent = next((item for item in variables if item.get("causality") == "independent"), None)
+    time_unit = raw.get("timeUnit") or (independent.get("unit") if independent else None)
+    if isinstance(time_unit, str) and time_unit.strip() and len(time_unit) <= 128:
+        result["timeUnit"] = time_unit.strip()
+    for field in ("numberOfContinuousStates", "numberOfEventIndicators"):
+        value = raw.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10_000_000:
+            result[field] = value
+
+    raw_capabilities = raw.get("capabilities")
+    if isinstance(raw_capabilities, Mapping):
+        capabilities: dict[str, bool | int | float] = {}
+        for field, value in raw_capabilities.items():
+            if field in _ACCESS_MODEL_CAPABILITIES and isinstance(value, bool):
+                capabilities[field] = value
+        for field in ("maxOutputDerivativeOrder", "recommendedIntermediateInputSmoothness"):
+            value = raw_capabilities.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 64:
+                capabilities[field] = value
+        fixed_step = raw_capabilities.get("fixedInternalStepSize")
+        if isinstance(fixed_step, (int, float)) and not isinstance(fixed_step, bool) and math.isfinite(float(fixed_step)) and fixed_step > 0:
+            capabilities["fixedInternalStepSize"] = float(fixed_step)
+        if capabilities:
+            result["capabilities"] = capabilities
+
+    raw_model_exchange_capabilities = raw.get("modelExchangeCapabilities")
+    if isinstance(raw_model_exchange_capabilities, Mapping):
+        model_exchange_capabilities = {
+            field: value
+            for field, value in raw_model_exchange_capabilities.items()
+            if field in _MODEL_EXCHANGE_CAPABILITIES and isinstance(value, bool)
+        }
+        if model_exchange_capabilities:
+            result["modelExchangeCapabilities"] = model_exchange_capabilities
+
+    structure = _visible_model_structure(raw.get("modelStructure"), variables)
+    if structure:
+        result["modelStructure"] = structure
+    return result or None
 
 
 def create_catalog_router(
@@ -88,6 +225,9 @@ def create_catalog_router(
         }
         model_description = policy.get("modelDescription")
         if isinstance(model_description, dict):
+            projected_description = _authorized_model_description(policy, response["modelVariables"])
+            if projected_description is not None:
+                response["modelDescription"] = projected_description
             for field in ("fmiVersion", "simulationType"):
                 value = model_description.get(field)
                 if isinstance(value, str) and value.strip() and len(value) <= 32:
@@ -315,11 +455,11 @@ def filter_authorized_experiments(raw_discovery: Any, policy: Any) -> list[dict[
             valid_options = True
             for option_name, value in options.items():
                 if (
-                    option_name not in {"startTime", "stopTime", "stepSize"}
+                    option_name not in {"startTime", "stopTime", "stepSize", "tolerance"}
                     or isinstance(value, bool)
                     or not isinstance(value, (int, float))
                     or not math.isfinite(value)
-                    or (option_name == "stepSize" and value <= 0)
+                    or (option_name in {"stepSize", "tolerance"} and value <= 0)
                 ):
                     valid_options = False
                     break

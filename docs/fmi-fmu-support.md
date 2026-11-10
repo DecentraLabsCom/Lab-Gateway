@@ -117,8 +117,9 @@ a passing probe establishes. With `probe=true`, the Executor also discovers and 
 REF smoke experiments. The current interpreter accepts transient tests with optional SSP parameters;
 tests may also use local `text/csv` stimuli with a `time` column and numeric FMU input columns. Rows
 must begin at the experiment start, increase strictly, align to the declared step size and fit the
-128-event schedule limit; each row becomes a runtime input change. Reference time series and solver
-tolerances remain unsupported and are reported as skipped. These private endpoints are not called by Marketplace users. Gateway public descriptions
+128-event schedule limit; each row becomes a runtime input change. Positive solver tolerances are
+supported and passed to FMI initialization; reference time series and other unsupported features
+are reported as skipped. These private endpoints are not called by Marketplace users. Gateway public descriptions
 use the reduced `publicOnly=true` view where appropriate; the Executor still validates and parses the
 full model description.
 
@@ -186,12 +187,24 @@ protection of the internal channel.
 The Gateway uses FMPy to read model descriptions for AAS metadata and proxy generation; model
 loading and simulation are handled by the Executor. The metadata path also reads the bounded source
 `modelDescription.xml` as a fallback for FMI type definitions and explicit attributes that some FMPy
-releases omit, including named FMI 3 Binary and Clock types. The generated proxy keeps supported
-units and display-unit conversions, type definitions, variable bounds and descriptions, FMI 3
-aliases, enumeration items, clock associations, array dimensions, default-experiment values such
-as tolerance, and the required FMI 3 output/initial-unknown `ModelStructure` lists.
-Wrapper identity and runtime capabilities continue to describe the proxy itself. Lab Stations
-package a released Executor snapshot in their platform runtime.
+releases omit, including named FMI 3 Binary and Clock types. The generated proxy preserves supported
+unit and display-unit conversion metadata, type definitions, variable bounds and descriptions, FMI 3
+aliases, enumeration items, clock associations and array dimensions. It also exposes valid
+`DefaultExperiment` start time, stop time, step size and tolerance; the independent variable's FMI
+time unit; output dependencies, state derivatives, clocked states, initial unknowns and event
+indicators from `ModelStructure`; and declared Co-Simulation/Model Exchange capabilities.
+
+Marketplace uses the defaults to initialize its simulation controls and shows the declared time
+unit on controls, timeline and graphs. The declared tolerance is displayed read-only. A selected
+FMI-LS experiment may override it for that run; the Executor passes the effective tolerance to FMI
+initialization and uses it for internal Model Exchange and FMI-LS-DAE integration. Marketplace's
+FMI structure panel filters variable relationships through the active reservation's read/write
+permissions and highlights related outputs as recommendations in the GLB graph selector. The Lab
+Manager binding editor also shows declared input dependencies for a selected output. Declared
+capabilities describe the FMU and do not by themselves guarantee that the
+Gateway runtime or reservation policy exposes a feature. Wrapper identity and runtime capabilities
+continue to describe the proxy itself. Lab Stations package a released Executor snapshot in their
+platform runtime.
 
 JWT key retrieval is independent of the FMU execution backend. In Full mode the runner uses
 `http://blockchain-services:8080/auth/jwks`; in Lite mode it uses the external issuer's JWKS
@@ -378,7 +391,7 @@ For example, a batch body contains shared options and one parameter map per case
 {
   "labId": "lab-01",
   "reservationKey": "reservation-123",
-  "options": {"startTime": 0, "stopTime": 10, "stepSize": 0.01},
+  "options": {"startTime": 0, "stopTime": 10, "stepSize": 0.01, "tolerance": 1e-7},
   "scenarios": [
     {"label": "low", "parameters": {"ambient": 285}},
     {"label": "high", "parameters": {"ambient": 305}}

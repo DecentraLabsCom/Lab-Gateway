@@ -13,6 +13,7 @@
     }) {
         let fmuDescription = '';
         let fmuDescriptionAccessKey = '';
+        let fmuVisualizationMetadata = null;
         let gatewayUploadedAssetUrl = '';
         let gatewayUploadedAssetAccessKey = '';
         let gatewayUploadedAssetType = '';
@@ -238,6 +239,60 @@
             delete panel.dataset.status;
         }
 
+        function renderFmuBindingAssistant(file = fields.assetFileInput?.files?.[0]) {
+            const panel = fields.bindingAssistant;
+            if (!panel) return;
+            if (!file || !/\.glb$/i.test(String(file.name || ''))
+                || !['', 'auto', 'glb'].includes(String(fields.assetType?.value || ''))) {
+                panel.hidden = true;
+                panel.replaceChildren?.();
+                return;
+            }
+            panel.hidden = false;
+            const metadata = fmuVisualizationMetadata;
+            if (!metadata) {
+                panel.textContent = 'Select an FMU laboratory to load its declared FMI variables and units for GLB binding suggestions.';
+                return;
+            }
+            const editor = root.LabManagerFmiGlbBindings;
+            if (!editor || typeof editor.createEditor !== 'function') {
+                panel.textContent = 'The GLB binding editor is unavailable. Reload Lab Manager to continue.';
+                return;
+            }
+            editor.createEditor({
+                panel,
+                file,
+                metadata,
+                documentImpl,
+                onApply: installAssetFile,
+            });
+        }
+
+        function installAssetFile(file) {
+            const transfer = new root.DataTransfer();
+            transfer.items.add(file);
+            fields.assetFileInput.files = transfer.files;
+            if (fields.assetFileName) fields.assetFileName.textContent = file.name;
+            gatewayUploadedAssetUrl = '';
+            gatewayUploadedAssetAccessKey = '';
+            gatewayUploadedAssetType = '';
+            clearAssetValidation();
+            renderFmuBindingAssistant(file);
+        }
+
+        async function loadImportedGlbForBindingEditor(asset) {
+            if (asset.assetType !== 'glb' || !fields.assetFileInput) return;
+            try {
+                const response = await fetchImpl(asset.path, { cache: 'no-store' });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const blob = await response.blob();
+                if (blob.size > 52428800) throw new Error('The GLB exceeds the 50 MiB upload limit.');
+                installAssetFile(new root.File([blob], 'Companion.glb', { type: 'model/gltf-binary' }));
+            } catch (error) {
+                logger.info('Imported GLB remains linked but could not be opened in the binding editor', error);
+            }
+        }
+
         function renderAssetValidation(report) {
             const panel = fields.assetValidation;
             if (!panel) return;
@@ -314,6 +369,8 @@
         function clearAllFmuHints() {
             fmuDescription = '';
             fmuDescriptionAccessKey = '';
+            fmuVisualizationMetadata = null;
+            renderFmuBindingAssistant();
         }
 
         function selectedLaboratory() {
@@ -350,12 +407,18 @@
                 }
                 fmuDescription = String(hints.description || '').trim();
                 fmuDescriptionAccessKey = accessKey;
+                fmuVisualizationMetadata = hints.visualizationMetadata && typeof hints.visualizationMetadata === 'object'
+                    ? hints.visualizationMetadata
+                    : null;
+                renderFmuBindingAssistant();
                 return hints;
             } catch (_error) {
                 // FMU hints are best-effort and must not block the sync form.
                 if ((fields.keyInput?.value || '').trim() === selectedValue) {
                     fmuDescription = '';
                     fmuDescriptionAccessKey = '';
+                    fmuVisualizationMetadata = null;
+                    renderFmuBindingAssistant();
                 }
                 return {};
             }
@@ -656,6 +719,7 @@
                     clearAllFmuHints();
                     clearAssetValidation();
                     updateAssetVisibility();
+                    renderFmuBindingAssistant();
                 });
                 fields.keyInput.addEventListener('change', () => {
                     const laboratory = selectedLaboratory();
@@ -685,6 +749,7 @@
                     gatewayUploadedAssetAccessKey = '';
                     gatewayUploadedAssetType = '';
                     updateAssetFileAccept(fields.assetType.value);
+                    renderFmuBindingAssistant();
                 });
             }
             if (fields.assetFileInput) {
@@ -692,6 +757,7 @@
                     clearAssetValidation();
                     const file = fields.assetFileInput.files && fields.assetFileInput.files[0];
                     if (fields.assetFileName) fields.assetFileName.textContent = file ? file.name : 'No file chosen';
+                    renderFmuBindingAssistant(file);
                 });
             }
             if (fields.assetUrl) {
@@ -712,6 +778,7 @@
                     fields.importAssetButton.disabled = true;
                     try {
                         const asset = await importCompanionAsset(laboratory.labId, laboratory.accessKey, assetType);
+                        await loadImportedGlbForBindingEditor(asset);
                         const validationKey = assetValidationKey(laboratory.labId, laboratory.accessKey, asset.assetType, null, asset.path);
                         if (needsAssetValidationAcknowledgement(asset.validation)) {
                             acknowledgedAssetValidationKey = validationKey;

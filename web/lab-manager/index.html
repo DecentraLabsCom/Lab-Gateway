@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-digital-twin-assets-v1">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-digital-twin-assets-v2">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -808,6 +808,7 @@
                                     <span class="file-picker-name" id="fmuSyncAssetFileName" aria-live="polite">No file chosen</span>
                                 </div>
                                 <div class="digital-twin-validation" id="fmuSyncAssetValidation" role="status" aria-live="polite" hidden></div>
+                                <div class="digital-twin-validation fmi-glb-binding-assistant" id="fmuSyncBindingAssistant" hidden></div>
                                 <small class="muted-text">Alternatively, upload a GLB scene or Three.js app ZIP. Automatic detection infers the type from the selected file. An uploaded AASX must carry its own visual asset reference.</small>
                             </div>
                             <label class="field full">
@@ -1426,7 +1427,8 @@
     <script src="../assets/js/lab-manager-notifications-config.js?v=lab-manager-notifications-config-v2"></script>
     <script src="../assets/js/lab-manager-notifications.js?v=lab-manager-notifications-v2"></script>
     <script src="../assets/js/lab-manager-notifications-feature.js?v=lab-manager-notifications-feature-v1"></script>
-    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v14"></script>
+    <script src="../assets/js/lab-manager-fmu-glb-bindings.js?v=lab-manager-fmu-glb-bindings-v1"></script>
+    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v15"></script>
     <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v7"></script>
     <script src="../assets/js/lab-manager-aasx.js?v=lab-manager-aasx-v3"></script>
     <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v7"></script>

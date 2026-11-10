@@ -44,24 +44,40 @@ def test_proxy_presets_and_experiments_round_trip_arrays_enumerations_and_csv_st
             "gain": [1.25, 2], "enabled": False, "labels": ["a<&", "b"], "mode": [0, 1],
         }}],
         fmi_ls_experiments=[{"name": "Step", "description": "Response", "parameters": {"gain": 3},
-            "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.5},
+            "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.5, "tolerance": 1e-7},
             "inputSchedule": [{"time": 0, "values": {"input,1": 2, "u": 3}},
                               {"time": 0.5, "values": {"input,1": 4, "u": 5}}]}],
     ))
     prefix = "extra/org.fmi-standard.fmi-ls-ref/"
     parameter_xml = ET.fromstring(files[prefix + "parameters/configuration-1.ssv"])
-    params = {p.attrib["name"]: p for p in parameter_xml.find("{*}Parameters")}
-    assert params["enabled"].find("{*}Boolean").attrib["value"] == "false"
-    assert params["gain"].find("{*}Dimension").attrib["size"] == "2"
-    assert [x.text for x in params["labels"].find("{*}String")] == ["a<&", "b"]
-    assert [x.text for x in params["mode"].find("{*}Enumeration")] == ["off", "on"]
+    parameter_values = parameter_xml.find("{*}Parameters")
+    assert parameter_values is not None
+    params = {p.attrib["name"]: p for p in parameter_values}
+    enabled_value = params["enabled"].find("{*}Boolean")
+    gain_dimension = params["gain"].find("{*}Dimension")
+    label_values = params["labels"].find("{*}String")
+    mode_values = params["mode"].find("{*}Enumeration")
+    assert enabled_value is not None
+    assert gain_dimension is not None
+    assert label_values is not None
+    assert mode_values is not None
+    assert enabled_value.attrib["value"] == "false"
+    assert gain_dimension.attrib["size"] == "2"
+    assert [x.text for x in label_values] == ["a<&", "b"]
+    assert [x.text for x in mode_values] == ["off", "on"]
     rows = list(csv.reader(io.StringIO(files[prefix + "experiments/stimuli/experiment-1.csv"].decode())))
     assert rows == [["time", "input,1", "u"], ["0", "2", "3"], ["0.5", "4", "5"]]
     experiments = ET.fromstring(files[prefix + "experiments/provider-experiments.exp"])
     case = experiments.find("{*}TransientExperiment")
+    assert case is not None
     assert case.attrib["stopTime"] == "1"
-    assert case.find("{*}Parameters").attrib["source"] == "../parameters/experiment-1.ssv"
-    assert case.find("{*}Stimuli").attrib["source"] == "stimuli/experiment-1.csv"
+    assert float(case.attrib["tolerance"]) == pytest.approx(1e-7)
+    parameter_reference = case.find("{*}Parameters")
+    stimuli_reference = case.find("{*}Stimuli")
+    assert parameter_reference is not None
+    assert stimuli_reference is not None
+    assert parameter_reference.attrib["source"] == "../parameters/experiment-1.ssv"
+    assert stimuli_reference.attrib["source"] == "stimuli/experiment-1.csv"
     assert json.loads(files["resources/config.json"]) == {"sessionTicket": "ticket"}
 
 
@@ -94,9 +110,15 @@ def _dae():
 def test_proxy_dae_manifest_preserves_selector_and_model_structure_references():
     files = _files(_build(fmi_ls_dae=_dae(), fmi_ls_model_metadata=_metadata()))
     root = ET.fromstring(files["extra/org.fmi-standard.fmi-ls-dae/fmi-ls-manifest.xml"])
-    assert root.find("EnableDAEParameter").attrib == {"valueReference": "1"}
-    assert root.find("AlgebraicVariables/AlgebraicVariable").attrib == {"valueReference": "2"}
-    assert root.find("ModelStructure/Residual").attrib == {"valueReference": "3", "dependencies": "2", "dependenciesKind": "dependent"}
+    enable_parameter = root.find("EnableDAEParameter")
+    algebraic_variable = root.find("AlgebraicVariables/AlgebraicVariable")
+    residual = root.find("ModelStructure/Residual")
+    assert enable_parameter is not None
+    assert algebraic_variable is not None
+    assert residual is not None
+    assert enable_parameter.attrib == {"valueReference": "1"}
+    assert algebraic_variable.attrib == {"valueReference": "2"}
+    assert residual.attrib == {"valueReference": "3", "dependencies": "2", "dependenciesKind": "dependent"}
 
 
 @pytest.mark.parametrize("field,value", [

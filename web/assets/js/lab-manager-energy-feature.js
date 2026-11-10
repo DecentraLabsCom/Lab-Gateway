@@ -114,6 +114,7 @@
                 assetFileInput: $('#fmuSyncAssetFile'),
                 assetFileName: $('#fmuSyncAssetFileName'),
                 assetValidation: $('#fmuSyncAssetValidation'),
+                bindingAssistant: $('#fmuSyncBindingAssistant'),
                 importAssetButton: $('#fmuSyncImportAssetBtn'),
                 contactEmail: $('#fmuSyncContactEmail'),
             },

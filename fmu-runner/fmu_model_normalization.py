@@ -34,7 +34,8 @@ def _normalize_model_structure(raw: Any, value_references: set[int], *, allow_da
         if not isinstance(raw_entries, list) or len(raw_entries) > _MAX_MODEL_STRUCTURE_ENTRIES:
             raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
         entries: list[dict[str, Any]] = []
-        seen_references: set[int] = set()
+        seen_names: set[str] = set()
+        seen_unidentified_references: set[int] = set()
         for raw_entry in raw_entries:
             if not isinstance(raw_entry, dict):
                 raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
@@ -43,10 +44,8 @@ def _normalize_model_structure(raw: Any, value_references: set[int], *, allow_da
                 reference is None
                 or reference > _MAX_FMI_VALUE_REFERENCE
                 or reference not in value_references
-                or reference in seen_references
             ):
                 raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
-            seen_references.add(reference)
             entry: dict[str, Any] = {"valueReference": reference}
             if "stateValueReference" in raw_entry:
                 state_reference = _normalize_fmi_non_negative_integer(raw_entry.get("stateValueReference"))
@@ -69,7 +68,14 @@ def _normalize_model_structure(raw: Any, value_references: set[int], *, allow_da
             if name is not None:
                 if not isinstance(name, str) or not name or len(name) > 1024:
                     raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+                if name in seen_names:
+                    raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+                seen_names.add(name)
                 entry["name"] = name
+            elif reference in seen_unidentified_references:
+                raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
+            else:
+                seen_unidentified_references.add(reference)
             dependencies = raw_entry.get("dependencies")
             if dependencies is not None:
                 if not isinstance(dependencies, list) or len(dependencies) > _MAX_MODEL_STRUCTURE_ENTRIES:
@@ -80,8 +86,6 @@ def _normalize_model_structure(raw: Any, value_references: set[int], *, allow_da
                     if value is None or value > _MAX_FMI_VALUE_REFERENCE or value not in value_references:
                         raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
                     normalized_dependencies.append(value)
-                if len(normalized_dependencies) != len(set(normalized_dependencies)):
-                    raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
                 entry["dependencies"] = normalized_dependencies
             dependency_names = raw_entry.get("dependencyNames")
             if dependency_names is not None:
@@ -90,6 +94,7 @@ def _normalize_model_structure(raw: Any, value_references: set[int], *, allow_da
                     or not isinstance(dependencies, list)
                     or len(dependency_names) != len(dependencies)
                     or any(not isinstance(dependency_name, str) or not dependency_name or len(dependency_name) > 1024 for dependency_name in dependency_names)
+                    or len(dependency_names) != len(set(dependency_names))
                 ):
                     raise HTTPException(status_code=502, detail="Station backend returned invalid FMI ModelStructure metadata")
                 entry["dependencyNames"] = list(dependency_names)
@@ -673,7 +678,7 @@ def normalize_model_metadata(payload: dict[str, Any]) -> ModelMetadata:
             model_variable_references,
             allow_dae=True,
         )
-    if supports_me is True:
+    if normalized["supportsModelExchange"] or normalized["supportsCoSimulation"]:
         raw_model_structure = payload.get("modelStructure")
         if raw_model_structure is not None:
             normalized["modelStructure"] = _normalize_model_structure(

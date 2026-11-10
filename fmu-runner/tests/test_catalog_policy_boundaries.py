@@ -67,7 +67,7 @@ def test_presets_require_actual_writable_model_variables(policy, mutate):
 def _experiment(**changes):
     return {"name": " Step response ", "status": "ready", "parameters": {"gain": 2},
             "parameterUnits": {"gain": "K"},
-            "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.25},
+            "options": {"startTime": 0, "stopTime": 1, "stepSize": 0.25, "tolerance": 1e-7},
             "inputSchedule": [{"time": 0.25, "values": {"u": 1}}], **changes}
 
 
@@ -80,7 +80,9 @@ def test_experiments_keep_authorized_initialization_and_ordered_grid_aligned_sti
     original = deepcopy(experiment)
     assert filter_authorized_experiments(_discover(experiment), policy) == [{
         "id": "experiment-0-0", "name": "Step response", "description": "Provider experiment",
-        "parameters": {"gain": 2}, "options": {"startTime": 0.0, "stopTime": 1.0, "stepSize": 0.25},
+        "parameters": {"gain": 2}, "options": {
+            "startTime": 0.0, "stopTime": 1.0, "stepSize": 0.25, "tolerance": 1e-7,
+        },
         "inputSchedule": [{"time": 0.25, "values": {"u": 1.0}}],
     }]
     assert experiment == original
@@ -91,6 +93,8 @@ def test_experiments_keep_authorized_initialization_and_ordered_grid_aligned_sti
     {"name": "x" * 181}, {"parameters": []}, {"parameterUnits": []}, {"options": []},
     {"inputSchedule": None}, {"inputSchedule": [{}] * 129},
     {"options": {"unsupported": 1}}, {"options": {"stepSize": True}},
+    {"options": {"tolerance": True}}, {"options": {"tolerance": 0}},
+    {"options": {"tolerance": float("inf")}},
     {"options": {"startTime": float("inf")}}, {"options": {"stepSize": 0}},
     {"options": {"startTime": 2, "stopTime": 1}},
     {"parameters": {"locked": 1}}, {"parameters": {}, "parameterUnits": {"gain": "K"}},

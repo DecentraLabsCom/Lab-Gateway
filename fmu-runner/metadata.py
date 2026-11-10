@@ -708,6 +708,12 @@ def _model_metadata_from_model_description(
             entry["dimensions"] = dimensions
         variables.append(entry)
 
+    independent_variable = next(
+        (variable for variable in variables if variable.get("causality") == "independent"),
+        None,
+    )
+    time_unit = independent_variable.get("unit") if independent_variable else None
+
     interface = getattr(md, "coSimulation", None) or getattr(md, "modelExchange", None)
     capabilities: dict = {}
     if interface:
@@ -886,9 +892,13 @@ def _model_metadata_from_model_description(
         "defaultStopTime": default_stop,
         "defaultStepSize": default_step,
         "defaultTolerance": default_tolerance,
+        **({"timeUnit": time_unit} if isinstance(time_unit, str) and time_unit else {}),
         "numberOfContinuousStates": int(getattr(md, "numberOfContinuousStates", 0) or 0),
         "numberOfEventIndicators": int(getattr(md, "numberOfEventIndicators", 0) or 0),
-        **({"modelStructure": model_structure} if supports_me else {}),
+        # FMI ModelStructure exists for Co-Simulation as well as Model
+        # Exchange. Preserve its output dependencies for authorized viewers;
+        # derivative and state sections are naturally empty for CS models.
+        **({"modelStructure": model_structure} if supports_cs or supports_me else {}),
         **({"modelExchangeCapabilities": model_exchange_capabilities} if model_exchange_capabilities else {}),
         "modelVariables": variables,
         "description": _normalize_xml_value(getattr(md, "description", None)) or "",
@@ -1007,10 +1017,28 @@ def _public_model_metadata(metadata: dict) -> dict:
     for key in ("defaultStartTime", "defaultStopTime", "defaultStepSize", "defaultTolerance"):
         if metadata.get(key) is not None:
             payload[key] = float(metadata[key])
+    time_unit = metadata.get("timeUnit")
+    if isinstance(time_unit, str) and time_unit.strip():
+        payload["timeUnit"] = time_unit.strip()[:128]
     for key in ("numberOfContinuousStates", "numberOfEventIndicators"):
         value = metadata.get(key)
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             payload[key] = value
+    model_structure = metadata.get("modelStructure")
+    if isinstance(model_structure, dict):
+        payload["modelStructure"] = model_structure
+    model_exchange_capabilities = metadata.get("modelExchangeCapabilities")
+    if isinstance(model_exchange_capabilities, dict):
+        payload["modelExchangeCapabilities"] = {
+            name: value
+            for name, value in model_exchange_capabilities.items()
+            if name in {
+                "needsExecutionTool", "canBeInstantiatedOnlyOncePerProcess", "canNotUseMemoryManagementFunctions",
+                "canGetAndSetFMUstate", "canSerializeFMUstate", "providesDirectionalDerivative",
+                "providesAdjointDerivatives", "completedIntegratorStepNotNeeded", "needsCompletedIntegratorStep",
+            }
+            and isinstance(value, bool)
+        }
     for key in (
         "description", "author", "version", "copyright", "license",
         "generationTool", "generationDateAndTime",

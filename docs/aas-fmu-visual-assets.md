@@ -122,6 +122,35 @@ See the [DecentraLabs FMI GLB bindings contract](https://github.com/DecentraLabs
 for the canonical versioned specification, target semantics, examples and JSON
 Schema.
 
+## Author bindings in Lab Manager
+
+On a Full Gateway, choose an FMU and upload a GLB in **Lab Manager > Digital
+Twins** to open the binding editor. A GLB companion already stored by that
+Gateway can also be imported into the editor. Existing node-level
+`extras.fmiBindings`, including any `valueMap`, are loaded into the form so the
+provider can review or extend them.
+
+For each node, the editor ranks variable suggestions using matching tokens from
+the node name and FMI variable name, display name, description, quantity and
+enumeration labels. Variable choices show the FMI type, unit or display unit,
+and available enumeration states. Array dimensions determine the number of
+coordinates required when a binding selects an array element; the editor
+validates the coordinate count and known dimension bounds. The provider still
+chooses the node, variable and scene target explicitly, including the axis for
+scalar transforms.
+
+For translation targets, enter the GLB's metres per scene unit. The editor can
+suggest a scale only for an FMI base unit matching metres or radians and with a
+zero base-unit offset. It does not infer non-zero offsets or display-unit
+conversions. `scale` and `offset` in the binding use the contract mapping
+`sceneValue = fmiValue * scale + offset`, so review both values against the
+FMU's FMI unit definitions and the scene's coordinate system. Apply the edits
+to create a new GLB upload; the existing immutable Gateway asset is not
+modified. Upload validation reports bindings that do not match the selected
+FMU or supported scene targets before the provider synchronizes the AAS shell.
+External public GLB URLs that Gateway cannot import are outside this editor
+workflow.
+
 ## Marketplace runtime flow
 
 Marketplace resolves either managed asset against the lab's on-chain Gateway

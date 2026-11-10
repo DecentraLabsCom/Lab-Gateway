@@ -369,6 +369,54 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
                         variable_name,
                     )
                     valid = False
+            if "valueMap" in binding:
+                value_map = binding.get("valueMap")
+                if (
+                    not isinstance(value_map, dict)
+                    or not value_map
+                    or len(value_map) > 128
+                    or any(not isinstance(key, str) or len(key) > 128 for key in value_map)
+                ):
+                    add_issue(
+                        "invalid_binding_field",
+                        "valueMap must be an object with at most 128 short FMI values.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                elif target == "visible":
+                    if (
+                        "visibleWhenGreaterThanOrEqual" in binding
+                        or any(not isinstance(mapped, bool) for mapped in value_map.values())
+                    ):
+                        add_issue(
+                            "invalid_binding_field",
+                            "A visible valueMap must map FMI values to booleans and cannot use a numeric threshold.",
+                            node_name,
+                            binding_index,
+                            variable_name,
+                        )
+                        valid = False
+                elif target == "material.color":
+                    if any(not _is_binding_color(mapped) for mapped in value_map.values()):
+                        add_issue(
+                            "invalid_binding_field",
+                            "A material.color valueMap must map FMI values to color strings or 24-bit color integers.",
+                            node_name,
+                            binding_index,
+                            variable_name,
+                        )
+                        valid = False
+                else:
+                    add_issue(
+                        "invalid_binding_field",
+                        "valueMap is supported only for visible and material.color targets.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
             binding_indices = binding.get("indices")
             if binding_indices is not None and (
                 not isinstance(binding_indices, list)

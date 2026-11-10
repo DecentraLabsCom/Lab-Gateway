@@ -140,6 +140,73 @@ def visible_model_variables(
     return visible
 
 
+def _visible_fmi_model_structure(
+    raw_structure: Any,
+    variables: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Keep only ModelStructure entries whose variables are visible to this reservation."""
+    if not isinstance(raw_structure, Mapping):
+        return {}
+    allowed_names = {item.get("name") for item in variables if isinstance(item.get("name"), str)}
+    name_by_reference = {
+        str(item.get("valueReference")): item.get("name")
+        for item in variables
+        if isinstance(item.get("name"), str) and item.get("valueReference") is not None
+    }
+    result: dict[str, list[dict[str, Any]]] = {}
+    for section in ("outputs", "derivatives", "clockedStates", "initialUnknowns", "eventIndicators"):
+        raw_entries = raw_structure.get(section)
+        if not isinstance(raw_entries, list):
+            continue
+        safe_entries: list[dict[str, Any]] = []
+        for entry in raw_entries[:100_000]:
+            if not isinstance(entry, Mapping):
+                continue
+            reference = entry.get("valueReference")
+            name = entry.get("name") if isinstance(entry.get("name"), str) else None
+            if name not in allowed_names:
+                name = name_by_reference.get(str(reference))
+            state_name = entry.get("stateName") if isinstance(entry.get("stateName"), str) else None
+            if state_name not in allowed_names:
+                state_name = None
+            if not name and not state_name:
+                continue
+            safe_entry: dict[str, Any] = {}
+            if name:
+                safe_entry["name"] = name[:512]
+            if state_name:
+                safe_entry["stateName"] = state_name[:512]
+
+            raw_dependencies = entry.get("dependencies")
+            raw_names = entry.get("dependencyNames")
+            raw_kinds = entry.get("dependenciesKind")
+            dependency_count = max(
+                len(raw_names) if isinstance(raw_names, list) else 0,
+                len(raw_dependencies) if isinstance(raw_dependencies, list) else 0,
+            )
+            selected: list[tuple[str, str | None]] = []
+            for index in range(min(dependency_count, 100_000)):
+                dependency_name = raw_names[index] if isinstance(raw_names, list) and index < len(raw_names) else None
+                dependency_reference = raw_dependencies[index] if isinstance(raw_dependencies, list) and index < len(raw_dependencies) else None
+                if dependency_name not in allowed_names:
+                    dependency_name = name_by_reference.get(str(dependency_reference))
+                if not isinstance(dependency_name, str) or dependency_name not in allowed_names:
+                    continue
+                kind = raw_kinds[index] if isinstance(raw_kinds, list) and index < len(raw_kinds) else None
+                selected.append((dependency_name[:512], kind[:64] if isinstance(kind, str) else None))
+                if len(selected) >= 4096:
+                    break
+            if selected:
+                safe_entry["dependencyNames"] = [dependency for dependency, _kind in selected]
+                kinds = [kind for _dependency, kind in selected]
+                if all(kind is not None for kind in kinds):
+                    safe_entry["dependenciesKind"] = kinds
+            safe_entries.append(safe_entry)
+        if safe_entries:
+            result[section] = safe_entries
+    return result
+
+
 def filter_model_description(
     policy: Mapping[str, Any],
     payload: Any,
@@ -188,6 +255,12 @@ def filter_model_description(
         ):
             variable.pop("start", None)
     filtered["modelVariables"] = safe_variables
+    if not include_proxy_model_exchange:
+        safe_structure = _visible_fmi_model_structure(payload.get("modelStructure"), safe_variables)
+        if safe_structure:
+            filtered["modelStructure"] = safe_structure
+        else:
+            filtered.pop("modelStructure", None)
     if include_proxy_model_exchange:
         model_structure = payload.get("modelStructure")
         if not isinstance(model_structure, Mapping):

@@ -331,8 +331,9 @@ def _fmi_model_description_extension(metadata: dict) -> Optional[dict]:
     fields = (
         "fmiVersion", "modelName", "description", "author", "version", "copyright", "license",
         "generationTool", "generationDateAndTime", "variableNamingConvention", "defaultStartTime", "defaultStopTime",
-        "defaultStepSize", "defaultTolerance", "numberOfContinuousStates", "numberOfEventIndicators",
-        "capabilities", "unitDefinitions", "typeDefinitions",
+        "defaultStepSize", "defaultTolerance", "timeUnit", "numberOfContinuousStates", "numberOfEventIndicators",
+        "supportsCoSimulation", "supportsModelExchange", "capabilities", "modelExchangeCapabilities",
+        "modelStructure", "unitDefinitions", "typeDefinitions",
     )
     model_description = {
         field: metadata[field]
@@ -374,6 +375,11 @@ def _fmi_model_description_extension(metadata: dict) -> Optional[dict]:
         return None
 
     encoded = json.dumps(model_description, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > _MAX_FMI_MODEL_DESCRIPTION_METADATA_BYTES and "modelStructure" in model_description:
+        # Keep large dependency graphs available from the reservation-bound
+        # FMU metadata route without making an AAS sync fail on extension size.
+        model_description.pop("modelStructure", None)
+        encoded = json.dumps(model_description, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     if len(encoded.encode("utf-8")) > _MAX_FMI_MODEL_DESCRIPTION_METADATA_BYTES:
         raise ValueError("FMI model-description metadata exceeds the AAS extension size limit")
     return {
