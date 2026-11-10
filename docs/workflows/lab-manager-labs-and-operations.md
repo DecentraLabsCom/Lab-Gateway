@@ -248,7 +248,8 @@ specific trust error instead of treating the failure as an authentication
 problem. Do not disable TLS validation or configure `TrustedHosts`.
 
 Windows v2 WinRM must use HTTPS/TLS on port `5986`, and the address must belong to
-`WINRM_MANAGEMENT_CIDRS`. Do not publish the listener or Ops Worker to the
+`STATION_MANAGEMENT_CIDRS` (or the legacy `WINRM_MANAGEMENT_CIDRS` alias).
+Do not publish the listener or Ops Worker to the
 Internet.
 
 ### Linux v3: SSH credential and host-key trust

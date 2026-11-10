@@ -70,7 +70,7 @@ OPS_BACKEND_MYSQL_PASSWORD=cambia_a_contraseña_segura
 OPS_GUACAMOLE_MYSQL_USER=ops_guac
 OPS_GUACAMOLE_MYSQL_PASSWORD=cambia_a_contraseña_segura
 OPS_SECRETS_KEY=<clave-fernet-estable>
-STATION_MANAGEMENT_CIDRS=10.7.74.0/24
+STATION_MANAGEMENT_CIDRS=10.192.38.0/24
 OPS_WINRM_TRUST_PATH=/app/data/winrm-certificates
 
 # Administrador de Guacamole (no uses 'guacadmin' en producción)
@@ -90,22 +90,25 @@ CORS_ALLOWED_ORIGINS=https://www.decentralabs-marketplace.app
 FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 ```
 
-`STATION_MANAGEMENT_CIDRS` es la lista de redes privadas desde las que Ops
-Worker puede alcanzar las Lab Stations configuradas. Las estaciones Windows
-usan WinRM HTTPS en el puerto 5986; Lab Manager configura las nuevas con
-Station Contract v3 por defecto y mantiene v2 para estaciones antiguas. Linux
-v3 usa SSH en el puerto definido para el host. Esta lista es obligatoria antes
-de configurar cualquier host de Ops, y la dirección de cada estación debe
-pertenecer a una de esas redes. Si se añade un host directamente al catálogo
-estático, declara `contract.major` como `3` para una estación actual o `2` para
-una estación antigua. `WINRM_MANAGEMENT_CIDRS` sigue disponible como alias de
-compatibilidad. Es una política de seguridad y
-no se deduce de Guacamole: Guacamole también puede contener conexiones de
-escritorio exclusivamente administrativas y no proporciona la máscara de red
-autorizada.
+`STATION_MANAGEMENT_CIDRS` contiene las redes de destino de las direcciones de
+Lab Station que Ops Worker puede gestionar. La dirección configurada de cada
+estación debe resolver a una IP dentro de una de esas redes. No es la subred de
+origen del Gateway y no tiene por qué coincidir con
+`WOL_LAN_SUBNET`: una ruta indica cómo alcanzar una dirección, pero no qué red
+debe autorizarse. Configura las subredes reales de las estaciones que gestiona
+cada Gateway; pueden variar entre Gateways y se separan con comas. El CIDR es
+obligatorio antes de configurar hosts de Ops. Las estaciones Windows usan
+WinRM HTTPS en el puerto 5986; Lab Manager configura las nuevas con Station
+Contract v3 por defecto y mantiene v2 para estaciones antiguas. Linux v3 usa
+SSH en el puerto definido para el host. Si se añade un host directamente al
+catálogo estático, declara `contract.major` como `3` para una estación actual
+o `2` para una estación antigua. `WINRM_MANAGEMENT_CIDRS` sigue disponible
+como alias para despliegues existentes. Es una política de seguridad y no se
+deduce de Guacamole: Guacamole también puede contener conexiones de escritorio
+exclusivamente administrativas y no proporciona la máscara autorizada.
 
-Usa el CIDR real de la VLAN de gestión. Si solo se autoriza una estación, usa
-un `/32` específico, por ejemplo:
+Usa el CIDR real de la red de Station de este Gateway. Si solo se autoriza una
+estación, usa un `/32` específico, por ejemplo:
 
 ```env
 STATION_MANAGEMENT_CIDRS=10.192.38.82/32
@@ -343,6 +346,21 @@ En particular, `fmu-access-state` debe ser escribible por el UID de OpenResty
 porque almacena los mapeos FMU cifrados y persistentes. Si ejecutas el stack
 mediante `sudo`, conserva el `HOST_UID` y `HOST_GID` de la cuenta de despliegue;
 no los sustituyas silenciosamente por los de root.
+
+Ops Worker también necesita leer los esquemas públicos Station Contract v3 de
+su bind mount de solo lectura. En Linux/macOS, ajusta los permisos del
+repositorio antes de iniciar Compose (y repítelo tras una actualización si el
+checkout perdió estos modos):
+
+```bash
+chmod 755 contracts contracts/station contracts/station/v3
+chmod 644 contracts/station/v3/*.json
+```
+
+Si los ficheros del repositorio pertenecen a root, ejecuta estos comandos con
+`sudo`. El script de setup repara estos permisos automáticamente. Si los
+corriges en un despliegue manual que ya está en marcha, reinicia el worker con
+`docker compose restart ops-worker`.
 
 ## Paso 6 — Añadir certificados SSL
 

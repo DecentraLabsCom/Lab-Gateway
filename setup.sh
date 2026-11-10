@@ -98,6 +98,33 @@ secure_gateway_state() {
     fi
 }
 
+repair_station_contract_permissions() {
+    # ops-worker runs as an unprivileged user and bind-mounts these public
+    # schemas read-only. Keep the host directories traversable and schema
+    # files readable, including checkouts carried forward from older installs.
+    local schema_dir
+
+    for schema_dir in contracts contracts/station contracts/station/v3; do
+        if [ ! -d "$schema_dir" ]; then
+            echo "Station Contract v3 schema directory is missing: $schema_dir." >&2
+            return 1
+        fi
+        if ! chmod 755 "$schema_dir"; then
+            echo "Unable to make Station Contract v3 schema directory traversable: $schema_dir. Run setup as its owner or with sudo." >&2
+            return 1
+        fi
+    done
+
+    if ! find contracts/station/v3 -maxdepth 1 -type f -name '*.json' -print -quit | grep -q .; then
+        echo "No Station Contract v3 JSON schema files found in contracts/station/v3." >&2
+        return 1
+    fi
+    if ! find contracts/station/v3 -maxdepth 1 -type f -name '*.json' -exec chmod 644 {} +; then
+        echo "Unable to make Station Contract v3 JSON schemas readable. Run setup as their owner or with sudo." >&2
+        return 1
+    fi
+}
+
 write_compose_secret() {
     local secret_name="$1"
     local env_key="$2"
@@ -885,19 +912,24 @@ else
 fi
 echo
 
-echo "Lab Station WinRM Management Network"
+echo "Lab Station Management Network"
 echo "===================================="
-echo "This restricts Ops Worker WinRM access to the private management network used by Lab Stations."
+echo "These destination CIDRs must contain the IP addresses of the Lab Stations Ops Worker will manage."
+echo "They may differ from the Gateway/macvlan subnet; routes do not identify which networks are authorized."
 echo "Enter comma-separated CIDRs. Leave empty only if no Ops hosts will be configured yet."
-winrm_management_cidrs_default="$(get_env_default "WINRM_MANAGEMENT_CIDRS" "$ROOT_ENV_FILE")"
-read -p "WINRM_MANAGEMENT_CIDRS [${winrm_management_cidrs_default:-empty -> configure before adding hosts}]: " winrm_management_cidrs
-winrm_management_cidrs="${winrm_management_cidrs:-$winrm_management_cidrs_default}"
-winrm_management_cidrs=$(echo "$winrm_management_cidrs" | sed 's/[[:space:]]//g')
-update_env_var "$ROOT_ENV_FILE" "WINRM_MANAGEMENT_CIDRS" "$winrm_management_cidrs"
-if [ -z "$winrm_management_cidrs" ]; then
-    echo "   * WINRM_MANAGEMENT_CIDRS left empty; configure it before adding Ops hosts."
+station_management_cidrs_default="$(get_env_default "STATION_MANAGEMENT_CIDRS" "$ROOT_ENV_FILE")"
+if [ -z "$station_management_cidrs_default" ]; then
+    station_management_cidrs_default="$(get_env_default "WINRM_MANAGEMENT_CIDRS" "$ROOT_ENV_FILE")"
+fi
+read -p "STATION_MANAGEMENT_CIDRS [${station_management_cidrs_default:-e.g. 10.192.38.0/24; empty only if no hosts yet}]: " station_management_cidrs
+station_management_cidrs="${station_management_cidrs:-$station_management_cidrs_default}"
+station_management_cidrs=$(echo "$station_management_cidrs" | sed 's/[[:space:]]//g')
+update_env_var "$ROOT_ENV_FILE" "STATION_MANAGEMENT_CIDRS" "$station_management_cidrs"
+remove_env_var "$ROOT_ENV_FILE" "WINRM_MANAGEMENT_CIDRS"
+if [ -z "$station_management_cidrs" ]; then
+    echo "   * STATION_MANAGEMENT_CIDRS left empty; configure it before adding Ops hosts."
 else
-    echo "   * WINRM_MANAGEMENT_CIDRS set to: $winrm_management_cidrs"
+    echo "   * STATION_MANAGEMENT_CIDRS set to: $station_management_cidrs"
 fi
 echo
 
@@ -1454,6 +1486,10 @@ chmod 755 fmu-proxy-runtime/binaries/darwin64 2>/dev/null || true
 chmod 700 ops-data/guac-revocation-spool 2>/dev/null || true
 chmod 700 ops-data/winrm-certificates 2>/dev/null || true
 secure_gateway_state
+if ! repair_station_contract_permissions; then
+    echo "Repair Station Contract v3 permissions before starting Compose." >&2
+    exit 1
+fi
 if ! align_state_ownership; then
     echo "State directories are not writable by the Compose service identity." >&2
     exit 1

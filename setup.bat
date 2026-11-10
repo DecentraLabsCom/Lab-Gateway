@@ -407,24 +407,27 @@ if "!lab_manager_allowed_cidrs!"=="" (
 )
 echo.
 
-echo Lab Station WinRM Management Network
+echo Lab Station Management Network
 echo ====================================
-echo This restricts Ops Worker WinRM access to the private management network used by Lab Stations.
+echo These destination CIDRs must contain the IP addresses of the Lab Stations Ops Worker will manage.
+echo They may differ from the Gateway/macvlan subnet; routes do not identify authorized networks.
 echo Enter comma-separated CIDRs. Leave empty only if no Ops hosts will be configured yet.
-call :ReadEnvValue "%ROOT_ENV_FILE%" "WINRM_MANAGEMENT_CIDRS" winrm_management_cidrs_default
-set "winrm_management_cidrs="
-if defined winrm_management_cidrs_default (
-    set /p "winrm_management_cidrs=WINRM_MANAGEMENT_CIDRS [!winrm_management_cidrs_default!]: "
+call :ReadEnvValue "%ROOT_ENV_FILE%" "STATION_MANAGEMENT_CIDRS" station_management_cidrs_default
+if not defined station_management_cidrs_default call :ReadEnvValue "%ROOT_ENV_FILE%" "WINRM_MANAGEMENT_CIDRS" station_management_cidrs_default
+set "station_management_cidrs="
+if defined station_management_cidrs_default (
+    set /p "station_management_cidrs=STATION_MANAGEMENT_CIDRS [!station_management_cidrs_default!]: "
 ) else (
-    set /p "winrm_management_cidrs=WINRM_MANAGEMENT_CIDRS [empty -^> configure before adding hosts]: "
+    set /p "station_management_cidrs=STATION_MANAGEMENT_CIDRS [e.g. 10.192.38.0/24; empty only if no hosts yet]: "
 )
-if not defined winrm_management_cidrs set "winrm_management_cidrs=!winrm_management_cidrs_default!"
-if defined winrm_management_cidrs set "winrm_management_cidrs=!winrm_management_cidrs: =!"
-call :UpdateEnv "%ROOT_ENV_FILE%" "WINRM_MANAGEMENT_CIDRS" "!winrm_management_cidrs!"
-if "!winrm_management_cidrs!"=="" (
-    echo    * WINRM_MANAGEMENT_CIDRS left empty; configure it before adding Ops hosts.
+if not defined station_management_cidrs set "station_management_cidrs=!station_management_cidrs_default!"
+if defined station_management_cidrs set "station_management_cidrs=!station_management_cidrs: =!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "STATION_MANAGEMENT_CIDRS" "!station_management_cidrs!"
+call :RemoveEnv "%ROOT_ENV_FILE%" "WINRM_MANAGEMENT_CIDRS"
+if "!station_management_cidrs!"=="" (
+    echo    * STATION_MANAGEMENT_CIDRS left empty; configure it before adding Ops hosts.
 ) else (
-    echo    * WINRM_MANAGEMENT_CIDRS set to: !winrm_management_cidrs!
+    echo    * STATION_MANAGEMENT_CIDRS set to: !station_management_cidrs!
 )
 echo.
 

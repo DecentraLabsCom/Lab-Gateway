@@ -107,9 +107,12 @@ El script te guía automáticamente por los siguientes pasos:
    un `ISSUER` externo selecciona Lite. Lite exige un trust bundle coincidente
    emitido por el plano de control Full remoto.
 5. **Configura las operaciones de Lab Station y capacidades opcionales**: pide
-   la lista privada `WINRM_MANAGEMENT_CIDRS` usada por las estaciones locales
-   y, en Linux, si se debe activar el overlay macvlan de la LAN física de las
-   estaciones. Si se activa, pide la interfaz física, la subred de Stations,
+   `STATION_MANAGEMENT_CIDRS`, las redes privadas de destino que contienen las
+   direcciones de Station que Ops Worker puede gestionar. Puede diferir de la
+   subred de origen/macvlan del Gateway y no se puede deducir con seguridad de
+   las rutas. Los valores existentes de `WINRM_MANAGEMENT_CIDRS` se migran como
+   valor alternativo. Después pregunta si se debe activar el overlay macvlan de
+   la LAN física de las estaciones. Si se activa, pide la interfaz física, la subred de Stations,
    si la VLAN tiene router, la dirección opcional del gateway y el rango
    macvlan reservado. También pide las IP fijas de `guacd` y `ops-worker`
    dentro de ese rango, y valida que sean direcciones IPv4 de host distintas
@@ -130,6 +133,11 @@ El script te guía automáticamente por los siguientes pasos:
 El script es interactivo deliberadamente. Para un cambio repetible y no
 interactivo, usa la [guía manual de Compose](instalar-compose-manual.md) y la
 [referencia de configuración](../reference/configuration.md).
+
+En Linux/macOS, el script también repara los permisos del bind mount de los
+esquemas públicos Station Contract v3: establece `0755` en los directorios y
+`0644` en los ficheros JSON para que Ops Worker, que no se ejecuta como root,
+pueda validar los heartbeats, incluso al conservar un checkout antiguo.
 
 ## Paso 5 - Verificar que el stack esta en ejecucion
 

@@ -58,7 +58,8 @@ OPS_BACKEND_MYSQL_PASSWORD=contraseña_segura
 OPS_GUACAMOLE_MYSQL_USER=ops_guac
 OPS_GUACAMOLE_MYSQL_PASSWORD=contraseña_segura
 OPS_SECRETS_KEY=<clave-fernet-estable>
-WINRM_MANAGEMENT_CIDRS=10.7.74.0/24
+# Sustituye el ejemplo por la(s) red(es) de destino de las Stations de este Gateway.
+STATION_MANAGEMENT_CIDRS=10.192.38.0/24
 GUAC_ADMIN_USER=admin
 GUAC_ADMIN_PASS=contraseña_segura
 ADMIN_ACCESS_TOKEN=token_aleatorio
@@ -72,6 +73,11 @@ FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 HOST_UID=1000
 HOST_GID=1000
 ```
+
+Sustituye el ejemplo de `STATION_MANAGEMENT_CIDRS` por la(s) red(es) de destino
+que contienen las estaciones gestionadas por este Gateway. Pueden variar por
+Gateway y diferir de su subred macvlan; separa con comas los CIDR si hay varias
+redes de Stations.
 
 ```env
 # blockchain-services/.env

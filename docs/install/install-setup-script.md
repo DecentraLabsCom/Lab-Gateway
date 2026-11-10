@@ -107,8 +107,11 @@ The script guides you through the following steps automatically:
    an external `ISSUER` selects Lite mode. Lite setup requires a matching
    trust bundle issued by the remote Full control plane.
 5. **Configures Lab Station operations and optional capabilities** — it asks for
-   the private `WINRM_MANAGEMENT_CIDRS` allowlist used by local Stations and,
-   on Linux, whether to activate the direct physical Station LAN WoL overlay.
+   `STATION_MANAGEMENT_CIDRS`, the private destination networks containing the
+   Station addresses Ops Worker may manage. This can differ from the Gateway's
+   source/macvlan subnet and cannot be safely derived from routes. Existing
+   `WINRM_MANAGEMENT_CIDRS` values are migrated as a fallback. The script then
+   asks whether to activate the physical Station LAN WoL overlay on Linux.
    When enabled, it asks for the parent NIC, Station subnet, whether the VLAN
    has a router, the optional gateway address, and the reserved macvlan range.
    It also asks for distinct fixed IPv4 addresses for `guacd` and `ops-worker`
@@ -128,6 +131,11 @@ The script guides you through the following steps automatically:
 The script is interactive by design. For a repeatable non-interactive change,
 use the [manual Compose guide](install-manual-compose.md) together with the
 [configuration reference](../reference/configuration.md).
+
+On Linux/macOS, the script also repairs permissions on the public Station
+Contract v3 schema bind mount: directories are set to `0755` and schema JSON
+files to `0644`, so the non-root Ops Worker can validate station heartbeats,
+including after an older checkout is carried forward.
 
 ## Step 5 - Verify the stack is running
 
