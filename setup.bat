@@ -13,8 +13,10 @@ set "compose_full="
 set "cf_enabled=0"
 set "certbot_enabled=0"
 set "aas_enabled=0"
+set "aas_support_enabled=0"
 set "fmu_runner_enabled=0"
 set "fmu_runner_profile=fmu-runner"
+set "compose_profile_list="
 set "external_aas_url="
 set "existing_mysql_root_password="
 set "existing_guacamole_mysql_password="
@@ -834,6 +836,7 @@ if not "!issuer_value!"=="" (
             echo No URL provided. AAS support disabled.
             call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" ""
         ) else (
+            set "aas_support_enabled=1"
             echo    * External AAS server: !external_aas_url!
             echo    * Bundled basyx-aas-server / basyx-mongo containers will NOT be started.
             call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" "!external_aas_url!"
@@ -861,6 +864,17 @@ if not "!issuer_value!"=="" (
         call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ALLOWED_HOSTS" ""
         call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_SERVICE_TOKEN" ""
         set "aas_enabled=1"
+        set "aas_support_enabled=1"
+    )
+)
+if "!aas_enabled!"=="1" (
+    call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ENABLED" "true"
+) else (
+    if "!aas_support_enabled!"=="1" (
+        REM BASYX_AAS_URL auto-enables an external AAS; do not store the same fact twice.
+        call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ENABLED" ""
+    ) else (
+        call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ENABLED" "false"
     )
 )
 echo.
@@ -912,8 +926,14 @@ if "!cf_enabled!"=="1" (
 )
 REM Build complete compose command: base + files + profile
 set "compose_full=%compose_cmd% !compose_files!"
-if "!cf_enabled!"=="1" set "compose_full=!compose_full! --profile !cf_profile!"
-if "!fmu_runner_enabled!"=="1" set "compose_full=!compose_full! --profile !fmu_runner_profile!"
+if "!cf_enabled!"=="1" (
+    set "compose_full=!compose_full! --profile !cf_profile!"
+    call :AppendComposeProfile "!cf_profile!"
+)
+if "!fmu_runner_enabled!"=="1" (
+    set "compose_full=!compose_full! --profile !fmu_runner_profile!"
+    call :AppendComposeProfile "!fmu_runner_profile!"
+)
 set "compose_up_args=up -d"
 if "!fmu_runner_enabled!"=="0" set "compose_up_args=up -d --scale fmu-runner=0"
 echo.
@@ -1000,8 +1020,15 @@ set "certbot_email="
 call :ReadEnvValue "%ROOT_ENV_FILE%" "CERTBOT_DOMAINS" certbot_domains
 call :ReadEnvValue "%ROOT_ENV_FILE%" "CERTBOT_EMAIL" certbot_email
 if not "!certbot_domains!"=="" if not "!certbot_email!"=="" set "certbot_enabled=1"
-if "!certbot_enabled!"=="1" set "compose_full=!compose_full! --profile certbot"
-if "!aas_enabled!"=="1" set "compose_full=!compose_full! --profile aas"
+if "!certbot_enabled!"=="1" (
+    set "compose_full=!compose_full! --profile certbot"
+    call :AppendComposeProfile "certbot"
+)
+if "!aas_enabled!"=="1" (
+    set "compose_full=!compose_full! --profile aas"
+    call :AppendComposeProfile "aas"
+)
+call :UpdateEnv "%ROOT_ENV_FILE%" "COMPOSE_PROFILES" "!compose_profile_list!"
 echo.
 
 echo Blockchain Services Configuration
@@ -1261,6 +1288,16 @@ set "env_file=%~1"
 set "env_key=%~2"
 set "env_value=%~3"
 powershell -NoLogo -NoProfile -Command "& { param($file,$key,$value); if (-not (Test-Path -LiteralPath $file)) { New-Item -Path $file -ItemType File -Force | Out-Null }; $content = @(); if (Test-Path -LiteralPath $file) { $content = @(Get-Content -LiteralPath $file) }; $pattern = '^' + [regex]::Escape($key) + '=.*$'; $replacement = $key + '=' + $value; $updated = $false; for ($i = 0; $i -lt $content.Count; $i++) { if ($content[$i] -match $pattern) { $content[$i] = $replacement; $updated = $true } }; if (-not $updated) { $content += $replacement }; Set-Content -LiteralPath $file -Value $content -Encoding Ascii }" "%env_file%" "%env_key%" "%env_value%"
+exit /b
+
+:AppendComposeProfile
+set "profile_to_add=%~1"
+if not defined profile_to_add exit /b
+if defined compose_profile_list (
+    set "compose_profile_list=!compose_profile_list!,!profile_to_add!"
+) else (
+    set "compose_profile_list=!profile_to_add!"
+)
 exit /b
 
 :SyncComposeSecrets

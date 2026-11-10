@@ -101,7 +101,8 @@ verification. Follow the platform-specific onboarding steps in
 
 1. For an FMU, install and validate the model on Lab Station; see
    [FMI/FMU support](../fmi-fmu-support.md). For local execution tests, start
-   `fmu-local-dev` together with `aas`:
+   `fmu-local-dev` together with `aas`, with `AAS_ENABLED=true` in the Gateway
+   `.env`:
    `docker compose --profile fmu-local-dev --profile aas up -d`. Do not run
    `fmu-runner` at the same time because both profiles use the `fmu-runner`
    proxy alias. For a physical lab, first complete the normal `Labs`,

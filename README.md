@@ -127,8 +127,8 @@ The default stack starts the one-shot `ops-schema-migrator`,
 | Profile | Purpose | Typical command |
 | --- | --- | --- |
 | `fmu-runner` | Production FMU facade; executes through Lab Station | `FMU_RUNNER_ENABLED=true docker compose --profile fmu-runner up -d` |
-| `fmu-local-dev` | Gateway development facade backed by the shared local FMU Executor; never production | `FMU_RUNNER_ENABLED=true docker compose --profile fmu-local-dev --profile aas up -d --build` |
-| `aas` | Bundled BaSyx AAS and MongoDB | `docker compose --profile aas up -d` |
+| `fmu-local-dev` | Gateway development facade backed by the shared local FMU Executor; never production | `AAS_ENABLED=true docker compose --profile fmu-local-dev --profile aas up -d --build` |
+| `aas` | Bundled BaSyx AAS and MongoDB | `AAS_ENABLED=true docker compose --profile aas up -d` |
 | `certbot` | ACME certificate acquisition/renewal | `docker compose --profile certbot up -d` |
 | `cloudflare` / `cloudflare-token` | Cloudflare Tunnel variants | See the setup guide |
 

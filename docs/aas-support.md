@@ -83,10 +83,16 @@ flowchart LR
 The Full Gateway owns the provider control plane and may expose AAS. The bundled BaSyx service is optional and is enabled with the `aas` Compose profile:
 
 ~~~bash
-docker compose --profile aas up -d
+AAS_ENABLED=true docker compose --profile aas up -d
 # or
-COMPOSE_PROFILES=aas docker compose up -d
+AAS_ENABLED=true COMPOSE_PROFILES=aas docker compose up -d
 ~~~
+
+Persist `AAS_ENABLED=true` in the Gateway root `.env` when configuring bundled
+BaSyx manually. Compose profiles start the AAS containers; the flag enables
+OpenResty's AAS routes. For an external AAS, a non-empty `BASYX_AAS_URL`
+enables the routes automatically unless `AAS_ENABLED=false`. The setup scripts
+persist the selected profile and the necessary route setting.
 
 The bundled deployment persists AAS data through MongoDB and named volumes.
 For local FMU development, start both the `fmu-local-dev` and `aas` Compose

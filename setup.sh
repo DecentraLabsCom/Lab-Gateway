@@ -20,6 +20,7 @@ compose_profiles=""
 cf_enabled=false
 certbot_enabled=false
 aas_bundled=false
+aas_support_enabled=false
 fmu_runner_enabled=false
 fmu_runner_profile="fmu-runner"
 setup_python_cmd=""
@@ -1290,6 +1291,7 @@ else
                 echo "No URL provided. AAS support disabled."
                 update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" ""
             else
+                aas_support_enabled=true
                 echo "   * External AAS server: $external_aas_url"
                 echo "   * Bundled basyx-aas-server / basyx-mongo containers will NOT be started."
                 update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" "$external_aas_url"
@@ -1323,8 +1325,18 @@ else
             update_env_var "$ROOT_ENV_FILE" "AAS_ALLOWED_HOSTS" ""
             update_env_var "$ROOT_ENV_FILE" "AAS_SERVICE_TOKEN" ""
             aas_bundled=true
+            aas_support_enabled=true
             ;;
     esac
+fi
+if [ "$aas_bundled" = true ]; then
+    update_env_var "$ROOT_ENV_FILE" "AAS_ENABLED" "true"
+elif [ "$aas_support_enabled" = true ]; then
+    # A non-empty BASYX_AAS_URL already enables external AAS automatically.
+    # Keep the URL as the single source of truth instead of duplicating it.
+    update_env_var "$ROOT_ENV_FILE" "AAS_ENABLED" ""
+else
+    update_env_var "$ROOT_ENV_FILE" "AAS_ENABLED" "false"
 fi
 echo
 
@@ -1577,6 +1589,11 @@ if [ "$fmu_runner_enabled" = "true" ]; then
         compose_profiles="--profile $fmu_runner_profile"
     fi
 fi
+
+# Persist the selected profiles so plain `docker compose up -d` calls after
+# setup, updates, or a Compose down/up cycle start the same optional services.
+persisted_compose_profiles=$(printf '%s' "$compose_profiles" | sed 's/--profile //g; s/ /,/g')
+update_env_var "$ROOT_ENV_FILE" "COMPOSE_PROFILES" "$persisted_compose_profiles"
 
 # Build final compose command
 compose_full="$compose_cmd"

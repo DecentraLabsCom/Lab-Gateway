@@ -427,10 +427,12 @@ requieren FMU Executor 0.3.4 o posterior.
 FMU_RUNNER_ENABLED=true
 FMU_BACKEND_MODE=local
 FMU_LOCAL_DEV_MODE=true
+AAS_ENABLED=true
+COMPOSE_PROFILES=fmu-local-dev,aas
 ```
 
 ```bash
-docker compose --profile fmu-local-dev up -d --build openresty fmu-runner-local
+docker compose --profile fmu-local-dev --profile aas up -d --build openresty fmu-runner-local
 ```
 
 El runner local necesita `secrets/session_observer_signing_secret`, generado
