@@ -1005,6 +1005,7 @@ body {
 .digital-twin-validation p { margin: 0.2rem 0; }
 .digital-twin-validation ul { margin: 0.45rem 0 0; padding-left: 1.2rem; color: var(--text); }
 .digital-twin-validation li + li { margin-top: 0.25rem; }
+.mt-2 { margin-top: 0.5rem; }
 .mt-3 { margin-top: 0.75rem; }
 .mt-4 { margin-top: 1rem; }
 .isced-suggestions {

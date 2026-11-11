@@ -110,6 +110,8 @@
                 fileName: $('#fmuSyncFileName'),
                 assetField: $('#fmuSyncAssetField'),
                 assetType: $('#fmuSyncAssetType'),
+                autoAssetHint: $('#fmuSyncAssetAutoHint'),
+                manualAssetOptions: $('#fmuSyncManualAssetOptions'),
                 assetUrl: $('#fmuSyncAssetUrl'),
                 assetFileInput: $('#fmuSyncAssetFile'),
                 assetFileName: $('#fmuSyncAssetFileName'),

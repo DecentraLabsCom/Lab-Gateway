@@ -221,6 +221,14 @@
                         : '';
         }
 
+        function updateAssetOptionsVisibility() {
+            const assetType = String(fields.assetType?.value || '');
+            if (fields.autoAssetHint) fields.autoAssetHint.hidden = assetType !== 'auto';
+            if (fields.manualAssetOptions) {
+                fields.manualAssetOptions.hidden = !['glb', 'threejs-app'].includes(assetType);
+            }
+        }
+
         function assetValidationKey(labId, accessKey, assetType, assetFile, assetUrl) {
             const assetIdentity = assetFile
                 ? `file:${assetFile.name}:${assetFile.size}:${assetFile.lastModified}`
@@ -454,12 +462,14 @@
                 gatewayUploadedAssetUrl = '';
                 gatewayUploadedAssetAccessKey = '';
                 gatewayUploadedAssetType = '';
+                updateAssetOptionsVisibility();
                 return;
             }
             if (wasHidden && fields.assetType && !fields.assetType.value) {
                 fields.assetType.value = 'auto';
                 updateAssetFileAccept('auto');
             }
+            updateAssetOptionsVisibility();
             if (!fields.assetUrl) return;
 
             const currentUrl = String(fields.assetUrl.value || '').trim();
@@ -619,7 +629,7 @@
                         if (!reviewAssetValidation(importedAsset.validation, validationKey)) return;
                     } catch (error) {
                         if (selectedAssetType !== 'auto' || error.status !== 404) throw error;
-                        showToast('No REF visual asset or same-name companion was found. Sync can continue; upload a .webapp.zip or .glb if needed.', 'info');
+                        showToast('No REF visual asset or same-name companion was found. Sync can continue without one; choose GLB scene or Three.js application to add one manually.', 'info');
                     }
                 } else if (!assetFile && assetType && !aasxFile && syncInfo.digitalTwinAssetUrl) {
                     const validationKey = assetValidationKey(labId, accessKey, assetType, null, syncInfo.digitalTwinAssetUrl);
@@ -740,6 +750,7 @@
             }
             if (fields.assetType) {
                 updateAssetFileAccept(fields.assetType.value);
+                updateAssetOptionsVisibility();
                 fields.assetType.addEventListener('change', () => {
                     clearAssetValidation();
                     if (fields.assetUrl) fields.assetUrl.value = '';
@@ -749,6 +760,7 @@
                     gatewayUploadedAssetAccessKey = '';
                     gatewayUploadedAssetType = '';
                     updateAssetFileAccept(fields.assetType.value);
+                    updateAssetOptionsVisibility();
                     renderFmuBindingAssistant();
                 });
             }
