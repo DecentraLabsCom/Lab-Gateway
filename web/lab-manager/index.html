@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-digital-twin-assets-v3">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-ssh-host-trust-dialog-v3">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -1264,6 +1264,106 @@
         </div>
     </div>
 
+    <dialog class="ssh-host-trust-dialog" id="sshHostTrustConfirmDialog"
+        aria-labelledby="sshHostTrustConfirmTitle" aria-describedby="sshHostTrustConfirmInstructions sshHostTrustCommand sshHostTrustCompareInstructions">
+        <form method="dialog">
+            <div class="modal-header">
+                <h3 id="sshHostTrustConfirmTitle"><i class="fas fa-shield-halved" aria-hidden="true"></i> Trust SSH host key?</h3>
+                <button class="ghost-btn icon-btn" type="submit" value="cancel" aria-label="Cancel">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="sshHostTrustConfirmInstructions">
+                    On the target Linux lab station's local console, run this command to display its SSH host-key fingerprint:
+                </p>
+                <pre class="ssh-host-trust-command" id="sshHostTrustCommand"><code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256</code></pre>
+                <p id="sshHostTrustCompareInstructions">
+                    Compare the SHA-256 fingerprint shown below with the <code>SHA256:...</code> value printed by the command.
+                    Run the command on the station itself, not on Gateway.
+                    Continue only if every character matches exactly.
+                </p>
+                <dl class="ssh-host-trust-details">
+                    <div>
+                        <dt>Host</dt>
+                        <dd id="sshHostTrustConfirmHost"></dd>
+                    </div>
+                    <div>
+                        <dt>Key algorithm</dt>
+                        <dd id="sshHostTrustConfirmAlgorithm"></dd>
+                    </div>
+                    <div>
+                        <dt>SHA-256 fingerprint</dt>
+                        <dd><code class="ssh-host-trust-fingerprint" id="sshHostTrustConfirmFingerprint"></code></dd>
+                    </div>
+                </dl>
+                <p class="hint">
+                    Trusting pins this SSH host key for the configured host and port. Lab Manager will then verify
+                    the connection and Station Contract v3 identity.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="ghost-btn" type="submit" value="cancel" autofocus>Cancel</button>
+                <button class="primary-btn" type="submit" value="trust">Trust and verify</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="ssh-credential-setup-dialog" id="sshCredentialSetupDialog"
+        aria-labelledby="sshCredentialSetupTitle" aria-describedby="sshCredentialSetupInstructions">
+        <form method="dialog">
+            <div class="modal-header">
+                <h3 id="sshCredentialSetupTitle"><i class="fas fa-key" aria-hidden="true"></i> SSH management key ready</h3>
+                <button class="ghost-btn icon-btn" type="submit" value="close" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="sshCredentialSetupInstructions">
+                    Install this public key on the Linux lab station to allow Lab Gateway to connect over SSH.
+                    Choose the command that matches how Lab Station Linux is installed.
+                </p>
+                <dl class="ssh-host-trust-details ssh-credential-host-details">
+                    <div>
+                        <dt>Host</dt>
+                        <dd id="sshCredentialSetupHost"></dd>
+                    </div>
+                    <div>
+                        <dt>SSH account</dt>
+                        <dd id="sshCredentialSetupUser"></dd>
+                    </div>
+                </dl>
+                <section class="ssh-credential-section" aria-labelledby="sshCredentialPublicKeyTitle">
+                    <div class="ssh-credential-section-heading">
+                        <h4 id="sshCredentialPublicKeyTitle">Management public key</h4>
+                        <button class="ghost-btn ssh-credential-copy-button" type="button" id="copySshCredentialPublicKey">Copy public key</button>
+                    </div>
+                    <pre class="ssh-credential-code"><code id="sshCredentialPublicKey"></code></pre>
+                </section>
+                <section class="ssh-credential-section" aria-labelledby="sshCredentialPortableTitle">
+                    <div class="ssh-credential-section-heading">
+                        <div>
+                            <h4 id="sshCredentialPortableTitle">Portable bundle · first installation</h4>
+                            <p>Run this from the extracted bundle directory. The installer detects the SSH port automatically.</p>
+                        </div>
+                        <button class="ghost-btn ssh-credential-copy-button" type="button" id="copySshCredentialPortableCommand">Copy command</button>
+                    </div>
+                    <pre class="ssh-credential-code"><code id="sshCredentialPortableCommand"></code></pre>
+                </section>
+                <section class="ssh-credential-section" aria-labelledby="sshCredentialExistingTitle">
+                    <div class="ssh-credential-section-heading">
+                        <div>
+                            <h4 id="sshCredentialExistingTitle">Existing installation</h4>
+                            <p>Use this after installing a package such as .deb or .rpm.</p>
+                        </div>
+                        <button class="ghost-btn ssh-credential-copy-button" type="button" id="copySshCredentialExistingCommand">Copy command</button>
+                    </div>
+                    <pre class="ssh-credential-code"><code id="sshCredentialExistingCommand"></code></pre>
+                </section>
+                <p class="hint">The private key remains encrypted in Lab Gateway. Only the public key is shown here.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="primary-btn" type="submit" value="close">Close</button>
+            </div>
+        </form>
+    </dialog>
+
     <div class="modal" id="editHostModal">
         <div class="modal-content">
             <div class="modal-header">
@@ -1409,7 +1509,7 @@
     <script src="../assets/js/lab-manager-winrm-trust.js?v=lab-manager-winrm-trust-v1"></script>
     <script src="../assets/js/lab-manager-winrm-trust-modal.js?v=lab-manager-winrm-trust-modal-v1"></script>
     <script src="../assets/js/lab-manager-host-provisioning.js?v=lab-manager-host-provisioning-v2"></script>
-    <script src="../assets/js/lab-manager-host-modals.js?v=lab-manager-host-modals-v2"></script>
+    <script src="../assets/js/lab-manager-host-modals.js?v=lab-manager-host-modals-v5"></script>
     <script src="../assets/js/lab-manager-host-view.js?v=lab-manager-host-view-v2"></script>
     <script src="../assets/js/lab-manager-host-action-bindings.js?v=lab-manager-host-action-bindings-v5"></script>
     <script src="../assets/js/lab-manager-ops-access.js?v=lab-manager-ops-access-v1"></script>
@@ -1417,7 +1517,7 @@
     <script src="../assets/js/lab-manager-modal-bindings.js?v=lab-manager-modal-bindings-v2"></script>
     <script src="../assets/js/lab-manager-host-actions.js?v=lab-manager-host-actions-v7"></script>
     <script src="../assets/js/lab-manager-wake-ops.js?v=lab-manager-wake-ops-v3"></script>
-    <script src="../assets/js/lab-manager-host-feature.js?v=lab-manager-host-feature-v10"></script>
+    <script src="../assets/js/lab-manager-host-feature.js?v=lab-manager-host-feature-v12"></script>
     <script src="../assets/js/lab-manager-fmu-station.js?v=lab-manager-fmu-station-v3"></script>
     <script src="../assets/js/core/toast.js?v=lab-manager-toast-v3"></script>
     <script src="../assets/js/lab-manager-notifications-access.js?v=lab-manager-notifications-access-v2"></script>

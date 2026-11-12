@@ -74,6 +74,19 @@
         const winrmTrustPreview = $('#winrmTrustPreview');
         const winrmTrustPreviewDetails = $('#winrmTrustPreviewDetails');
         const winrmTrustFingerprintConfirmed = $('#winrmTrustFingerprintConfirmed');
+        const sshHostTrustConfirmDialog = $('#sshHostTrustConfirmDialog');
+        const sshHostTrustConfirmHost = $('#sshHostTrustConfirmHost');
+        const sshHostTrustConfirmAlgorithm = $('#sshHostTrustConfirmAlgorithm');
+        const sshHostTrustConfirmFingerprint = $('#sshHostTrustConfirmFingerprint');
+        const sshCredentialSetupDialog = $('#sshCredentialSetupDialog');
+        const sshCredentialSetupHost = $('#sshCredentialSetupHost');
+        const sshCredentialSetupUser = $('#sshCredentialSetupUser');
+        const sshCredentialPublicKey = $('#sshCredentialPublicKey');
+        const sshCredentialPortableCommand = $('#sshCredentialPortableCommand');
+        const sshCredentialExistingCommand = $('#sshCredentialExistingCommand');
+        const copySshCredentialPublicKey = $('#copySshCredentialPublicKey');
+        const copySshCredentialPortableCommand = $('#copySshCredentialPortableCommand');
+        const copySshCredentialExistingCommand = $('#copySshCredentialExistingCommand');
         const editHostModal = $('#editHostModal');
         const closeEditHostModalButton = $('#closeEditHostModal');
         const cancelEditHostButton = $('#cancelEditHost');
@@ -424,6 +437,19 @@
                 credentialUser: winrmCredentialUser,
                 credentialPassword: winrmCredentialPassword,
                 credentialSaveButton: saveWinrmCredentialsButton,
+                sshTrustConfirmDialog: sshHostTrustConfirmDialog,
+                sshTrustConfirmHost: sshHostTrustConfirmHost,
+                sshTrustConfirmAlgorithm: sshHostTrustConfirmAlgorithm,
+                sshTrustConfirmFingerprint: sshHostTrustConfirmFingerprint,
+                sshCredentialSetupDialog,
+                sshCredentialSetupHost,
+                sshCredentialSetupUser,
+                sshCredentialPublicKey,
+                sshCredentialPortableCommand,
+                sshCredentialExistingCommand,
+                copySshCredentialPublicKey,
+                copySshCredentialPortableCommand,
+                copySshCredentialExistingCommand,
             },
             hostMetadata,
             hostState,
