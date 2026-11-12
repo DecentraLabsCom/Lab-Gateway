@@ -262,11 +262,25 @@ trust` independently.
    generates one in the Gateway and displays its public key. The private key
    remains encrypted in Lab Gateway.
 2. Install the displayed public key on the Station with the command shown by
-   Lab Manager, normally:
+   Lab Manager that matches how Lab Station Linux was installed:
 
-   ```bash
-   sudo labstationctl setup --profile <profile> --ssh-port <port> --management-public-key '<public-key>'
-   ```
+   - For a first installation from a portable bundle, extract the bundle and
+     run its installer as root from the extracted directory. The installer
+     installs the payload, invokes `labstationctl setup`, and detects the SSH
+     port automatically; it does not accept `--ssh-port`:
+
+     ```bash
+     sudo sh ./install.sh --profile <profile> --management-public-key '<public-key>'
+     ```
+
+     If already logged in as root, omit `sudo`.
+
+   - For a `.deb`/`.rpm` package or an existing installation where
+     `labstationctl` is already installed, configure it with:
+
+     ```bash
+     sudo labstationctl setup --profile <profile> --ssh-port <port> --management-public-key '<public-key>'
+     ```
 
 3. Click `SSH host-key trust` to preview the server key. Verify its fingerprint
    through a trusted out-of-band channel, then enter the exact fingerprint to

@@ -291,7 +291,19 @@
                     const meta = hostMetadata[host] || {};
                     const profile = meta.profile || 'dedicated';
                     const port = Number(meta.managementPort) || 22;
-                    promptImpl(`Install this public key for ${credential.username || 'labstation-ops'} on ${host}. Run: sudo labstationctl setup --profile ${profile} --ssh-port ${port} --management-public-key '<key>'. The private key remains encrypted in Gateway.`, credential.publicKey);
+                    promptImpl(
+                        `Install this public key for ${credential.username || 'labstation-ops'} on ${host}. The key is prefilled below; copy it into the command for your installation type.
+
+Portable bundle (first installation): from the extracted bundle directory, run:
+sudo sh ./install.sh --profile ${profile} --management-public-key '<key>'
+The installer installs the payload and invokes labstationctl setup, which detects the SSH port automatically. Do not add --ssh-port.
+
+Existing installation (for example, installed from a .deb/.rpm package):
+sudo labstationctl setup --profile ${profile} --ssh-port ${port} --management-public-key '<key>'
+
+The private key remains encrypted in Gateway.`,
+                        credential.publicKey,
+                    );
                 }
                 showToast(`SSH management key ready for ${host}`, 'success');
                 await loadHostInventory({ skipAuthPrompt: true });
