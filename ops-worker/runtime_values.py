@@ -17,7 +17,11 @@ WINRM_TRUST_REF_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
 MAC_RE = re.compile(r"^[0-9A-Fa-f]{2}([-:])[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$")
 GUAC_SELECTOR_RE = re.compile(r"^guac:id:([1-9][0-9]*)$")
 
-ENOUGH_DISCOVERY_SIGNALS = {"labstation-detected", "winrm-reachable"}
+ENOUGH_DISCOVERY_SIGNALS = {
+    "labstation-detected",
+    "winrm-reachable",
+    "management-trust-pending",
+}
 
 WINRM_TRUST_CERTIFICATE_NAME = "server.cer"
 WINRM_TRUST_PEM_NAME = "server.pem"
