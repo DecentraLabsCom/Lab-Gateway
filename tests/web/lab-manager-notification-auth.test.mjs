@@ -1764,7 +1764,7 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.match(script, /Last activity:/);
   assert.doesNotMatch(script, /FMU token:/);
   assert.match(script, /Heartbeat: \$\{safeUpdated\}<\/span>\s*<span class="host-history-item">Forced logoff: \$\{safeLastForced\}<\/span>\s*<span class="host-history-item">Power action: \$\{safeLastPower\}/);
-  assert.match(styles, /\.host-history-heartbeat\s*\{[\s\S]*flex-basis:\s*100%/);
+  assert.match(styles, /\.host-history-items\s*\{[\s\S]*display:\s*flex[\s\S]*flex-direction:\s*column/);
   assert.match(script, /credentials \/ \$\{transport === 'ssh' \? 'host-key trust' : 'TLS trust'\}/);
   assert.match(script, /formatConnectionsStatus/);
   assert.match(script, /return 'No connections'/);

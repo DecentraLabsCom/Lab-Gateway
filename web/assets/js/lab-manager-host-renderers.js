@@ -361,7 +361,7 @@
                 : typeof status.sessions?.localSessionActive === 'boolean'
                     ? status.sessions.localSessionActive
                     : data.normalized?.sessions?.localSessionActive;
-            const localSession = sessionInventoryKnown ? reportedLocalSession : undefined;
+            const localSession = sessionSummary.queryOk === false ? undefined : reportedLocalSession;
             const activeSessionDisplay = getActiveSessionDisplay(status, localSession);
             const activeSession = activeSessionDisplay.active;
             const localMode = typeof status.localModeEnabled === 'boolean'

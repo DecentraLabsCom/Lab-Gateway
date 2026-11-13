@@ -37,7 +37,16 @@ test('host row renderer preserves status markup and escapes host data', () => {
       heartbeat: {
         timestamp: '2026-09-13T10:00:00Z',
         summary: { ready: true },
-        status: { localSessionActive: false, localModeEnabled: true },
+        status: {
+          profile: 'hybrid',
+          localSessionActive: false,
+          localModeEnabled: true,
+          sessions: {
+            queryOk: true,
+            localSessionActive: false,
+            labUserRemoteActive: false,
+          },
+        },
         operations: {
           lastForcedLogoff: { timestamp: '2026-09-13T09:00:00Z', user: 'operator<&' },
           lastPowerAction: { timestamp: '2026-09-13T09:30:00Z', mode: 'wake<&' },
@@ -72,8 +81,8 @@ test('host row renderer preserves status markup and escapes host data', () => {
   assert.doesNotMatch(html, /Ready:/);
   assert.match(html, /<button class="mini-btn" data-action="poll" title="Check station status">Heartbeat<\/button>/);
   assert.match(html, /<button class="mini-btn" data-action="wake-ops" title="Configure Wake Ops and wake station">Wake Ops<\/button>/);
-  assert.match(html, /<button class="mini-btn primary" data-action="prepare" title="Prepare station">Prepare<\/button>/);
-  assert.match(html, /<button class="mini-btn" data-action="release" title="Release station">Release<\/button>/);
+  assert.match(html, /<button class="mini-btn primary" data-action="prepare" title="Local mode is active; disable it before preparing" disabled>Prepare<\/button>/);
+  assert.match(html, /<button class="mini-btn" data-action="release" title="Release the managed physical lab session">Release<\/button>/);
   assert.match(html, /<button class="mini-btn danger" data-action="shutdown" title="Shut down station">Shutdown<\/button>/);
   assert.match(html, /<button class="mini-btn secondary" data-action="toggle-local-mode" title="Disable local mode">Disable Local<\/button>/);
   assert.doesNotMatch(html, /data-action="sync-aas"/);
@@ -89,12 +98,48 @@ test('host row renderer describes enabling local mode when it is disabled', () =
     heartbeat: {
       timestamp: '2026-09-13T10:00:00Z',
       summary: { ready: true },
-      status: { localSessionActive: false, localModeEnabled: false },
+      status: {
+        profile: 'hybrid',
+        localSessionActive: false,
+        localModeEnabled: false,
+        sessions: {
+          queryOk: true,
+          localSessionActive: false,
+          labUserRemoteActive: false,
+        },
+      },
       operations: {},
     },
   }, {});
 
-  assert.match(html, /<button class="mini-btn secondary" data-action="toggle-local-mode" title="Enable local mode">Enable Local<\/button>/);
+  assert.match(html, /<button class="mini-btn secondary" data-action="toggle-local-mode" title="Enable local mode for on-site use">Enable Local<\/button>/);
+});
+
+test('keeps profile-inapplicable operations visible and disabled with their reason', () => {
+  const renderer = loadRenderers().createController(dependencies());
+  const dedicated = renderer.renderHostRowMarkup('station-dedicated', {
+    heartbeat: {
+      status: {
+        profile: 'dedicated',
+        localModeEnabled: false,
+        sessions: { queryOk: true, localSessionActive: false, labUserRemoteActive: false },
+      },
+    },
+  }, {});
+  const fmuOnly = renderer.renderHostRowMarkup('station-fmu-only', {
+    heartbeat: {
+      status: {
+        profile: 'fmu-only',
+        localModeEnabled: false,
+        sessions: { queryOk: true, localSessionActive: false, labUserRemoteActive: false },
+      },
+    },
+  }, {});
+
+  assert.match(dedicated, /data-action="toggle-local-mode" title="Local mode is only available on hybrid stations" disabled>Enable Local<\/button>/);
+  assert.match(fmuOnly, /data-action="prepare" title="Physical session actions are unavailable for the FMU-only profile" disabled>Prepare<\/button>/);
+  assert.match(fmuOnly, /data-action="release" title="Physical session actions are unavailable for the FMU-only profile" disabled>Release<\/button>/);
+  assert.match(fmuOnly, /data-action="toggle-local-mode" title="Local mode is only available on hybrid stations" disabled>Enable Local<\/button>/);
 });
 
 test('host row renderer links and releases the single FMU token target', () => {
@@ -338,7 +383,7 @@ test('host row renderer keeps missing heartbeat and trust states public', () => 
   assert.doesNotMatch(html, /<div class="host-meta host-history">\s*<span class="host-history-item">Heartbeat:/);
   assert.match(html, /Forced logoff: not available/);
   assert.match(html, /Connections: <span class="host-status-text bad">No connections<\/span>/);
-  assert.match(html, /WinRM credentials \/ TLS: <button[^>]*data-action="set-winrm-credentials"[^>]*><span class="host-status-text warn">missing<\/span><\/button> \/ <button[^>]*data-action="manage-winrm-trust"[^>]*><span class="host-status-text warn">missing<\/span><\/button><\/div>/);
+  assert.match(html, /WinRM credentials \/ TLS trust: <button[^>]*data-action="set-winrm-credentials"[^>]*><span class="host-status-text warn">missing<\/span><\/button> \/ <button[^>]*data-action="manage-winrm-trust"[^>]*><span class="host-status-text warn">missing<\/span><\/button><\/div>/);
   assert.doesNotMatch(html, /data-action="edit-host"/);
 });
 
