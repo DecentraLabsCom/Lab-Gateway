@@ -62,8 +62,18 @@ flowchart LR
    - the dedicated lab-session account.
 6. Choose the protocol-security options that match the target. In production,
    use TLS/NLA or the equivalent secure mode and validate the target
-   certificate. Do not disable certificate validation merely to bypass a
-   deployment issue.
+   certificate. For a Linux Lab Station running XRDP on a trusted, isolated
+   laboratory network, Guacamole's automatically generated self-signed XRDP
+   certificate can be accepted by enabling **Ignore server certificate**
+   while leaving the security mode at its default (**Any**). Leave **Trust host
+   certificate on first use** disabled and **Fingerprints of trusted host
+   certificates** blank. This skips server identity validation; use it only
+   when the RDP path is restricted to that trusted network. RDP still
+   negotiates its security and encryption. To retain certificate validation
+   instead, leave **Ignore server certificate** disabled and pin the verified
+   SHA-256 fingerprint in **Fingerprints of trusted host certificates**. Do
+   not enable multiple certificate-acceptance methods at once. This exception
+   is specific to Linux XRDP and does not change the guidance for Windows RDP.
 7. Save the connection and record the numeric connection ID from the
    connection details or the Guacamole API/UI URL.
 
