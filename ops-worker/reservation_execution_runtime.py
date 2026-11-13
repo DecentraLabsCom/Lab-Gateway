@@ -1,6 +1,6 @@
 """Composition adapter for reservation execution and operational alerts."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
 from reservation_execution_context import ReservationExecutionContext
@@ -183,7 +183,11 @@ class ReservationExecutionRuntime:
         reservation_id: str,
         lab_id: Optional[str],
         options: Dict[str, Any],
+        verify_reachable: Optional[Callable[[Mapping[str, Any]], bool]] = None,
     ) -> Tuple[bool, Dict[str, Any]]:
+        verify_arguments: Dict[str, Any] = {}
+        if verify_reachable is not None:
+            verify_arguments["verify_reachable"] = verify_reachable
         return self._context.perform_wake_step_impl(
             host,
             reservation_id,
@@ -194,6 +198,7 @@ class ReservationExecutionRuntime:
             notify_failure=self._context.get_notify_critical_failure(),
             current_epoch=self._context.get_current_epoch(),
             logger=self._context.get_logger(),
+            **verify_arguments,
         )
 
     def perform_command_step(

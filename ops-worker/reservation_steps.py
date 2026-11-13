@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
 from wol_defaults import DEFAULT_WOL_ATTEMPTS, DEFAULT_WOL_PING_TIMEOUT_SECONDS
+from station_wake import management_port
 
 
 def perform_wake_step(
@@ -17,6 +18,7 @@ def perform_wake_step(
     notify_failure: Callable[..., Any],
     current_epoch: Callable[[], float],
     logger: Any,
+    verify_reachable: Optional[Callable[[Mapping[str, Any]], bool]] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
     mac = options.get("mac") or host.get("mac")
     if not mac:
@@ -66,13 +68,7 @@ def perform_wake_step(
     )
     broadcast = options.get("broadcast") or host.get("broadcast")
     port = int(options.get("port", host.get("wol_port", 9)))
-    management_value = host.get("management")
-    management = management_value if isinstance(management_value, Mapping) else {}
-    configured_probe_port = management.get("port", host.get("management_port", host.get("winrm_port")))
-    try:
-        probe_port = int(configured_probe_port) if configured_probe_port not in (None, "") else None
-    except (TypeError, ValueError):
-        probe_port = None
+    probe_port = management_port(host)
 
     start = current_epoch()
     success = False
@@ -89,6 +85,10 @@ def perform_wake_step(
             probe_port=probe_port,
         )
         message = "Host reachable" if success else "Host did not respond to ping"
+        if success and verify_reachable is not None:
+            success = bool(verify_reachable(host))
+            if not success:
+                message = "Station management identity could not be verified after wake"
     except Exception:
         logger.exception("Wake operation failed for %s", host.get("name"))
         message = "Wake operation failed"
@@ -103,6 +103,8 @@ def perform_wake_step(
         "port": port,
         "broadcast": broadcast,
     }
+    if verify_reachable is not None:
+        details["stationIdentityVerified"] = success
     record_operation(
         reservation_id,
         lab_id,
@@ -144,6 +146,10 @@ def perform_command_step(
     dispatcher_request_error: Optional[str] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
     start = current_epoch()
+    if command == "power" and args and args[0] == "shutdown":
+        args = list(args)
+        args = [arg for arg in args if not arg.lower().startswith("--require-idle")]
+        args.append("--require-idle")
     success = False
     exit_code = 2
     outcome = "failure"

@@ -7,6 +7,7 @@ from uuid import uuid4
 from flask import Blueprint, jsonify, request
 
 from station_errors import StationError
+from station_action_policy import StationActionPolicyError, validate_operator_station_action
 
 
 def create_station_api_blueprint(
@@ -26,7 +27,7 @@ def create_station_api_blueprint(
 
     def error_response(exc: StationError):
         request_id = str(uuid4())
-        status = 409 if "TRUST" in exc.code else 401 if exc.code == "STATION_AUTH_FAILED" else 502
+        status = 409 if "TRUST" in exc.code or exc.code == "STATION_SHUTDOWN_BLOCKED" else 401 if exc.code == "STATION_AUTH_FAILED" else 502
         return jsonify({"error": exc.message, "code": exc.code, "transport": exc.transport, "requestId": request_id}), status
 
     @bp.post("/api/station/command")
@@ -43,8 +44,16 @@ def create_station_api_blueprint(
         if not isinstance(args, list) or any(not isinstance(item, str) for item in args):
             return jsonify({"error": "args must be a string array"}), 400
         try:
+            validate_operator_station_action(
+                host,
+                station_command,
+                args,
+                run_station_command=run_station_command,
+            )
             result = run_station_command(host, station_command, args, request_id=str(uuid4()))
             return jsonify(result), 200 if int(result.get("exitCode", 2)) < 2 else 409
+        except StationActionPolicyError as exc:
+            return jsonify({"error": str(exc), "code": exc.code}), 409
         except StationError as exc:
             return error_response(exc)
         except ValueError as exc:

@@ -115,7 +115,11 @@ def validate_station_command(command: str, args: List[str]) -> None:
                     break
     elif command == "power":
         allowed = len(args) >= 1 and args[0] in {"shutdown", "hibernate"} and all(
-            safe_option(value, {"--delay", "--reason", "--require-wake"}) for value in args[1:]
+            safe_option(
+                value,
+                {"--delay", "--reason", "--require-wake", "--require-idle", "--repair-wake"},
+            )
+            for value in args[1:]
         )
         if allowed:
             for value in args[1:]:
@@ -125,6 +129,12 @@ def validate_station_command(command: str, args: List[str]) -> None:
                 elif key == "--reason" and (not separator or not raw.strip() or len(raw) > 128):
                     allowed = False
                 elif key == "--require-wake" and separator and raw not in {"true", "false"}:
+                    allowed = False
+                elif key == "--require-idle" and (args[0] != "shutdown" or separator):
+                    allowed = False
+                elif key == "--repair-wake" and (
+                    not separator or raw not in {"true", "false", "yes", "no"}
+                ):
                     allowed = False
     elif command == "energy audit":
         allowed = not args

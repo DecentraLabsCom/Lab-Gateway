@@ -1,8 +1,10 @@
 """Composition for the local-mode toggle HTTP route."""
 
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
 from runtime_values import DEFAULT_LOCAL_MODE_FLAG_PATH
+from station_action_policy import StationActionPolicyError, validate_operator_station_action
 
 
 def get_local_mode_flag_path(host: Dict[str, Any]) -> str:
@@ -41,17 +43,40 @@ def handle_local_mode(
         management = management_value if isinstance(management_value, dict) else {}
         contract_value = host.get("contract")
         contract = contract_value if isinstance(contract_value, dict) else {}
+        if enabled:
+            if run_station_command is None:
+                raise StationActionPolicyError(
+                    "STATION_PROFILE_UNKNOWN",
+                    "Station profile cannot be verified; local mode was not enabled",
+                )
+            validate_operator_station_action(
+                host,
+                "local-mode",
+                ["set"],
+                run_station_command=run_station_command,
+            )
         if run_station_command and (
             str(management.get("transport") or host.get("management_transport") or "").lower() == "ssh"
             or int(contract.get("major") or 0) >= 3
         ):
             result = run_station_command(host, "local-mode", ["set" if enabled else "clear"])
             if int(result.get("exitCode", result.get("exit_code", 2))) >= 2:
+                metadata_value = result.get("metadata")
+                metadata = metadata_value if isinstance(metadata_value, dict) else {}
+                code = str(metadata.get("code") or "STATION_COMMAND_FAILED")
+                conflict_codes = {
+                    "STATION_LEASE_CONFLICT",
+                    "STATION_OPERATION_IN_PROGRESS",
+                    "STATION_PROFILE_UNSUPPORTED",
+                    "STATION_REMOTE_SESSION_ACTIVE",
+                    "STATION_SESSION_QUERY_FAILED",
+                    "STATION_SESSION_STATE_UNKNOWN",
+                }
                 return jsonify({
-                    "error": "Station local-mode operation failed",
-                    "code": "STATION_COMMAND_FAILED",
+                    "error": result.get("message") or "Station local-mode operation failed",
+                    "code": code,
                     "transport": management.get("transport"),
-                }), 502
+                }), 409 if code in conflict_codes else 502
             return jsonify({
                 "host": host_name,
                 "localModeEnabled": enabled,
@@ -59,9 +84,12 @@ def handle_local_mode(
                 "transport": result.get("transport", management.get("transport")),
             }), 200
         if enabled:
-            write_remote_file(host, flag_path, "1", None, None, None, None, None)
+            set_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            write_remote_file(host, flag_path, set_at, None, None, None, None, None)
         else:
             remove_remote_file(host, flag_path, None, None, None, None, None)
+    except StationActionPolicyError as exc:
+        return jsonify({"error": str(exc), "code": exc.code}), 409
     except Exception as exc:
         return internal_error_response(f"Local mode toggle failed for {host_name}", exc)
 

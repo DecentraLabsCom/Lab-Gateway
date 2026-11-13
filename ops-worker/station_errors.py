@@ -37,3 +37,8 @@ class StationUnreachable(StationError):
 class StationCommandRejected(StationError):
     def __init__(self, message: str = "Station command is not allowlisted"):
         super().__init__("STATION_COMMAND_REJECTED", message, "ssh")
+
+
+class StationShutdownBlocked(StationError):
+    def __init__(self, message: str, transport: Optional[str] = None):
+        super().__init__("STATION_SHUTDOWN_BLOCKED", message, transport)

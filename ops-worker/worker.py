@@ -133,6 +133,13 @@ from host_catalog import (
     resolve_addresses as _resolve_addresses_impl,
     validate_winrm_catalog as _validate_winrm_catalog_impl,
 )
+from wol_defaults import DEFAULT_WOL_PING_TIMEOUT_SECONDS
+from station_wake import (
+    management_port as _station_management_port,
+    management_transport as _station_management_transport,
+    station_identity_matches as _station_identity_matches,
+    wait_for_station_identity as _wait_for_station_identity,
+)
 from host_registry import HostRegistry
 from fmu_station_enrollment import FmuStationConfig
 from host_config_service import (
@@ -266,6 +273,7 @@ from station_credentials import (
     public_ssh_credential as public_ssh_credential,
 )
 from station_transport_factory import create_station_transport_runtime
+from station_shutdown_policy import inspect_shutdown_status
 from station_ssh_trust import (
     confirm_ssh_host_key as confirm_ssh_host_key,
     delete_ssh_trust as delete_ssh_trust,
@@ -1119,25 +1127,79 @@ def _wake_ops_latest_wake(host_name: str) -> Optional[Dict[str, Any]]:
     return _latest_wake_operation_impl(DB_ENGINE, host_name, sql_text=text)
 
 
-def _wake_ops_probe(host: Mapping[str, Any]) -> bool:
-    address = host.get("address") or host.get("ping_target")
-    if not address:
+def _wake_ops_transport(host: Mapping[str, Any]) -> str:
+    return _station_management_transport(host)
+
+
+def _wol_host_is_up(target: str, timeout: float, probe_port: Optional[int] = None) -> bool:
+    """Use the configured management listener for WoL reachability checks."""
+    if not target or not _is_valid_ping_target(target):
         return False
-    configured_port = host.get("winrm_port")
+    configured_port = WINRM_PORT if probe_port is None else probe_port
     try:
-        probe_port = int(configured_port) if configured_port not in (None, "") else WINRM_PORT
+        port = int(configured_port)
     except (TypeError, ValueError):
-        probe_port = WINRM_PORT
-    return host_is_up(
-        str(address),
-        max(0.2, LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS),
-        probe_port=probe_port,
-    )
+        return False
+    if not 1 <= port <= 65535:
+        return False
+    return tcp_port_open(target, port, timeout)
+
+
+def _wake_ops_probe(host: Mapping[str, Any]) -> Optional[bool]:
+    """Return true/false for verified on/off signals and None when ambiguous."""
+    address = host.get("address") or host.get("ping_target")
+    if not address or not _is_valid_ping_target(str(address)):
+        return None
+    transport = _wake_ops_transport(host)
+    timeout = max(0.2, LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS)
+    if transport not in {"ssh", "winrm"}:
+        return None
+    probe_port = _station_management_port(host, transport)
+    if probe_port is None:
+        return None
+    if not tcp_port_open(str(address), probe_port, timeout):
+        return False
+    try:
+        probe = probe_station(host)
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning(
+            "Wake Ops could not verify %s Station identity for %s: %s",
+            transport,
+            host.get("name"),
+            type(exc).__name__,
+        )
+        return None
+    return True if _station_identity_matches(host, probe) else None
+
+
+def _wake_ops_cycle_is_safe(host: Mapping[str, Any]) -> Optional[bool]:
+    """Require a fresh Station status with no local use or active user session."""
+    try:
+        result = run_station_command(host, "status-json", [])
+        if not isinstance(result, Mapping) or int(result.get("exitCode", 2)) >= 2:
+            return None
+        payload = json.loads(str(result.get("stdout") or ""))
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning(
+            "Wake Ops could not read Station status for %s: %s",
+            host.get("name"), type(exc).__name__,
+        )
+        return None
+
+    if not isinstance(payload, Mapping):
+        return None
+    status_value = payload.get("status")
+    status = status_value if isinstance(status_value, Mapping) else payload
+    safe, _reason = inspect_shutdown_status(status)
+    return safe
 
 
 def _wake_ops_initial_power_state(host: Mapping[str, Any]) -> str:
-    if _wake_ops_probe(host):
+    probe = _wake_ops_probe(host)
+    if probe is True:
         return "on"
+    if probe is None:
+        return "unknown"
     if not DB_ENGINE:
         return "off"
     try:
@@ -1145,6 +1207,8 @@ def _wake_ops_initial_power_state(host: Mapping[str, Any]) -> str:
             heartbeat = _fetch_latest_heartbeat(connection, host.get("name", ""))
     except Exception:  # pylint: disable=broad-except
         logging.exception("Unable to classify initial power state for %s", host.get("name"))
+        return "unknown"
+    if heartbeat and heartbeat.get("localMode") is True:
         return "unknown"
     if heartbeat:
         timestamp = to_utc(heartbeat.get("timestamp"))
@@ -1156,7 +1220,7 @@ def _wake_ops_initial_power_state(host: Mapping[str, Any]) -> str:
 def _wake_ops_wait_until_off(host: Mapping[str, Any], timeout_seconds: int = 180) -> bool:
     deadline = time.monotonic() + max(1, timeout_seconds)
     while time.monotonic() <= deadline:
-        if not _wake_ops_probe(host):
+        if _wake_ops_probe(host) is False:
             return True
         time.sleep(5)
     return False
@@ -1169,15 +1233,50 @@ def _wake_ops_shutdown(
     lab_id: Optional[str],
 ) -> bool:
     action = f"wake_ops_shutdown_{phase}"
+    safe_to_shutdown = _wake_ops_cycle_is_safe(host)
+    if safe_to_shutdown is not True:
+        message = (
+            "Station reports local use or an active user session; Wake Ops skipped shutdown"
+            if safe_to_shutdown is False
+            else "Station shutdown guard is unavailable; Wake Ops skipped shutdown"
+        )
+        record_reservation_operation(
+            reservation_id,
+            lab_id,
+            host.get("name", ""),
+            action,
+            "failed",
+            False,
+            response_code=409,
+            message=message,
+        )
+        return False
+    power_args = ["shutdown", "--delay=60", "--require-wake", "--require-idle"]
+    power_args.append("--reason=Wake Ops weekly verification")
     result, _details = perform_command_step(
         dict(host),
         reservation_id,
         lab_id,
         action,
         "power",
-        ["shutdown", "--delay=60", "--reason=Wake Ops weekly verification"],
+        power_args,
     )
     return result
+
+
+def _wake_ops_verify_station_identity(host: Mapping[str, Any]) -> bool:
+    verified = _wait_for_station_identity(
+        host,
+        probe_station,
+        DEFAULT_WOL_PING_TIMEOUT_SECONDS,
+    )
+    if not verified:
+        logging.warning(
+            "Wake operation could not verify Station identity for %s over %s",
+            host.get("name"),
+            _wake_ops_transport(host),
+        )
+    return verified
 
 
 def _wake_ops_manual_wake(host_name: str) -> Dict[str, Any]:
@@ -1187,7 +1286,13 @@ def _wake_ops_manual_wake(host_name: str) -> Dict[str, Any]:
     reservation_id = f"wake-ops:manual:{uuid.uuid4().hex}"
     lab_ids = resolve_lab_ids_for_host(dict(host))
     lab_id = str(lab_ids[0]) if lab_ids else None
-    success, details = perform_wake_step(dict(host), reservation_id, lab_id, {})
+    success, details = perform_wake_step(
+        dict(host),
+        reservation_id,
+        lab_id,
+        {},
+        verify_reachable=_wake_ops_verify_station_identity,
+    )
     return {"host": host_name, "reservationId": reservation_id, **details, "success": success}
 
 
@@ -1218,13 +1323,20 @@ def _wake_ops_cycle(
             "message": message,
         }
 
+    verify_reachable = _wake_ops_verify_station_identity
     result = execute_wake_ops_cycle(
         host,
         reservation_id,
         initial_power_state=initial_state,
         shutdown=lambda phase: _wake_ops_shutdown(host, reservation_id, phase, lab_id),
         wait_until_off=lambda: _wake_ops_wait_until_off(host),
-        wake=lambda: perform_wake_step(dict(host), reservation_id, lab_id, {})[0],
+        wake=lambda: perform_wake_step(
+            dict(host),
+            reservation_id,
+            lab_id,
+            {},
+            verify_reachable=verify_reachable,
+        )[0],
         now=_wake_ops_now,
     )
     record_reservation_operation(
@@ -1426,7 +1538,7 @@ _summarize_phases = _TIMELINE_RUNTIME.summarize_phases
 
 _HOST_DISCOVERY_CONTEXT = HostDiscoveryContext(
     is_valid_ping_target_impl=LiveCallable(globals(), '_is_valid_ping_target_impl', _is_valid_ping_target_impl),
-    get_is_valid_ping_target=lambda: _is_valid_ping_target,
+    get_is_valid_ping_target=lambda: cast(Callable[[str], bool], _is_valid_ping_target),
     host_is_up_impl=LiveCallable(globals(), '_host_is_up_impl', _host_is_up_impl),
     get_winrm_port=lambda: WINRM_PORT,
     get_create_connection=lambda: socket.create_connection,
@@ -1494,7 +1606,7 @@ _WOL_CONTEXT = WolContext(
     wol_and_wait=LiveCallable(globals(), '_wol_and_wait_impl', _wol_and_wait_impl),
     get_send_magic_packet=lambda: wake,
     get_sleep=lambda: time.sleep,
-    get_host_is_up=lambda: host_is_up,
+    get_host_is_up=lambda: _wol_host_is_up,
 )
 _WOL_RUNTIME = create_wol_runtime(_WOL_CONTEXT)
 wol_and_wait = _WOL_RUNTIME.wol_and_wait
@@ -1857,6 +1969,7 @@ _WORKER_BLUEPRINT_PROVIDERS = {
     "parse_bool": parse_bool,
     "poll_heartbeat": poll_heartbeat,
     "power_bp": power_bp,
+    "probe_station": probe_station,
     "probe_lab_targets": probe_lab_targets,
     "provision_guacamole_temporary_user": provision_guacamole_temporary_user,
     "read_fmu_runner_health": read_fmu_runner_health,

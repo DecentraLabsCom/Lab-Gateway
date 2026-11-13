@@ -119,8 +119,9 @@ Gateway is rejected, even when both Gateways use the same provider wallet.
 In `Operations` → `Lab Station Ops`, the interface shows:
 
 - hosts configured in `ops-worker/hosts.json` and `ops-data/hosts.json`;
-- the station address, last heartbeat, current readiness/local-session/local-mode
-  state, and the last forced-logoff and power-action information;
+- the station address, platform and reported profile, last heartbeat, current
+  readiness/local-session/local-mode state, and the last forced-logoff and
+  power-action information;
 - the number of matching remote-access connections; and
 - Guacamole connections that are not yet associated with an Ops host.
 
@@ -301,10 +302,31 @@ After credentials and trust are ready, heartbeat polling reads the logical
 For each host, operators can:
 
 - request an immediate heartbeat;
-- send Wake-on-LAN;
+- send Wake-on-LAN and, for a host-bound request, confirm the Station over its
+  configured WinRM or SSH transport before reporting success;
 - execute only Lab Station commands allowed by `OPS_ALLOWED_COMMANDS`;
 - enable or disable local mode according to the operating procedure; and
 - inspect preparation state, the last operation, power state, and WoL NIC data.
+
+`Prepare` and `Release` are physical-lab actions. They are available for the
+`dedicated` and `hybrid` profiles; `fmu-only` stations do not expose them. The
+controls stay disabled until the Station profile is known, and the API checks
+the live Station status again before sending an operator action. `Prepare`
+stops when local mode is active or unknown, or when session inventory is
+unavailable. On a dedicated station, an unexpected interactive user session
+blocks preparation. On a hybrid station,
+the Station's session-eviction policy controls whether a warned local session
+can be closed; if eviction is disabled, preparation fails safely. `Release`
+closes the managed remote lab-user session and application without rebooting,
+and is rejected while a reservation or demo lease is active.
+
+`Enable Local` is available only for `hybrid`, after confirming session
+inventory and that no remote lab-user session or reservation is active. It
+marks exclusive on-site use and expires after eight hours by default on current
+Windows and Linux Stations. `Disable Local` remains available if a flag is
+present so an operator can clear a stale flag after a profile change. The
+Station serializes enabling against reservation operations and enforces the
+same profile rules as the Gateway.
 
 Heartbeat streaming starts only when the selected management credentials and
 trust are ready. For Windows v2, that means WinRM credentials and valid TLS

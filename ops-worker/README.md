@@ -215,13 +215,21 @@ off or unavailable Station from an internal worker failure.
   - Body: `{ host, mac?, broadcast?, port?, ping_target?, ping_timeout?, attempts? }`
   - Defaults: 3 attempts and 30 seconds per wait/probe window. The request can
     therefore take up to approximately 180 seconds when the Station remains
-    unreachable.
+    unreachable. When `host` identifies a managed Station, success also
+    requires an authenticated Station probe over its configured WinRM or SSH
+    transport; a raw MAC request without `host` reports network reachability.
 - `GET /api/wake-ops/<host_name>` / `PUT /api/wake-ops/<host_name>`
   - Read or update the per-host weekly Wake Ops schedule. The default is
     enabled, Sunday at 08:00 in the Gateway's `TZ` timezone.
 - `POST /api/wake-ops/<host_name>/wake`
-  - Send a manual Wake request and record successful reachability as WoL
-    evidence without changing the weekly schedule.
+  - Send a manual Wake request and record successful authenticated Station
+    reachability as WoL evidence without changing the weekly schedule.
+- `POST /api/station/command`
+  - Run an allowlisted Station command over the host's configured transport.
+    On either platform, `power shutdown` first verifies local mode and session
+    inventory; the Station checks these again after any command delay. It is
+    blocked if local mode is enabled, inventory is unknown, or a user session
+    is active.
 - `POST /api/winrm`
   - Body: `{ host, command, args?, transport?, use_ssl?, port? }`
   - Runs the host's configured `labstation_exe` (normally `C:\Lab Station\LabStation.exe`) with `<command> <args>` via WinRM. Transport, TLS and port are constrained by the host catalog and gateway policy; HTTPS on port 5986 is the default and request values cannot downgrade or override that policy.
@@ -301,6 +309,7 @@ off or unavailable Station from an internal worker failure.
 - `GET /api/reservations/timeline?reservationId=...&limit=...&offset=...`
 - `POST /api/hosts/reload`
 - `POST /api/hosts/local-mode`
+  - Enables local mode only for a hybrid Station after checking its live profile. Disabling a stale flag remains allowed.
 - `GET /api/operations/recent`
 - `POST /aas-admin/lab/<lab_id>/sync`
 
@@ -319,11 +328,19 @@ Enable with:
 
 Wake Ops uses the Gateway `TZ` timezone by default. A per-host schedule may
 still store an explicit timezone from Lab Manager when a deployment needs one.
-Its current host reachability check probes the WinRM port and does not use the
-Linux v3 SSH identity probe; the weekly power-state cycle therefore applies to
-Windows WinRM hosts. Keep the per-host schedule disabled for Linux v3: with a
-stale heartbeat, the cycle can misclassify a powered-on Station and send WoL
-followed by a shutdown command.
+The weekly cycle uses the configured management port for either platform and
+requires an authenticated Station status over that same transport before it
+classifies a host as on or records a wake as successful. A closed management
+port is treated as off only when no recent heartbeat or local-mode signal makes
+the state ambiguous. An open port without a verified Station identity is also
+ambiguous, so no power command is sent. Before cycling an online Windows or
+Linux Station, it requires a fresh status, local mode off,
+and a successful session inventory with no active user sessions. Every managed
+shutdown repeats that guard on the Station after the configured delay. Wake
+Ops also requires persistent WoL readiness before shutdown. Wake Ops manual
+and scheduled requests use the same configured management port and authenticated
+post-wake check. Set schedules for maintenance windows
+outside reservations and planned local use.
 
 Reservation automation knobs:
 

@@ -128,7 +128,7 @@ The current operational API, exposed through the gateway as `/ops/...`, includes
 
 | Gateway route | Purpose |
 | --- | --- |
-| `POST /ops/api/wol` | Send a magic packet and optionally wait for the host to become reachable. |
+| `POST /ops/api/wol` | Send a magic packet; when a managed `host` is supplied, wait for its configured management port and authenticated Station status. |
 | `POST /ops/api/winrm` | Run an allowlisted Windows v2 command over WinRM. |
 | `POST /ops/api/heartbeat/poll` | Collect and persist the current heartbeat. |
 | `GET /ops/api/heartbeat/stream` | Stream heartbeats as server-sent events. |
@@ -197,26 +197,46 @@ The start path is normally:
 
 1. Resolve `labId` from the provider catalog, then follow its `accessKey` to the current Guacamole connection and unique registered host.
 2. Send Wake-on-LAN when requested and wait for reachability.
-3. Run `prepare-session` to apply the station's session guard and clean the designated lab user profile.
+3. Run `prepare-session` for a `dedicated` or `hybrid` physical Station. It
+   refuses `fmu-only`, active or unknown local mode, and an unexpected local
+   session on a dedicated Station. Hybrid session eviction follows the
+   Station's configured policy; the Windows and Linux transports expose the
+   same command and profile semantics.
 4. Record every attempt in `reservation_operations` and move the local projection to `ACTIVE` only after success.
 
 The end path normally runs `release-session` without rebooting and can request a shutdown or hibernation action. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
+
+Lab Manager's operator `Prepare`/`Release` controls follow the same physical
+profile rules. `Release` closes only the managed remote lab-user session and
+application; it does not sign out the hybrid instructor. The operator path is
+available only when no reservation or demo lease is active. `Enable Local` is
+hybrid-only; clearing an already active flag remains possible for cleanup.
 
 ## Wake Ops
 
 Wake Ops is enabled by default for configured hosts and runs once a week on
 Sunday at 08:00 in the Gateway's `TZ` timezone. Lab Manager exposes the same
 schedule under **Operations → Wake Ops**, including the manual **Wake** action.
-The weekly cycle currently classifies power with a TCP probe against the
-host's WinRM port (5986 by default), plus recent heartbeat evidence. This
-probe applies to Windows v2; Wake Ops does not use the Linux v3 SSH identity
-probe. Keep the per-host Wake Ops schedule disabled for Linux v3 until this
-check is transport-aware: an online Linux Station with a stale heartbeat can
-be classified as off, and the cycle may then send WoL and a shutdown command.
-For Windows v2, an online station is shut down before WoL; a verified-off
-station is woken and shut down again; an ambiguous state does not receive a
-remote shutdown. Successful WoL evidence remains valid for seven days and is
-stored in `reservation_operations`.
+The weekly cycle classifies both Windows v2 and Linux v3 through the configured
+management port and an authenticated Station status over that transport. A
+closed management port is treated as off only when heartbeat evidence is not
+recent and does not report local mode enabled. An open port whose Station
+identity cannot be verified is ambiguous, so no power command is sent. Before
+cycling an online Windows or Linux Station, Wake Ops requires a fresh status
+with local mode disabled and a successful
+session inventory containing no active user sessions. The Gateway applies this
+same preflight to every managed `power shutdown`, then both Station agents check
+the same conditions before and after the delay and cancel if the state changed.
+Managed Shutdown also audits Wake-on-LAN readiness without repairing settings;
+regular Shutdown proceeds with a warning on either platform when readiness is
+incomplete. Wake Ops requires persistent Wake-on-LAN readiness and stops if it
+is incomplete. Wake Ops manual and scheduled requests send the same WoL packet,
+wait on the configured management port, and verify the authenticated Station
+identity before recording success. An online station is
+shut down before WoL; a verified-off station is woken and shut down again; an
+ambiguous state does not receive a remote shutdown. Configure the weekly window
+outside reservations and planned local use. Successful WoL evidence remains
+valid for seven days and is stored in `reservation_operations`.
 
 ## Windows v2 CLI and Linux v3 dispatcher
 
@@ -232,9 +252,12 @@ for the dispatcher request.
 | `prepare-session` | Evicts or guards local use as configured, closes the controller, and prepares the lab user before a reservation. |
 | `release-session` | Cleans up the lab user after the reservation without rebooting by default; an explicit request can include a controlled reboot. |
 | `status-json <path>` | Writes a fresh status report for inspection or heartbeat collection. |
-| `power shutdown` / `power hibernate` | Performs a controlled power action while checking Wake-on-LAN readiness. |
+| `power shutdown` / `power hibernate` | Performs a controlled power action. Every Gateway-managed shutdown, on Windows or Linux, requires the Station to advertise the idle-guard capability, local mode to be off, and a complete session inventory with no active user sessions. The Gateway checks before dispatch and the Station checks again after the optional delay. |
 | `recovery reboot-if-needed` | Performs a safeguard reboot only when station diagnostics justify it, unless explicitly forced. |
 | `service ...` | Manages the Lab Station scheduled background task when required. |
+
+An agent that does not advertise `power-idle-guard-v1` cannot receive a
+Gateway-managed shutdown. Update that Station agent to enable the shared guard.
 
 For both platforms, exit code `0` means success, `1` means completed with a
 warning, and values of `2` or greater indicate failure. The station records
@@ -242,7 +265,7 @@ actions in its platform logs, heartbeat, and operation-specific telemetry.
 
 ## Connectivity requirements
 
-- **Wake-on-LAN:** on Linux, activate `docker-compose.wol.yml` so `ops-worker` and `guacd` have static macvlan endpoints on the Station VLAN. Exclude `WOL_LAN_IP_RANGE` from the dynamic pool on the actual DHCP server, whether that is the router or `dnsmasq` on the Gateway host; the Compose overlay and `setup.sh` do not edit DHCP configuration. Check leases before changing an existing pool. Configure distinct fixed `WOL_LAN_OPS_WORKER_IPV4` and `WOL_LAN_GUACD_IPV4` values so Station WinRM and RDP firewall scopes do not drift when containers are recreated. Leave `WOL_LAN_GATEWAY` empty for an isolated VLAN, or set the actual VLAN router when targets exist outside the configured subnet. Persist the directed broadcast (for example `10.192.38.255`) in the host entry and as Guacamole's `wol-broadcast-addr`, alongside `wol-send-packet=true` and `wol-mac-addr`. The Windows firmware/NIC must be configured for magic-packet wake.
+- **Wake-on-LAN:** on Linux, activate `docker-compose.wol.yml` so `ops-worker` and `guacd` have static macvlan endpoints on the Station VLAN. Exclude `WOL_LAN_IP_RANGE` from the dynamic pool on the actual DHCP server, whether that is the router or `dnsmasq` on the Gateway host; the Compose overlay and `setup.sh` do not edit DHCP configuration. Check leases before changing an existing pool. Configure distinct fixed `WOL_LAN_OPS_WORKER_IPV4` and `WOL_LAN_GUACD_IPV4` values so Station WinRM and RDP firewall scopes do not drift when containers are recreated. Leave `WOL_LAN_GATEWAY` empty for an isolated VLAN, or set the actual VLAN router when targets exist outside the configured subnet. Persist the directed broadcast (for example `10.192.38.255`) in the host entry and as Guacamole's `wol-broadcast-addr`, alongside `wol-send-packet=true` and `wol-mac-addr`. The target Station's firmware and network interface must support and be configured for magic-packet wake.
 - **Station management:** Windows v2 hosts use WinRM HTTPS on 5986; Linux v3 hosts use SSH on their configured port (22 by default), Ed25519 service credentials, a pinned host key, and the forced Station dispatcher. Set `STATION_MANAGEMENT_CIDRS` to the destination CIDR(s) containing the Station addresses managed by this Gateway. This may differ from the Gateway's source or macvlan subnet; list multiple Station networks as comma-separated CIDRs. `WINRM_MANAGEMENT_CIDRS` remains a compatibility alias.
 - **Guacamole:** `guacd` can reach the station's configured RDP, VNC, or SSH service over the lab network.
 - **FMU station mode:** when `FMU_BACKEND_MODE=station`, `fmu-runner` can reach `FMU_STATION_BASE_URL` and authenticate with `FMU_STATION_INTERNAL_TOKEN`.

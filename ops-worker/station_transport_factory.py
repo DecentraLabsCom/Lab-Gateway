@@ -7,8 +7,9 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any, Dict, List, Optional
 
-from station_errors import StationCommandRejected, StationError, StationUnreachable
+from station_errors import StationCommandRejected, StationError, StationShutdownBlocked, StationUnreachable
 from station_transport import normalize_command_result, validate_station_command
+from station_shutdown_policy import shutdown_preflight_error
 from transports.ssh import SshTransport
 
 
@@ -51,7 +52,35 @@ class StationTransportRuntime:
         dispatcher_request: Optional[Mapping[str, Any]] = None,
         **legacy_kwargs: Any,
     ) -> Dict[str, Any]:
+        args = list(args or [])
         transport = self.transport_for(host)
+        if command == "power" and args and args[0] == "shutdown":
+            status_result = self.execute(host, "status-json", [])
+            if int(status_result.get("exitCode", 2)) >= 2:
+                raise StationShutdownBlocked(
+                    "Station status is unavailable; shutdown was not sent", transport
+                )
+            try:
+                status_payload = json.loads(str(status_result.get("stdout") or ""))
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise StationShutdownBlocked(
+                    "Station status is invalid; shutdown was not sent", transport
+                ) from exc
+            preflight_error = shutdown_preflight_error(status_payload)
+            if preflight_error:
+                raise StationShutdownBlocked(preflight_error, transport)
+            args = [arg for arg in args if not arg.lower().startswith("--require-idle")]
+            args = [
+                arg for arg in args
+                if not arg.lower().startswith("--skip-wake-check")
+                and not arg.lower().startswith("--repair-wake")
+                and arg.lower() != "--no-repair-wake"
+            ]
+            args.append("--require-idle")
+            if transport == "winrm":
+                args.append("--repair-wake=no")
+            validate_station_command(command, args)
+
         if transport == "ssh":
             try:
                 if dispatcher_request is None:

@@ -317,6 +317,21 @@
             const transport = String(meta.managementTransport || 'winrm').toLowerCase();
             const transportLabel = transport === 'ssh' ? 'SSH' : 'WinRM';
             const platformLabel = String(meta.platform || (transport === 'ssh' ? 'linux' : 'windows')).toUpperCase();
+            const reportedProfile = data.normalized?.profile
+                || status.profile
+                || status.stationProfile
+                || heartbeat.profile;
+            const normalizedProfile = String(reportedProfile || '').trim().toLowerCase();
+            const profile = normalizedProfile === 'server' ? 'dedicated' : normalizedProfile;
+            const profileLabel = ['dedicated', 'hybrid', 'fmu-only'].includes(profile)
+                ? profile.toUpperCase()
+                : 'UNKNOWN';
+            const configuredProfileValue = String(meta.profile || '').trim().toLowerCase();
+            const configuredProfile = configuredProfileValue === 'server' ? 'dedicated' : configuredProfileValue;
+            const configuredProfileMarkup = ['dedicated', 'hybrid', 'fmu-only'].includes(configuredProfile)
+                && configuredProfile !== profile
+                ? ` (configured: ${escapeHtml(configuredProfile.toUpperCase())})`
+                : '';
             const reportedContractVersion = data.normalized?.contractVersion
                 || heartbeat.schemaVersion || status.schemaVersion || 'not reported';
             const configuredContractMajor = String(meta.contractVersion || '').match(/^\s*(\d+)(?:\.|$)/)?.[1] || '';
@@ -334,11 +349,56 @@
             const readiness = getReadinessDisplay(heartbeat, summary, {
                 includeFmu: includeFmuReadiness,
             });
-            const localSession = status.localSessionActive;
+            const sessionSummary = status.sessions && typeof status.sessions === 'object'
+                ? status.sessions
+                : data.normalized?.sessions || {};
+            const sessionInventoryKnown = sessionSummary.queryOk === true;
+            const remoteLabSession = typeof sessionSummary.labUserRemoteActive === 'boolean'
+                ? sessionSummary.labUserRemoteActive
+                : status.labUserRemoteActive;
+            const reportedLocalSession = typeof status.localSessionActive === 'boolean'
+                ? status.localSessionActive
+                : typeof status.sessions?.localSessionActive === 'boolean'
+                    ? status.sessions.localSessionActive
+                    : data.normalized?.sessions?.localSessionActive;
+            const localSession = sessionInventoryKnown ? reportedLocalSession : undefined;
             const activeSessionDisplay = getActiveSessionDisplay(status, localSession);
             const activeSession = activeSessionDisplay.active;
             const localMode = typeof status.localModeEnabled === 'boolean'
                 ? status.localModeEnabled : heartbeat.localModeEnabled;
+            const hasPhysicalProfile = profile === 'dedicated' || profile === 'hybrid';
+            const prepareBlockedByLocalMode = localMode !== false;
+            const prepareBlockedByDedicatedSession = profile === 'dedicated' && localSession !== false;
+            const prepareBlocked = prepareBlockedByLocalMode || !sessionInventoryKnown || prepareBlockedByDedicatedSession;
+            const prepareTitle = localMode === true
+                ? 'Local mode is active; disable it before preparing'
+                : localMode !== false
+                    ? 'Refresh Station status to verify local mode'
+                    : !sessionInventoryKnown
+                        ? 'Refresh Station status to verify active sessions'
+                    : profile === 'dedicated' && localSession === true
+                        ? 'An unexpected interactive session blocks dedicated preparation'
+                        : profile === 'dedicated' && localSession !== false
+                            ? 'Refresh Station status to verify active sessions'
+                            : 'Prepare physical lab session';
+            const profileActionsMarkup = profile === 'fmu-only'
+                ? ''
+                : hasPhysicalProfile
+                    ? `<button class="mini-btn primary" data-action="prepare" title="${escapeHtml(prepareTitle)}"${prepareBlocked ? ' disabled' : ''}>Prepare</button>`
+                        + '<button class="mini-btn" data-action="release" title="Release the managed physical lab session">Release</button>'
+                    : '<button class="mini-btn primary" data-action="prepare" title="Refresh Station status to verify its profile" disabled>Prepare</button>'
+                        + '<button class="mini-btn" data-action="release" title="Refresh Station status to verify its profile" disabled>Release</button>';
+            const localActionMarkup = localMode === true
+                ? '<button class="mini-btn secondary" data-action="toggle-local-mode" title="Disable local mode">Disable Local</button>'
+                : profile === 'hybrid'
+                    ? localMode === false
+                        ? !sessionInventoryKnown
+                            ? '<button class="mini-btn secondary" data-action="toggle-local-mode" title="Refresh Station status to verify active sessions" disabled>Enable Local</button>'
+                            : remoteLabSession !== false
+                                ? '<button class="mini-btn secondary" data-action="toggle-local-mode" title="Refresh Station status to verify the remote lab-user session" disabled>Enable Local</button>'
+                                : '<button class="mini-btn secondary" data-action="toggle-local-mode" title="Enable local mode for on-site use">Enable Local</button>'
+                        : '<button class="mini-btn secondary" data-action="toggle-local-mode" title="Refresh Station status to verify local mode" disabled>Local status unknown</button>'
+                    : '';
             const lastForced = operations.lastForcedLogoff;
             const lastPower = operations.lastPowerAction;
             const updated = heartbeat.timestamp;
@@ -412,7 +472,7 @@
                 </div>
                 <div class="host-meta host-address">Address: <span class="mono">${safeAddress}</span></div>
                 <div class="host-meta">Connections: ${guacamoleStatusMarkup}</div>
-                <div class="host-meta">Platform: ${escapeHtml(platformLabel)} · Station contract: ${escapeHtml(reportedContractVersion)}${configuredContractMarkup}</div>
+                <div class="host-meta">Platform: ${escapeHtml(platformLabel)} · Profile: ${escapeHtml(profileLabel)}${configuredProfileMarkup} · Station contract: ${escapeHtml(reportedContractVersion)}${configuredContractMarkup}</div>
                 <div class="host-meta">Management: ${escapeHtml(transportLabel)}:${escapeHtml(meta.managementPort || (transport === 'ssh' ? 22 : 5986))}</div>
                 <div class="host-meta">${escapeHtml(transportLabel)} credentials / ${transport === 'ssh' ? 'host-key trust' : 'TLS'}: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update ${escapeHtml(transportLabel)} management credentials" aria-label="Set or update ${escapeHtml(transportLabel)} management credentials"><span class="host-status-text ${credentialsConfigured ? 'good' : 'warn'}">${credentialsConfigured ? 'configured' : 'missing'}</span></button> / <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage ${escapeHtml(transportLabel)} trust" aria-label="Manage ${escapeHtml(transportLabel)} trust"><span class="host-status-text ${winrmTrust.className}">${escapeHtml(winrmTrust.label)}</span></button></div>
             </div>
@@ -434,10 +494,9 @@
             <div class="host-actions">
                 <button class="mini-btn" data-action="poll" title="Check station status">Heartbeat</button>
                 <button class="mini-btn" data-action="wake-ops" title="Configure Wake Ops and wake station">Wake Ops</button>
-                <button class="mini-btn primary" data-action="prepare" title="Prepare station">Prepare</button>
-                <button class="mini-btn" data-action="release" title="Release station">Release</button>
+                ${profileActionsMarkup}
                 <button class="mini-btn danger" data-action="shutdown" title="Shut down station">Shutdown</button>
-                <button class="mini-btn secondary" data-action="toggle-local-mode" title="${localMode ? 'Disable' : 'Enable'} local mode">${localMode ? 'Disable' : 'Enable'} Local</button>
+                ${localActionMarkup}
                 <button class="mini-btn${fmuStation.action === 'release-fmu' ? ' danger' : ''}" data-action="${fmuStation.action}" title="${fmuStation.title}"${fmuActionDisabled}>${fmuStation.actionLabel}</button>
             </div>
         `;

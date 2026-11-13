@@ -48,8 +48,13 @@
                 return;
             }
             if (action === 'toggle-local-mode') {
-                const currentMode = hostState[host]?.heartbeat?.status?.localModeEnabled;
-                onToggleLocalMode(host, !currentMode);
+                const state = hostState[host] || {};
+                const heartbeat = state.heartbeat || {};
+                const status = heartbeat.status || heartbeat.station || heartbeat;
+                const currentMode = typeof status.localModeEnabled === 'boolean'
+                    ? status.localModeEnabled
+                    : state.normalized?.localModeEnabled ?? heartbeat.localModeEnabled;
+                if (typeof currentMode === 'boolean') onToggleLocalMode(host, !currentMode);
                 return;
             }
             if (action === 'set-winrm-credentials') {

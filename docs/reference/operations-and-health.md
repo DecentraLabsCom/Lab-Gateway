@@ -31,13 +31,17 @@ The projection also separates `access` (`ready`, `busy`, `inaccessible` or
 `unknown`), `wake` (`verified`, `configured`, `failed` or `unknown`) and
 `availability` (`now`, `on_demand`, `recoverable`, `unavailable` or `unknown`).
 `wake.verified` requires a recent persisted wake operation that sent WoL and
-then observed the host answering; a configured MAC and ping target alone only
-produce `wake.configured`. Successful WoL evidence remains verified for seven
-days. Weekly Wake Ops can refresh that evidence; its current reachability check
-probes the WinRM port and applies to Windows v2, not Linux v3 SSH. Keep the
-Linux per-host schedule disabled because a stale heartbeat can make the cycle
-misclassify a powered-on Station. See the
-[Wake Ops limitation](../workflows/gateway-lab-station-operations.md#wake-ops).
+then authenticated the Station over its configured management transport; a
+configured MAC and ping target alone only produce `wake.configured`. Successful
+WoL evidence remains verified for seven
+days. Weekly Wake Ops can refresh that evidence. Windows v2 and Linux v3 both
+use the configured management port and require an authenticated Station status
+over WinRM or pinned SSH, respectively. An open port without a verified Station
+identity is ambiguous and skips power commands; online cycles require local
+mode off and a healthy, inactive user-session inventory. Every managed
+shutdown rechecks that state after its delay; Wake Ops also requires persistent
+WoL. See the
+[Wake Ops behavior](../workflows/gateway-lab-station-operations.md#wake-ops).
 Physical-lab entries use the persisted Station heartbeat, with the bounded
 Guacamole target probe and WoL evidence as independent fallback/enrichment
 signals. FMU entries use the private `fmu-runner` health signal in both local

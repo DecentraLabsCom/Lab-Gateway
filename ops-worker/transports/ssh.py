@@ -99,7 +99,7 @@ class SshTransport:
         *,
         timeout_seconds: Optional[float] = None,
     ) -> Dict[str, Any]:
-        budget = self.command_timeout if timeout_seconds is None else max(1.0, min(float(timeout_seconds), 300.0))
+        budget = self.command_timeout if timeout_seconds is None else max(1.0, min(float(timeout_seconds), 3630.0))
         lock = _host_lock(host, self.max_parallel_per_host)
         acquired = lock.acquire(timeout=self.connect_timeout)
         if not acquired:
@@ -271,7 +271,11 @@ class SshTransport:
         if dispatcher_request is None:
             request_id = request_id or str(uuid.uuid4())
             envelope = {"schemaVersion": 1, "id": request_id, "operation": "execute", "command": command, "args": args}
-            result = self._dispatch(host, envelope)
+            result = self._dispatch(
+                host,
+                envelope,
+                timeout_seconds=self._command_timeout_for(command, args),
+            )
         else:
             if command not in {"prepare-session", "release-session"}:
                 raise StationCommandRejected()
@@ -345,6 +349,20 @@ class SshTransport:
         if result.get("message"):
             normalized["message"] = str(result["message"])
         return normalized
+
+    def _command_timeout_for(self, command: str, args: List[str]) -> float:
+        """Keep the SSH response channel open for an explicit Station power delay."""
+        if command != "power":
+            return self.command_timeout
+        delay = 0
+        for argument in args:
+            if isinstance(argument, str) and argument.startswith("--delay="):
+                try:
+                    delay = int(argument.partition("=")[2])
+                except ValueError:
+                    return self.command_timeout
+                break
+        return max(self.command_timeout, delay + 30)
 
     def read_artifact(self, host: Mapping[str, Any], artifact_id: str) -> str:
         validate_station_command("artifact.read", [artifact_id])

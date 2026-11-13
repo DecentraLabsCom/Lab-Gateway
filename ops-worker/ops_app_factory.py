@@ -112,6 +112,7 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
                 *args,
                 **kwargs,
             ),
+            probe_station=lambda *args, **kwargs: get("probe_station")(*args, **kwargs),
         )
     )
     app.register_blueprint(
