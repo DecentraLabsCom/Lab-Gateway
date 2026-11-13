@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Sequence
 from urllib.parse import urlsplit
@@ -14,51 +13,31 @@ from urllib.parse import urlsplit
 import httpx
 from aas_model_builders import (
     _AAS_LAB_ID_RE,
-    _FMI_VARIABLE_METADATA_EXTENSION,
-    _IDSHORT_UNSAFE_RE,
-    _MAX_FMI_VARIABLE_METADATA_BYTES,
-    _SEMANTIC_ID_ACCESS_GENERATED_DIGEST,
-    _SEMANTIC_ID_ACCESS_INTERFACE_DIGEST,
-    _SEMANTIC_ID_ARBITRARY,
-    _SEMANTIC_ID_ASSET_INTERFACES,
-    _SEMANTIC_ID_CAPABILITY_DESCRIPTION,
-    _SEMANTIC_ID_CONTACT_INFORMATION,
-    _SEMANTIC_ID_HANDOVER_DOCUMENTATION,
-    _SEMANTIC_ID_SIMULATION_ACCESS_CONTROL,
-    _SEMANTIC_ID_SIMULATION_MODEL,
-    _SEMANTIC_ID_SIMULATION_MODELS,
-    _SEMANTIC_ID_TECHNICAL_DATA,
-    _SIMULATION_SEMANTICS,
+    _SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES,
+    _SEMANTIC_ID_FMI_LS_RELATED_RESOURCES,
+    _SEMANTIC_ID_FMI_LS_STRUCT,
     _aas_id_for_lab,
-    _arbitrary_property,
-    _asset_interface_action,
-    _causality_to_port_type,
-    _documentation_urls,
     _encode_id,
-    _fmi_causality_to_idta,
-    _fmi_type_to_idta,
-    _fmi_variable_metadata_extension,
     _fmu_digest as _model_fmu_digest,
-    _non_negative_int,
-    _sanitize_idshort,
-    _semantic_id,
-    _standard_mlp,
     _standard_property,
     _submodel_id_for_access_control,
     _submodel_id_for_contact,
     _submodel_id_for_execution,
+    _submodel_id_for_fmi_ls_related_resources,
+    _submodel_id_for_fmi_ls_struct,
     _submodel_id_for_fmu,
     _submodel_id_for_handover,
     _submodel_id_for_interfaces,
     _submodel_id_for_technical,
+    _readable_fmi_variable_names,
     _validate_lab_id,
     build_aas_shell,
     build_asset_interfaces_description_submodel,
     build_contact_information_submodel,
     build_execution_capabilities_submodel,
+    build_fmi_ls_related_resources_submodel,
+    build_fmi_ls_struct_submodel,
     build_handover_documentation_submodel,
-    build_simulation_access_control_submodel,
-    build_simulation_ports,
     build_simulation_submodel as _build_simulation_submodel,
     build_technical_data_submodel,
 )
@@ -68,16 +47,15 @@ from aas_access_control_sync import (
     _is_simulation_access_control_submodel,
     _sync_simulation_access_control,
 )
-from aasx_import import _parse_aasx_xml_environment, parse_aasx as _parse_aasx_package
+from aasx_import import parse_aasx as _parse_aasx_package
 from aasx_limits import (
     MAX_AASX_ENVIRONMENT_PART_BYTES,
     MAX_AASX_RELATIONSHIP_PART_BYTES,
     MAX_AASX_UPLOAD_BYTES,
 )
 from simulation_access_policy import (
-    build_part4_access_rules,
     compile_part4_access_rules,
-    fmi_interface_digest,
+    normalize_authorized_execution_interfaces,
 )
 
 logger = logging.getLogger("fmu-runner.aas")
@@ -393,6 +371,96 @@ def _shell_submodel_ids(shell: dict[str, Any]) -> list[str]:
     return result
 
 
+async def get_handover_visual_assets(lab_id: str) -> list[dict[str, str]]:
+    """Read local preview visual assets from the linked AAS handover submodel."""
+    normalized_lab_id = str(lab_id or "").strip()
+    if _AAS_LAB_ID_RE.fullmatch(normalized_lab_id) is None or not BASYX_AAS_URL:
+        return []
+
+    shell_id = f"urn:decentralabs:lab:{normalized_lab_id}"
+    handover_id = _submodel_id_for_handover(normalized_lab_id)
+    try:
+        async with httpx.AsyncClient(
+            base_url=BASYX_AAS_URL,
+            headers=_aas_request_headers(),
+            timeout=8.0,
+        ) as client:
+            shell_response = await client.get(f"/shells/{_encode_id(shell_id)}")
+            if shell_response.status_code == 404:
+                return []
+            if shell_response.status_code != 200:
+                raise RuntimeError("AAS shell could not be read")
+            shell = shell_response.json()
+            if not isinstance(shell, dict) or shell.get("id") != shell_id:
+                raise RuntimeError("AAS shell reference is invalid")
+            raw_submodel_ids = shell.get("submodelIds")
+            submodel_ids = (
+                [value for value in raw_submodel_ids if isinstance(value, str)]
+                if isinstance(raw_submodel_ids, list) and raw_submodel_ids
+                else _shell_submodel_ids(shell)
+            )
+            if handover_id not in submodel_ids:
+                return []
+
+            submodel_response = await client.get(f"/submodels/{_encode_id(handover_id)}")
+            if submodel_response.status_code == 404:
+                return []
+            if submodel_response.status_code != 200:
+                raise RuntimeError("AAS handover submodel could not be read")
+            submodel = submodel_response.json()
+            if not isinstance(submodel, dict) or submodel.get("id") != handover_id:
+                raise RuntimeError("AAS handover submodel reference is invalid")
+    except (httpx.RequestError, ValueError) as exc:
+        raise RuntimeError("AAS visual asset references are unavailable") from exc
+
+    visual_assets: list[dict[str, str]] = []
+    pending: list[tuple[Any, int]] = [(submodel.get("submodelElements", []), 0)]
+    visited = 0
+    while pending and visited < 2048 and len(visual_assets) < 32:
+        elements, depth = pending.pop()
+        if depth > 12 or not isinstance(elements, list):
+            continue
+        for element in elements:
+            visited += 1
+            if visited > 2048 or len(visual_assets) >= 32:
+                break
+            if not isinstance(element, dict):
+                continue
+            if element.get("modelType") == "File":
+                url = element.get("value")
+                content_type = str(element.get("contentType") or "").split(";", 1)[0].strip().lower()
+                if not isinstance(url, str):
+                    continue
+                if (
+                    content_type == "text/html"
+                    and re.fullmatch(
+                        rf"/digital-twin-apps/{re.escape(normalized_lab_id)}/[a-f0-9]{{64}}/index\.html",
+                        url,
+                    )
+                ):
+                    renderer = "threejs-app"
+                elif (
+                    content_type == "model/gltf-binary"
+                    and re.fullmatch(
+                        rf"/digital-twin-scenes/{re.escape(normalized_lab_id)}/[a-f0-9]{{64}}\.glb",
+                        url,
+                    )
+                ):
+                    renderer = "glb"
+                else:
+                    continue
+                visual_assets.append({
+                    "submodelId": handover_id,
+                    "elementIdShort": str(element.get("idShort") or ""),
+                    "url": url,
+                    "contentType": content_type,
+                    "renderer": renderer,
+                })
+            elif isinstance(element.get("value"), list):
+                pending.append((element["value"], depth + 1))
+    return visual_assets
+
+
 async def _generated_updated_at(
     client: httpx.AsyncClient,
     lab_id: str,
@@ -500,6 +568,7 @@ async def _sync_aasx_package_resources(
     metadata: dict,
     aasx_bytes: bytes,
     extra_info: Optional[dict],
+    fmi_ls_resources: Optional[dict],
     fmu_path: Optional[Path],
     required_aas_id: Optional[str],
     force_regenerate_access_policy: bool,
@@ -573,6 +642,63 @@ async def _sync_aasx_package_resources(
                 "keys": [{"type": "Submodel", "value": aasx_simulation_model_id}],
             })
 
+        generated_related_resources = build_fmi_ls_related_resources_submodel(
+            lab_id,
+            fmi_ls_resources,
+        )
+        if generated_related_resources is not None:
+            related_candidates = [
+                (index, submodel)
+                for index, submodel in enumerate(all_submodels)
+                if isinstance(submodel, dict)
+                and (
+                    submodel.get("idShort") == "FmiLsRelatedResources"
+                    or any(
+                        isinstance(key, dict)
+                        and key.get("value") == _SEMANTIC_ID_FMI_LS_RELATED_RESOURCES
+                        for key in (
+                            submodel.get("semanticId", {}).get("keys", [])
+                            if isinstance(submodel.get("semanticId"), dict)
+                            else []
+                        )
+                    )
+                )
+            ]
+            if len(related_candidates) > 1:
+                result["error"] = "FMU AASX contains ambiguous FMI-LS-REF resource submodels"
+                return result
+            if related_candidates:
+                related_index, related_existing = related_candidates[0]
+                existing_id = related_existing.get("id")
+                if not isinstance(existing_id, str) or not existing_id.strip():
+                    result["error"] = "FMU AASX FMI-LS-REF resource submodel has no valid ID"
+                    return result
+                if any(
+                    isinstance(key, dict)
+                    and key.get("value") == _SEMANTIC_ID_FMI_LS_RELATED_RESOURCES
+                    for key in (
+                        related_existing.get("semanticId", {}).get("keys", [])
+                        if isinstance(related_existing.get("semanticId"), dict)
+                        else []
+                    )
+                ):
+                    generated_related_resources["id"] = existing_id
+                    all_submodels[related_index] = generated_related_resources
+                else:
+                    # Keep a provider-authored submodel with the same short
+                    # name if it uses a different semantic contract.
+                    generated_related_resources = related_existing
+                related_id = existing_id
+            else:
+                related_id = generated_related_resources["id"]
+                all_submodels.append(generated_related_resources)
+            if related_id not in _shell_submodel_ids(target_shell):
+                shell_refs.append({
+                    "type": "ModelReference",
+                    "keys": [{"type": "Submodel", "value": related_id}],
+                })
+            result["fmiLsRelatedResourcesSubmodelId"] = related_id
+
         imported_access_policies = [
             submodel for submodel in all_submodels
             if _is_simulation_access_control_submodel(submodel)
@@ -607,12 +733,30 @@ async def _sync_aasx_package_resources(
             raw_rules = base64.b64decode(rules_blob["value"], validate=True)
             generated_digest = _find_property_value(policy_submodel, "GeneratedPolicyDigest")
             interface_digest = _find_property_value(policy_submodel, "InterfaceDigest")
+            configured_execution_interfaces = _find_property_value(
+                policy_submodel,
+                "AuthorizedExecutionInterfaces",
+            )
+            try:
+                execution_interfaces_value = (
+                    json.loads(configured_execution_interfaces)
+                    if configured_execution_interfaces is not None
+                    else None
+                )
+                authorized_execution_interfaces = normalize_authorized_execution_interfaces(
+                    metadata,
+                    execution_interfaces_value,
+                )
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                logger.warning("Imported AASX execution-interface policy is invalid: %s", type(exc).__name__)
+                result["error"] = "FMU AASX execution-interface policy does not match its FMU"
+                return result
             source = "aas-generated" if (
                 generated_digest
                 and generated_digest == hashlib.sha256(raw_rules).hexdigest()
             ) else "aas-provider"
             try:
-                compile_part4_access_rules(
+                imported_access_policy = compile_part4_access_rules(
                     rules_document,
                     metadata,
                     aasx_simulation_model_id,
@@ -621,20 +765,97 @@ async def _sync_aasx_package_resources(
                     source=source,
                     allowed_submodel_ids=shell_submodel_ids,
                 )
+                imported_access_policy["authorizedExecutionInterfaces"] = authorized_execution_interfaces
             except (TypeError, ValueError) as exc:
                 logger.warning("Imported FMU AASX access policy is invalid: %s", type(exc).__name__)
                 result["error"] = "FMU AASX access policy does not match its FMU or AAS shell"
                 return result
+            if configured_execution_interfaces is None:
+                policy_submodel.setdefault("submodelElements", []).append(
+                    _standard_property(
+                        "AuthorizedExecutionInterfaces",
+                        "xs:string",
+                        json.dumps(authorized_execution_interfaces, separators=(",", ":")),
+                        _SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES,
+                    )
+                )
+            if source == "aas-provider":
+                struct_readable_variable_names: set[str] = set()
+            else:
+                struct_readable_variable_names = {
+                    name
+                    for name, permission in imported_access_policy.get("variables", {}).items()
+                    if isinstance(name, str) and isinstance(permission, dict) and permission.get("read") is True
+                }
             result["accessPolicyPreserved"] = True
             result["accessControlSubmodelId"] = policy_submodel_id
         else:
             generate_access_policy = True
+            struct_readable_variable_names = _readable_fmi_variable_names(metadata)
             generated_policy_id = _submodel_id_for_access_control(lab_id)
             if generated_policy_id not in _shell_submodel_ids(target_shell):
                 shell_refs.append({
                     "type": "ModelReference",
                     "keys": [{"type": "Submodel", "value": generated_policy_id}],
                 })
+
+        generated_struct = build_fmi_ls_struct_submodel(
+            lab_id,
+            metadata.get("fmiLsStruct"),
+            readable_variable_names=struct_readable_variable_names,
+        )
+        if generated_struct is not None:
+            struct_candidates = [
+                (index, submodel)
+                for index, submodel in enumerate(all_submodels)
+                if isinstance(submodel, dict)
+                and (
+                    submodel.get("idShort") == "FmiLsStruct"
+                    or any(
+                        isinstance(key, dict)
+                        and key.get("value") == _SEMANTIC_ID_FMI_LS_STRUCT
+                        for key in (
+                            submodel.get("semanticId", {}).get("keys", [])
+                            if isinstance(submodel.get("semanticId"), dict)
+                            else []
+                        )
+                    )
+                )
+            ]
+            if len(struct_candidates) > 1:
+                result["error"] = "FMU AASX contains ambiguous FMI-LS-STRUCT map submodels"
+                return result
+            if struct_candidates:
+                struct_index, struct_existing = struct_candidates[0]
+                existing_id = struct_existing.get("id")
+                if not isinstance(existing_id, str) or not existing_id.strip():
+                    result["error"] = "FMU AASX FMI-LS-STRUCT submodel has no valid ID"
+                    return result
+                has_struct_semantic = any(
+                    isinstance(key, dict) and key.get("value") == _SEMANTIC_ID_FMI_LS_STRUCT
+                    for key in (
+                        struct_existing.get("semanticId", {}).get("keys", [])
+                        if isinstance(struct_existing.get("semanticId"), dict)
+                        else []
+                    )
+                )
+                if has_struct_semantic:
+                    generated_struct["id"] = existing_id
+                    all_submodels[struct_index] = generated_struct
+                else:
+                    # Preserve a provider-authored submodel with a colliding idShort.
+                    generated_struct = None
+                struct_id = existing_id
+            else:
+                struct_id = generated_struct["id"]
+                all_submodels.append(generated_struct)
+            if struct_id not in _shell_submodel_ids(target_shell):
+                shell_refs.append({
+                    "type": "ModelReference",
+                    "keys": [{"type": "Submodel", "value": struct_id}],
+                })
+            if generated_struct is not None:
+                result["fmiLsStructSubmodelId"] = struct_id
 
     uploaded_aas_ids: list = []
     uploaded_sm_ids: list = []
@@ -720,6 +941,7 @@ async def _sync_generated_fmu_submodels(
     access_key: str,
     metadata: dict,
     extra_info: Optional[dict],
+    fmi_ls_resources: Optional[dict],
     fmu_path: Optional[Path],
     runtime_info: Optional[dict],
     force_regenerate_access_policy: bool,
@@ -733,11 +955,25 @@ async def _sync_generated_fmu_submodels(
     interfaces_id = result["interfacesSubmodelId"]
     contact_id = result["contactSubmodelId"]
     handover_id = result["handoverSubmodelId"]
+    related_resources_id = _submodel_id_for_fmi_ls_related_resources(lab_id)
+    struct_id = _submodel_id_for_fmi_ls_struct(lab_id)
     aas_id_encoded = _encode_id(aas_id)
     submodel_id_encoded = _encode_id(submodel_id)
     technical_data_id_encoded = _encode_id(technical_data_id)
 
-    shell_payload = build_aas_shell(lab_id, access_key, metadata, extra_info)
+    related_resources_payload = build_fmi_ls_related_resources_submodel(lab_id, fmi_ls_resources)
+    struct_payload = build_fmi_ls_struct_submodel(
+        lab_id,
+        metadata.get("fmiLsStruct"),
+        readable_variable_names=_readable_fmi_variable_names(metadata),
+    )
+    shell_payload = build_aas_shell(
+        lab_id,
+        access_key,
+        metadata,
+        extra_info,
+        fmi_ls_resources=fmi_ls_resources,
+    )
     submodel_payload = build_simulation_submodel(lab_id, access_key, metadata, extra_info, fmu_path=fmu_path)
     technical_data_payload = build_technical_data_submodel(lab_id, metadata, runtime_info)
     execution_capabilities_payload = build_execution_capabilities_submodel(
@@ -746,12 +982,19 @@ async def _sync_generated_fmu_submodels(
         runtime_info,
     )
     execution_operations = []
-    if metadata.get("supportsCoSimulation") or metadata.get("supportsModelExchange"):
+    supports_runtime_execution = metadata.get("supportsExecution")
+    if not isinstance(supports_runtime_execution, bool):
+        supports_runtime_execution = bool(
+            metadata.get("supportsCoSimulation")
+            or metadata.get("supportsModelExchange")
+            or metadata.get("supportsFmiLsDae")
+        )
+    if supports_runtime_execution:
         execution_operations.extend([
             ("RunSimulation", "/fmu/api/v1/simulations/run", "POST", ""),
             ("CancelSimulation", "/fmu/api/v1/simulations/{simulationId}/cancel", "POST", ""),
         ])
-    if metadata.get("supportsCoSimulation"):
+    if supports_runtime_execution:
         execution_operations.extend([
             ("CreateRealtimeSession", "/fmu/api/v1/fmu/sessions", "GET", "websocket"),
             *[(command, "/fmu/api/v1/fmu/sessions", "GET", "websocket") for command in (
@@ -759,9 +1002,29 @@ async def _sync_generated_fmu_submodels(
                 "SetInputs", "GetOutputs", "TerminateSession",
             )],
         ])
+        capabilities = metadata.get("capabilities")
+        if (
+            isinstance(capabilities, dict)
+            and (
+                capabilities.get("canGetAndSetFMUstate") is True
+                or capabilities.get("canGetAndSetFMUState") is True
+            )
+            and (
+                capabilities.get("canSerializeFMUstate") is True
+                or capabilities.get("canSerializeFMUState") is True
+            )
+        ):
+            execution_operations.extend([
+                ("CaptureFMUState", "/fmu/api/v1/fmu/sessions", "GET", "websocket"),
+                ("RestoreFMUState", "/fmu/api/v1/fmu/sessions", "GET", "websocket"),
+            ])
     interfaces_payload = build_asset_interfaces_description_submodel(lab_id, execution_operations)
     contact_payload = build_contact_information_submodel(lab_id, extra_info)
     handover_payload = build_handover_documentation_submodel(lab_id, extra_info)
+    if related_resources_payload is not None:
+        result["fmiLsRelatedResourcesSubmodelId"] = related_resources_id
+    if struct_payload is not None:
+        result["fmiLsStructSubmodelId"] = struct_id
 
     # --- Submodel: PUT (create or replace) ---
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,1024}", submodel_id_encoded):
@@ -890,6 +1153,8 @@ async def _sync_generated_fmu_submodels(
         (interfaces_id, interfaces_payload, "AssetInterfacesDescription"),
         (contact_id, contact_payload, "ContactInformations"),
         (handover_id, handover_payload, "HandoverDocumentation"),
+        (related_resources_id, related_resources_payload, "FmiLsRelatedResources"),
+        (struct_id, struct_payload, "FmiLsStruct"),
     ):
         if _sm_payload is None:
             continue
@@ -953,6 +1218,7 @@ async def sync_fmu_to_basyx(
     metadata: dict,
     aasx_bytes: Optional[bytes] = None,
     extra_info: Optional[dict] = None,
+    fmi_ls_resources: Optional[dict] = None,
     fmu_path: Optional[Path] = None,
     unit_definitions: Sequence[dict] = (),
     required_aas_id: Optional[str] = None,
@@ -982,7 +1248,6 @@ async def sync_fmu_to_basyx(
     interfaces_id = _submodel_id_for_interfaces(lab_id)
     contact_id = _submodel_id_for_contact(lab_id)
     handover_id = _submodel_id_for_handover(lab_id)
-
     result: dict = {
         "aasId": aas_id,
         "submodelId": submodel_id,
@@ -1016,6 +1281,7 @@ async def sync_fmu_to_basyx(
                     metadata=metadata,
                     aasx_bytes=aasx_bytes,
                     extra_info=extra_info,
+                    fmi_ls_resources=fmi_ls_resources,
                     fmu_path=fmu_path,
                     required_aas_id=required_aas_id,
                     force_regenerate_access_policy=force_regenerate_access_policy,
@@ -1032,6 +1298,7 @@ async def sync_fmu_to_basyx(
                     access_key=access_key,
                     metadata=metadata,
                     extra_info=extra_info,
+                    fmi_ls_resources=fmi_ls_resources,
                     fmu_path=fmu_path,
                     runtime_info=runtime_info,
                     force_regenerate_access_policy=force_regenerate_access_policy,

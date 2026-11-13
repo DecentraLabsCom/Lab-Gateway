@@ -260,16 +260,16 @@ from reservation_runtime import create_reservation_orchestrator_class
 from reservation_context import ReservationRuntimeContext
 from winrm_runtime import create_winrm_runtime
 from station_credentials import (
-    delete_ssh_credential,
-    generate_ssh_credential,
+    delete_ssh_credential as delete_ssh_credential,
+    generate_ssh_credential as generate_ssh_credential,
     load_ssh_credential,
-    public_ssh_credential,
+    public_ssh_credential as public_ssh_credential,
 )
 from station_transport_factory import create_station_transport_runtime
 from station_ssh_trust import (
-    confirm_ssh_host_key,
-    delete_ssh_trust,
-    probe_ssh_host_key,
+    confirm_ssh_host_key as confirm_ssh_host_key,
+    delete_ssh_trust as delete_ssh_trust,
+    probe_ssh_host_key as probe_ssh_host_key,
     ssh_trust_status,
 )
 from winrm_context import WinRMContext
@@ -1624,9 +1624,37 @@ def read_fmu_runner_health() -> Dict[str, Any]:
 
 def build_host_inventory() -> Dict[str, Any]:
     """Build inventory while preserving the live worker patch point."""
-    return _HOST_INVENTORY_RUNTIME.build_host_inventory(
+    inventory = _HOST_INVENTORY_RUNTIME.build_host_inventory(
         safe_entry=safe_host_inventory_entry,
     )
+    if str(FMU_STATUS_BACKEND or "").strip().lower() != "station":
+        return inventory
+
+    try:
+        station_fmu_lab_ids = {
+            normalize_match_key(resource.get("labId"))
+            for resource in resolve_lab_resources()
+            if isinstance(resource, Mapping)
+            and str(resource.get("resourceType") or "").strip().lower() == "fmu"
+            and str(resource.get("executionBackend") or "").strip().lower() == "station"
+        }
+        if not station_fmu_lab_ids:
+            return inventory
+
+        associated_hosts = {
+            normalize_match_key(association.get("hostName"))
+            for association in resolve_lab_associations()
+            if isinstance(association, Mapping)
+            and normalize_match_key(association.get("labId")) in station_fmu_lab_ids
+        }
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.warning("Unable to resolve FMU Station lab associations: %s", exc)
+        return inventory
+
+    for host in inventory.get("hosts", []):
+        if isinstance(host, dict) and normalize_match_key(host.get("name")) in associated_hosts:
+            host["hasStationFmuLab"] = True
+    return inventory
 
 
 poll_all_hosts = _HEARTBEAT_RUNTIME.poll_all_hosts

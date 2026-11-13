@@ -860,7 +860,7 @@ services:
       - FMU_STATION_INTERNAL_TOKEN_FILE=/run/secrets/fmu_station_internal_token
       - FMU_STATION_REQUEST_TIMEOUT=${FMU_STATION_REQUEST_TIMEOUT:-10}
       - FMU_SESSION_OBSERVATION_MAX_ATTEMPTS=${FMU_SESSION_OBSERVATION_MAX_ATTEMPTS:-3}
-      - FMU_MAX_SIMULATION_PARAMETERS=${FMU_MAX_SIMULATION_PARAMETERS:-128}
+      - FMU_MAX_SIMULATION_PARAMETERS=${FMU_MAX_SIMULATION_PARAMETERS:-256}
       # Bound scheduled input payloads at the public facade before forwarding
       # them to the production Station Executor.
       - FMU_MAX_INPUT_SCHEDULE_EVENTS=${FMU_MAX_INPUT_SCHEDULE_EVENTS:-120000}
@@ -920,7 +920,7 @@ services:
         limits:
           memory: 1G
           cpus: '2.0'
-          pids: 96
+          pids: 128
         reservations:
           memory: 512M
           cpus: '0.5'
@@ -945,7 +945,7 @@ services:
   # local FMU data directory with the Gateway facade.
   fmu-executor-local:
     profiles: ["fmu-local-dev"]
-    image: ${FMU_EXECUTOR_IMAGE:-ghcr.io/decentralabscom/fmu-executor:0.3.4}
+    image: ${FMU_EXECUTOR_IMAGE:-ghcr.io/decentralabscom/fmu-executor:0.3.10}
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     environment:
       - FMU_EXECUTOR_HOST=0.0.0.0
@@ -954,14 +954,15 @@ services:
       - FMU_EXECUTOR_TEMP=/tmp
       - FMU_EXECUTOR_STATE_DIR=/var/lib/fmu-executor/state
       - FMU_EXECUTION_TIMEOUT_SECONDS=${FMU_EXECUTION_TIMEOUT_SECONDS:-300}
-      - FMU_MAX_SIMULATION_PARAMETERS=${FMU_MAX_SIMULATION_PARAMETERS:-128}
+      - FMU_MAX_SIMULATION_PARAMETERS=${FMU_MAX_SIMULATION_PARAMETERS:-256}
       - FMU_MAX_ARCHIVE_BYTES=${FMU_MAX_ARCHIVE_BYTES:-134217728}
       - FMU_MAX_EXPANDED_BYTES=${FMU_MAX_EXPANDED_BYTES:-201326592}
       - FMU_MAX_ARCHIVE_ENTRIES=${FMU_MAX_ARCHIVE_ENTRIES:-20000}
       - FMU_MAX_MODEL_DESCRIPTION_BYTES=${FMU_MAX_MODEL_DESCRIPTION_BYTES:-33554432}
       - FMU_WORKER_CPU_SECONDS=${FMU_WORKER_CPU_SECONDS:-300}
-      - FMU_WORKER_MEMORY_MIB=${FMU_WORKER_MEMORY_MIB:-768}
+      - FMU_WORKER_MEMORY_MIB=${FMU_WORKER_MEMORY_MIB:-1536}
       - FMU_WORKER_FILE_MIB=${FMU_WORKER_FILE_MIB:-128}
+      - FMU_NATIVE_THREAD_LIMIT=${FMU_NATIVE_THREAD_LIMIT:-2}
       - FMU_MAX_BATCH_CASES=${FMU_MAX_BATCH_CASES:-8}
       - FMU_MAX_SCENARIOS_PER_RESERVATION_PER_DAY=${FMU_MAX_SCENARIOS_PER_RESERVATION_PER_DAY:-}
       - FMU_MAX_SIMULATION_STEPS=${FMU_MAX_SIMULATION_STEPS:-600000}
@@ -997,9 +998,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G
           cpus: '2.0'
-          pids: 64
+          pids: 128
     logging:
       driver: "json-file"
       options:
@@ -1028,7 +1029,7 @@ services:
       - FMU_LOCAL_DEV_MODE=true
       - FMU_LOCAL_EXECUTOR_BASE_URL=${FMU_LOCAL_EXECUTOR_BASE_URL:-http://fmu-executor-local:8091}
       - FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN_FILE=/run/secrets/fmu_local_executor_token
-      - FMU_MAX_SIMULATION_PARAMETERS=64
+      - FMU_MAX_SIMULATION_PARAMETERS=256
       - FMU_DATA_PATH=/app/fmu-data
       - FMU_PROXY_RUNTIME_PATH=/app/fmu-proxy-runtime
       - DIGITAL_TWIN_ASSETS_PATH=/app/digital-twin-assets
@@ -1133,7 +1134,8 @@ services:
   # BaSyx AAS Server - Asset Administration Shell registry & repository
   # Public read via /aas/ (OpenResty), admin write via /aas-admin/ (lab_manager_admin_access.lua)
   # Only available in Full Gateway instances (one per institution).
-  # Start with: docker compose --profile aas up  (or COMPOSE_PROFILES=aas)
+  # Start with: AAS_ENABLED=true docker compose --profile aas up
+  # (or persist AAS_ENABLED=true and COMPOSE_PROFILES=aas in .env)
   basyx-aas-server:
     image: eclipsebasyx/aas-environment:2.0.0-milestone-04
     profiles: ["aas"]

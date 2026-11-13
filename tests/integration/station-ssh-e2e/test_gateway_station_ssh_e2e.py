@@ -4,8 +4,6 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 
-import paramiko
-
 import transports.ssh as ssh_module
 from station_ssh_trust import confirm_ssh_host_key, probe_ssh_host_key
 from station_transport_factory import StationTransportRuntime

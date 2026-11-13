@@ -5,24 +5,20 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
+from simulation_access_policy import build_effective_policy
+
 
 _LAB_ID_RE = re.compile(r"local_demo_[a-f0-9]{24}")
 _SHELL_ID_PREFIX = "urn:decentralabs:lab:"
-_SUBMODEL_ID_FIELDS = (
-    "submodelId",
-    "technicalDataSubmodelId",
-    "executionSubmodelId",
-    "interfacesSubmodelId",
-    "contactSubmodelId",
-    "handoverSubmodelId",
-    "accessControlSubmodelId",
-)
+
+logger = logging.getLogger(__name__)
 
 
 class LocalPreviewAasxRegistry:
@@ -45,7 +41,10 @@ class LocalPreviewAasxRegistry:
         get_link_path: Callable[[str], Path],
         build_aas_shell: Callable[..., dict],
         get_effective_policy: Callable[[dict], Any],
+        get_effective_policy_for_metadata: Callable[[dict, dict], Any] | None = None,
         invalidate_access_policy: Callable[..., Any],
+        get_digital_twin_assets: Callable[[str, str], Any] | None = None,
+        get_fmi_ls_related_resources: Callable[[str], Any] | None = None,
     ):
         self.get_model_metadata = get_model_metadata
         self.sync_fmu_to_basyx = sync_fmu_to_basyx
@@ -55,9 +54,11 @@ class LocalPreviewAasxRegistry:
         self.get_link_path = get_link_path
         self.build_aas_shell = build_aas_shell
         self.get_effective_policy = get_effective_policy
+        self.get_effective_policy_for_metadata = get_effective_policy_for_metadata
         self.invalidate_access_policy = invalidate_access_policy
+        self.get_digital_twin_assets = get_digital_twin_assets
+        self.get_fmi_ls_related_resources = get_fmi_ls_related_resources
         self._locks: dict[str, asyncio.Lock] = {}
-        self._cache: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     def _validate_claims(claims: dict) -> tuple[str, str]:
@@ -91,33 +92,135 @@ class LocalPreviewAasxRegistry:
             raise RuntimeError(f"Local AASX {operation} failed: {reason[:240]}")
         return result
 
+    async def _resolve_policy(self, claims: dict, metadata: dict) -> Any:
+        if self.get_effective_policy_for_metadata is not None:
+            result = self.get_effective_policy_for_metadata(claims, metadata)
+        else:
+            result = self.get_effective_policy(claims)
+        if hasattr(result, "__await__"):
+            return await result
+        return result
+
     async def ensure(self, claims: dict) -> dict:
         lab_id, access_key = self._validate_claims(claims)
         lock = self._locks.setdefault(lab_id, asyncio.Lock())
         async with lock:
-            cached = self._cache.get(lab_id)
-            if cached is not None:
-                return dict(cached)
+            # Local preview assets can be replaced while the Gateway process
+            # remains running. Always reconcile the source FMU and companion
+            # digests before reusing an AAS policy, so newly declared FMI
+            # inputs and refreshed scene bindings become visible immediately.
+            raw_assets = self.get_digital_twin_assets(lab_id, access_key) if self.get_digital_twin_assets else []
+            if raw_assets is None:
+                raw_assets = []
+            if not isinstance(raw_assets, list) or len(raw_assets) > 2:
+                raise RuntimeError("Local digital twin asset references are invalid")
+            assets: list[dict[str, str]] = []
+            for raw_asset in raw_assets:
+                if not isinstance(raw_asset, dict):
+                    raise RuntimeError("Local digital twin asset reference is invalid")
+                asset_path = str(raw_asset.get("path") or "").strip()
+                content_type = str(raw_asset.get("contentType") or "").strip().lower()
+                valid_app = (
+                    content_type == "text/html"
+                    and re.fullmatch(
+                        rf"/digital-twin-apps/{re.escape(lab_id)}/[a-f0-9]{{64}}/index\.html",
+                        asset_path,
+                    ) is not None
+                )
+                valid_scene = (
+                    content_type == "model/gltf-binary"
+                    and re.fullmatch(
+                        rf"/digital-twin-scenes/{re.escape(lab_id)}/[a-f0-9]{{64}}\.glb",
+                        asset_path,
+                    ) is not None
+                )
+                if not (valid_app or valid_scene) or any(asset["path"] == asset_path for asset in assets):
+                    raise RuntimeError("Local digital twin asset reference is invalid")
+                assets.append({"path": asset_path, "contentType": content_type})
+            asset_urls = [asset["path"] for asset in assets]
+
+            # Load and normalize the FMU metadata once. Policy resolution and
+            # local-shell refresh both depend on this same snapshot; fetching
+            # it again is especially costly for large model descriptions.
+            metadata = await self.get_model_metadata(access_key)
+            if not isinstance(metadata, dict) or not isinstance(metadata.get("modelVariables"), list):
+                raise RuntimeError("Local FMU metadata is unavailable")
 
             link_path = self.get_link_path(lab_id)
             if link_path.exists():
                 if self.get_aasx_package(lab_id) is None:
                     raise RuntimeError("Local AASX link has no package record")
-                policy = await self.get_effective_policy(claims)
-                if not isinstance(policy, dict) or not str(policy.get("policySource") or "").startswith("aas-"):
-                    raise RuntimeError("Linked local AASX policy is unavailable")
-                self._cache[lab_id] = dict(policy)
-                return dict(policy)
+                try:
+                    existing_link = json.loads(link_path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                    raise RuntimeError("Local AASX link is unavailable") from exc
+                stored_asset_urls = (
+                    existing_link.get("digitalTwinAssetUrls")
+                    if isinstance(existing_link, dict)
+                    else None
+                )
+                if not isinstance(stored_asset_urls, list):
+                    legacy_asset_url = (
+                        str(existing_link.get("digitalTwinAssetUrl") or "").strip()
+                        if isinstance(existing_link, dict)
+                        else ""
+                    )
+                    stored_asset_urls = [legacy_asset_url] if legacy_asset_url else []
+                if isinstance(existing_link, dict) and stored_asset_urls == asset_urls:
+                    canonical_shell_id = f"{_SHELL_ID_PREFIX}{lab_id}"
+                    owns_local_shell = existing_link.get("aasId") == canonical_shell_id
+                    try:
+                        policy = await self._resolve_policy(claims, metadata)
+                    except Exception as exc:
+                        if not owns_local_shell:
+                            raise
+                        logger.warning(
+                            "Regenerating local preview AAS after policy resolution failed: %s",
+                            type(exc).__name__,
+                        )
+                    else:
+                        has_aas_policy = (
+                            isinstance(policy, dict)
+                            and str(policy.get("policySource") or "").startswith("aas-")
+                        )
+                        if has_aas_policy:
+                            if owns_local_shell:
+                                expected_variables = build_effective_policy(metadata).get("variables")
+                                if (
+                                    isinstance(expected_variables, dict)
+                                    and policy.get("variables") != expected_variables
+                                ):
+                                    logger.warning(
+                                        "Regenerating local preview AAS because its generated FMI access defaults changed",
+                                    )
+                                else:
+                                    return dict(policy)
+                            else:
+                                return dict(policy)
+                        if not owns_local_shell:
+                            raise RuntimeError("Linked local AASX policy is unavailable")
+                        if not has_aas_policy:
+                            logger.warning(
+                                "Regenerating local preview AAS because its saved policy is unavailable",
+                            )
 
-            metadata = await self.get_model_metadata(access_key)
-            if not isinstance(metadata, dict) or not isinstance(metadata.get("modelVariables"), list):
-                raise RuntimeError("Local FMU metadata is unavailable")
+            fmi_ls_resources = None
+            if self.get_fmi_ls_related_resources is not None:
+                fmi_ls_resources = await self.get_fmi_ls_related_resources(access_key)
+
+            extra_info: dict[str, Any] = {"description": "Local-only digital twin access-policy validation."}
+            if assets:
+                extra_info["digitalTwinAssets"] = [
+                    {"url": asset["path"], "contentType": asset["contentType"]}
+                    for asset in assets
+                ]
 
             generated = self._require_sync(await self.sync_fmu_to_basyx(
                 lab_id=lab_id,
                 access_key=access_key,
                 metadata=metadata,
-                extra_info={"description": "Local-only digital twin access-policy validation."},
+                extra_info=extra_info,
+                fmi_ls_resources=fmi_ls_resources,
             ), "metadata sync")
             shell_id = generated.get("aasId")
             if not isinstance(shell_id, str) or shell_id != f"{_SHELL_ID_PREFIX}{lab_id}":
@@ -126,7 +229,8 @@ class LocalPreviewAasxRegistry:
                 lab_id,
                 access_key,
                 metadata,
-                extra_info={"description": "Local-only digital twin access-policy validation."},
+                extra_info=extra_info,
+                fmi_ls_resources=fmi_ls_resources,
             )
             submodel_ids = self._submodel_ids(shell)
             if not submodel_ids or not generated.get("accessControlSubmodelId"):
@@ -150,6 +254,7 @@ class LocalPreviewAasxRegistry:
                 access_key=access_key,
                 metadata=metadata,
                 aasx_bytes=package,
+                fmi_ls_resources=fmi_ls_resources,
                 required_aas_id=shell_id,
             ), "package import")
             if imported.get("accessPolicyPreserved") is not True:
@@ -169,6 +274,7 @@ class LocalPreviewAasxRegistry:
                 "labId": lab_id,
                 "submodelIds": resolved_submodel_ids,
                 "accessControlSubmodelId": imported.get("accessControlSubmodelId"),
+                "digitalTwinAssetUrls": asset_urls,
             }
             link_path.parent.mkdir(parents=True, exist_ok=True)
             temporary_path = link_path.with_name(f".{link_path.name}.{uuid4().hex}.tmp")
@@ -179,10 +285,12 @@ class LocalPreviewAasxRegistry:
                 temporary_path.unlink(missing_ok=True)
 
             self.invalidate_access_policy(lab_id)
-            policy = await self.get_effective_policy(claims)
+            # Reuse the exact metadata snapshot used to regenerate the AASX.
+            # The policy resolver validates it against the freshly imported
+            # AAS, so a second Station/Executor describe request is redundant.
+            policy = await self._resolve_policy(claims, metadata)
             if not isinstance(policy, dict) or not str(policy.get("policySource") or "").startswith("aas-"):
                 raise RuntimeError("Imported local AASX policy could not be resolved")
-            self._cache[lab_id] = dict(policy)
             return dict(policy)
 
 

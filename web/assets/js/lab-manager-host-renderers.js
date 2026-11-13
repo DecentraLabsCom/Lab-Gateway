@@ -54,13 +54,17 @@
             return String(value || '').trim().replace(/\.$/, '').toLowerCase();
         }
 
-        function getFmuStationDisplay(host, meta, state = {}) {
+        function isConfiguredFmuStationHost(host, meta, state = {}) {
             const targetHost = normalizeFmuMatchValue(state.stationHost);
             const targetAddress = normalizeFmuMatchValue(state.stationAddress);
             const hostName = normalizeFmuMatchValue(host);
             const address = normalizeFmuMatchValue(meta.address);
-            const isTarget = Boolean(targetHost && hostName === targetHost)
-                || Boolean(targetAddress && address === targetAddress);
+            return (Boolean(targetHost) && hostName === targetHost)
+                || (Boolean(targetAddress) && address === targetAddress);
+        }
+
+        function getFmuStationDisplay(host, meta, state = {}) {
+            const isTarget = isConfiguredFmuStationHost(host, meta, state);
             const linked = state.linked === true
                 || state.runner?.stationAuthenticated === true;
             const linkStatus = state.linkStatus
@@ -207,7 +211,7 @@
             return visibleIssues.join('; ') + (issues.length > visibleIssues.length ? '; …' : '');
         }
 
-        function getReadinessDisplay(heartbeat, summary) {
+        function getReadinessDisplay(heartbeat, summary, { includeFmu = false } = {}) {
             const readiness = heartbeat.readiness && typeof heartbeat.readiness === 'object'
                 ? heartbeat.readiness
                 : heartbeat.status?.readiness && typeof heartbeat.status.readiness === 'object'
@@ -215,6 +219,7 @@
                     : null;
             const connectorStates = readiness
                 ? readinessConnectors
+                    .filter(connector => includeFmu || !connector.keys.includes('fmu'))
                     .map(connector => {
                         const key = connector.keys.find(candidate => (
                             readiness[candidate] && typeof readiness[candidate] === 'object'
@@ -227,25 +232,32 @@
                     .filter(Boolean)
                 : [];
 
+            const failedConnectors = connectorStates.filter(connector => !connector.entry.ready);
+            if (failedConnectors.length) {
+                return {
+                    label: 'Not ready',
+                    className: 'bad',
+                    tooltip: failedConnectors
+                        .map(connector => `${connector.label}: ${summarizeReadinessIssues(connector.entry)}`)
+                        .join(' '),
+                };
+            }
+
             const readyConnectors = connectorStates.filter(connector => connector.entry.ready);
             if (readyConnectors.length) {
                 const readyLabels = readyConnectors.map(connector => connector.label).join(' · ');
                 return {
                     label: readyLabels,
                     className: 'good',
-                    tooltip: readyConnectors.length < connectorStates.length
-                        ? `${readyLabels} ready.`
-                        : '',
+                    tooltip: '',
                 };
             }
 
-            if (connectorStates.length) {
+            if (readiness) {
                 return {
-                    label: 'Not ready',
-                    className: 'bad',
-                    tooltip: connectorStates
-                        .map(connector => `${connector.label}: ${summarizeReadinessIssues(connector.entry)}`)
-                        .join(' '),
+                    label: 'Readiness unknown',
+                    className: 'warn',
+                    tooltip: 'No applicable connector readiness reported by Lab Station.',
                 };
             }
 
@@ -257,7 +269,18 @@
                 return { label: 'Remote app', className: 'good', tooltip: '' };
             }
             if (legacyReady === false) {
-                const summaryIssues = getReadinessIssues(summary);
+                const rawSummaryIssues = getReadinessIssues(summary);
+                const summaryIssues = includeFmu
+                    ? rawSummaryIssues
+                    : rawSummaryIssues.filter(issue => !/fmu executor/i.test(issue));
+                if (!includeFmu && rawSummaryIssues.length > summaryIssues.length
+                    && summaryIssues.length === 0) {
+                    return {
+                        label: 'Readiness unknown',
+                        className: 'warn',
+                        tooltip: 'The heartbeat only reports FMU readiness, which is not required here.',
+                    };
+                }
                 return {
                     label: 'Not ready',
                     className: 'bad',
@@ -267,8 +290,8 @@
                 };
             }
             return {
-                label: 'Not ready',
-                className: 'bad',
+                label: 'Readiness unknown',
+                className: 'warn',
                 tooltip: 'No connector readiness reported by Lab Station.',
             };
         }
@@ -294,9 +317,23 @@
             const transport = String(meta.managementTransport || 'winrm').toLowerCase();
             const transportLabel = transport === 'ssh' ? 'SSH' : 'WinRM';
             const platformLabel = String(meta.platform || (transport === 'ssh' ? 'linux' : 'windows')).toUpperCase();
+            const reportedContractVersion = data.normalized?.contractVersion
+                || heartbeat.schemaVersion || status.schemaVersion || 'not reported';
+            const configuredContractMajor = String(meta.contractVersion || '').match(/^\s*(\d+)(?:\.|$)/)?.[1] || '';
+            const reportedContractMajor = String(reportedContractVersion).match(/^\s*(\d+)(?:\.|$)/)?.[1] || '';
+            const showConfiguredContract = meta.contractVersion
+                && (!configuredContractMajor || !reportedContractMajor || configuredContractMajor !== reportedContractMajor);
+            const configuredContractMarkup = showConfiguredContract
+                ? ` (configured: ${escapeHtml(meta.contractVersion)})`
+                : '';
             const credentialsConfigured = meta.managementCredentials?.configured === true
                 || (transport === 'winrm' && Boolean(meta.winrmConfigured));
-            const readiness = getReadinessDisplay(heartbeat, summary);
+            const includeFmuReadiness = meta.hasStationFmuLab === true
+                && fmuStationState.backendMode === 'station'
+                && isConfiguredFmuStationHost(host, meta, fmuStationState);
+            const readiness = getReadinessDisplay(heartbeat, summary, {
+                includeFmu: includeFmuReadiness,
+            });
             const localSession = status.localSessionActive;
             const activeSessionDisplay = getActiveSessionDisplay(status, localSession);
             const activeSession = activeSessionDisplay.active;
@@ -375,10 +412,9 @@
                 </div>
                 <div class="host-meta host-address">Address: <span class="mono">${safeAddress}</span></div>
                 <div class="host-meta">Connections: ${guacamoleStatusMarkup}</div>
-                <div class="host-meta">Platform: ${escapeHtml(platformLabel)} · Station contract: ${escapeHtml(meta.contractVersion || 'unknown')}</div>
+                <div class="host-meta">Platform: ${escapeHtml(platformLabel)} · Station contract: ${escapeHtml(reportedContractVersion)}${configuredContractMarkup}</div>
                 <div class="host-meta">Management: ${escapeHtml(transportLabel)}:${escapeHtml(meta.managementPort || (transport === 'ssh' ? 22 : 5986))}</div>
-                <div class="host-meta">${escapeHtml(transportLabel)} credentials: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update ${escapeHtml(transportLabel)} management credentials" aria-label="Set or update ${escapeHtml(transportLabel)} management credentials"><span class="host-status-text ${credentialsConfigured ? 'good' : 'warn'}">${credentialsConfigured ? 'configured' : 'missing'}</span></button></div>
-                <div class="host-meta">${escapeHtml(transport === 'ssh' ? 'SSH host-key trust' : 'WinRM TLS trust')}: <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage ${escapeHtml(transportLabel)} trust" aria-label="Manage ${escapeHtml(transportLabel)} trust"><span class="host-status-text ${winrmTrust.className}">${escapeHtml(winrmTrust.label)}</span></button></div>
+                <div class="host-meta">${escapeHtml(transportLabel)} credentials / ${transport === 'ssh' ? 'host-key trust' : 'TLS'}: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update ${escapeHtml(transportLabel)} management credentials" aria-label="Set or update ${escapeHtml(transportLabel)} management credentials"><span class="host-status-text ${credentialsConfigured ? 'good' : 'warn'}">${credentialsConfigured ? 'configured' : 'missing'}</span></button> / <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage ${escapeHtml(transportLabel)} trust" aria-label="Manage ${escapeHtml(transportLabel)} trust"><span class="host-status-text ${winrmTrust.className}">${escapeHtml(winrmTrust.label)}</span></button></div>
             </div>
             <div class="host-state-column">
                 <div class="host-meta host-state" aria-label="Current station state">

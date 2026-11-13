@@ -44,21 +44,6 @@ $AuthHeaders = @{ Authorization = "Bearer integration-test-jwt" }
 function Log-Pass([string]$msg) { Write-Host "  PASS: $msg" -ForegroundColor Green; $script:Passed++ }
 function Log-Fail([string]$msg) { Write-Host "  FAIL: $msg" -ForegroundColor Red; $script:Failed++ }
 
-function Invoke-Curl {
-    param([string[]]$Args)
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "curl"
-    $psi.Arguments = $Args -join " "
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $p = [System.Diagnostics.Process]::Start($psi)
-    $stdout = $p.StandardOutput.ReadToEnd()
-    $p.WaitForExit(30000)
-    return $stdout
-}
-
 function Wait-Service([string]$url, [int]$maxAttempts = 30) {
     for ($i = 0; $i -lt $maxAttempts; $i++) {
         try {

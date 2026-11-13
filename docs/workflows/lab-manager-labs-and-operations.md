@@ -175,12 +175,14 @@ Ops Worker credential store, not in `hosts.json`.
 Until both credentials and certificate trust are ready, heartbeat streaming is
 not started for that host.
 
-The host card reports credentials and certificate trust separately:
+The host card groups both statuses in one row, for example
+`WinRM credentials / TLS: configured / ready`. Click the first status to manage
+credentials or the second to manage TLS trust:
 
-- `WinRM credentials: missing` means no user/password is stored;
-- `WinRM TLS trust: missing` means credentials exist but no valid Station
+- credentials `missing` means no user/password is stored;
+- TLS `missing` means credentials exist but no valid Station
   certificate has been saved in the Gateway's per-host trust store;
-- `WinRM TLS trust: ready` means the Gateway can parse the local certificate and
+- TLS `ready` means the Gateway can parse the local certificate and
   it is currently within its validity period; and
 - `expired`, `not yet valid`, or `invalid` identify a certificate that cannot be
   used.
@@ -191,7 +193,7 @@ served by the Station matches the trusted certificate.
 
 ### Manage WinRM TLS trust
 
-Click the `WinRM TLS trust` status in the host card to open its certificate
+Click the TLS status in the `WinRM credentials / TLS` row to open its certificate
 panel. The panel is the single entry point for this host's trust lifecycle:
 
 1. Select the public certificate exported by Lab Station, normally
@@ -246,7 +248,8 @@ specific trust error instead of treating the failure as an authentication
 problem. Do not disable TLS validation or configure `TrustedHosts`.
 
 Windows v2 WinRM must use HTTPS/TLS on port `5986`, and the address must belong to
-`WINRM_MANAGEMENT_CIDRS`. Do not publish the listener or Ops Worker to the
+`STATION_MANAGEMENT_CIDRS` (or the legacy `WINRM_MANAGEMENT_CIDRS` alias).
+Do not publish the listener or Ops Worker to the
 Internet.
 
 ### Linux v3: SSH credential and host-key trust
@@ -259,11 +262,25 @@ trust` independently.
    generates one in the Gateway and displays its public key. The private key
    remains encrypted in Lab Gateway.
 2. Install the displayed public key on the Station with the command shown by
-   Lab Manager, normally:
+   Lab Manager that matches how Lab Station Linux was installed:
 
-   ```bash
-   sudo labstationctl setup --profile <profile> --ssh-port <port> --management-public-key '<public-key>'
-   ```
+   - For a first installation from a portable bundle, extract the bundle and
+     run its installer as root from the extracted directory. The installer
+     installs the payload, invokes `labstationctl setup`, and detects the SSH
+     port automatically; it does not accept `--ssh-port`:
+
+     ```bash
+     sudo sh ./install.sh --profile <profile> --management-public-key '<public-key>'
+     ```
+
+     If already logged in as root, omit `sudo`.
+
+   - For a `.deb`/`.rpm` package or an existing installation where
+     `labstationctl` is already installed, configure it with:
+
+     ```bash
+     sudo labstationctl setup --profile <profile> --ssh-port <port> --management-public-key '<public-key>'
+     ```
 
 3. Click `SSH host-key trust` to preview the server key. Verify its fingerprint
    through a trusted out-of-band channel, then enter the exact fingerprint to

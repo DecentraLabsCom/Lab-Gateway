@@ -1,5 +1,7 @@
 #include "decentralabs_proxy/runtime.hpp"
 
+#include "decentralabs_proxy/scalar_value_codec.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -35,49 +37,6 @@ std::string PercentDecode(const std::string_view text) {
     return output;
 }
 
-std::optional<BinaryValue> DecodeBase64(const std::string& text) {
-    static const int8_t kTable[256] = {
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-2,-1,-1,
-        -1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
-        -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-    };
-    if (text.empty()) {
-        return BinaryValue{};
-    }
-    if (text.size() % 4 != 0) {
-        return std::nullopt;
-    }
-    BinaryValue output;
-    output.reserve((text.size() / 4) * 3);
-    for (std::size_t index = 0; index < text.size(); index += 4) {
-        const int8_t a = kTable[static_cast<unsigned char>(text[index])];
-        const int8_t b = kTable[static_cast<unsigned char>(text[index + 1])];
-        const int8_t c = text[index + 2] == '=' ? -2 : kTable[static_cast<unsigned char>(text[index + 2])];
-        const int8_t d = text[index + 3] == '=' ? -2 : kTable[static_cast<unsigned char>(text[index + 3])];
-        if (a < 0 || b < 0 || c == -1 || d == -1) {
-            return std::nullopt;
-        }
-        const std::uint32_t triple =
-            (static_cast<std::uint32_t>(a) << 18U) |
-            (static_cast<std::uint32_t>(b) << 12U) |
-            (static_cast<std::uint32_t>(c < 0 ? 0 : c) << 6U) |
-            static_cast<std::uint32_t>(d < 0 ? 0 : d);
-        output.push_back(static_cast<std::uint8_t>((triple >> 16U) & 0xFFU));
-        if (c != -2) {
-            output.push_back(static_cast<std::uint8_t>((triple >> 8U) & 0xFFU));
-        }
-        if (d != -2) {
-            output.push_back(static_cast<std::uint8_t>(triple & 0xFFU));
-        }
-    }
-    return output;
-}
-
 struct IntegerBounds {
     std::int64_t min = std::numeric_limits<std::int64_t>::min();
     std::uint64_t max = std::numeric_limits<std::uint64_t>::max();
@@ -106,10 +65,61 @@ IntegerBounds BoundsForDeclaredType(const std::string_view declared_type) {
     if (declared_type == "UInt64") {
         return {0, std::numeric_limits<std::uint64_t>::max(), true};
     }
-    return {};
+    return {std::numeric_limits<std::int64_t>::min(), std::numeric_limits<std::uint64_t>::max(), false};
 }
 
-std::optional<std::int64_t> ParseSignedIntegerJsonValue(const JsonValue& value) {
+bool TryNormalizeIntegerValue(const VariableInfo& variable, const std::int64_t raw_value, ScalarValue* output) {
+    if (output == nullptr) {
+        return false;
+    }
+    const auto bounds = BoundsForDeclaredType(variable.declared_type);
+    if (bounds.unsigned_only) {
+        if (raw_value < 0) {
+            return false;
+        }
+        const auto value = static_cast<std::uint64_t>(raw_value);
+        if (value > bounds.max) {
+            return false;
+        }
+        *output = value;
+        return true;
+    }
+    if (raw_value < bounds.min || (raw_value >= 0 && static_cast<std::uint64_t>(raw_value) > bounds.max)) {
+        return false;
+    }
+    *output = raw_value;
+    return true;
+}
+
+bool TryNormalizeIntegerValue(const VariableInfo& variable, const std::uint64_t raw_value, ScalarValue* output) {
+    if (output == nullptr) {
+        return false;
+    }
+    const auto bounds = BoundsForDeclaredType(variable.declared_type);
+    if (bounds.unsigned_only) {
+        if (raw_value > bounds.max) {
+            return false;
+        }
+        *output = raw_value;
+        return true;
+    }
+    if (raw_value > bounds.max || raw_value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+        return false;
+    }
+    *output = static_cast<std::int64_t>(raw_value);
+    return true;
+}
+
+template <typename T>
+bool TryNormalizeIntegerValue(const VariableInfo& variable, const T raw_value, ScalarValue* output) {
+    if constexpr (std::is_unsigned_v<T>) {
+        return TryNormalizeIntegerValue(variable, static_cast<std::uint64_t>(raw_value), output);
+    } else {
+        return TryNormalizeIntegerValue(variable, static_cast<std::int64_t>(raw_value), output);
+    }
+}
+
+std::optional<std::int64_t> ParseSignedInteger(const JsonValue& value) {
     try {
         if (value.IsString()) {
             return static_cast<std::int64_t>(std::stoll(value.AsString()));
@@ -118,8 +128,7 @@ std::optional<std::int64_t> ParseSignedIntegerJsonValue(const JsonValue& value) 
             const double number = value.AsNumber();
             double integral_part = 0.0;
             const double fractional_part = std::modf(number, &integral_part);
-            if (!std::isfinite(number)
-                || std::abs(fractional_part) > std::numeric_limits<double>::epsilon()) {
+            if (!std::isfinite(number) || std::abs(fractional_part) > std::numeric_limits<double>::epsilon()) {
                 return std::nullopt;
             }
             if (number < static_cast<double>(std::numeric_limits<std::int64_t>::min()) ||
@@ -134,7 +143,7 @@ std::optional<std::int64_t> ParseSignedIntegerJsonValue(const JsonValue& value) 
     return std::nullopt;
 }
 
-std::optional<std::uint64_t> ParseUnsignedIntegerJsonValue(const JsonValue& value) {
+std::optional<std::uint64_t> ParseUnsignedInteger(const JsonValue& value) {
     try {
         if (value.IsString()) {
             return static_cast<std::uint64_t>(std::stoull(value.AsString()));
@@ -143,9 +152,7 @@ std::optional<std::uint64_t> ParseUnsignedIntegerJsonValue(const JsonValue& valu
             const double number = value.AsNumber();
             double integral_part = 0.0;
             const double fractional_part = std::modf(number, &integral_part);
-            if (!std::isfinite(number)
-                || std::abs(fractional_part) > std::numeric_limits<double>::epsilon()
-                || number < 0.0) {
+            if (!std::isfinite(number) || std::abs(fractional_part) > std::numeric_limits<double>::epsilon() || number < 0.0) {
                 return std::nullopt;
             }
             if (number > static_cast<double>(std::numeric_limits<std::uint64_t>::max())) {
@@ -159,120 +166,12 @@ std::optional<std::uint64_t> ParseUnsignedIntegerJsonValue(const JsonValue& valu
     return std::nullopt;
 }
 
-template <typename T>
-bool TryNormalizeIntegerValue(const VariableInfo& variable, const T raw_value, ScalarValue* output) {
-    if (output == nullptr) {
-        return false;
-    }
-
-    const auto bounds = BoundsForDeclaredType(variable.declared_type);
-    if (bounds.unsigned_only) {
-        std::uint64_t value = 0;
-        if constexpr (std::is_unsigned_v<T>) {
-            value = static_cast<std::uint64_t>(raw_value);
-        } else {
-            const auto signed_value = static_cast<std::int64_t>(raw_value);
-            if (signed_value < 0) {
-                return false;
-            }
-            value = static_cast<std::uint64_t>(signed_value);
-        }
-        if (value > bounds.max) {
-            return false;
-        }
-        *output = value;
-        return true;
-    }
-
-    if constexpr (std::is_unsigned_v<T>) {
-        const auto value = static_cast<std::uint64_t>(raw_value);
-        if (value > bounds.max || value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
-            return false;
-        }
-        *output = static_cast<std::int64_t>(value);
-        return true;
-    } else {
-        const auto value = static_cast<std::int64_t>(raw_value);
-        if (value < bounds.min) {
-            return false;
-        }
-        if (value >= 0 && static_cast<std::uint64_t>(value) > bounds.max) {
-            return false;
-        }
-        *output = value;
-        return true;
-    }
-}
-
-template <typename T>
-bool TryCastStoredInteger(const VariableInfo& variable, const ScalarValue& stored_value, T* output) {
-    if (output == nullptr) {
-        return false;
-    }
-
-    const auto bounds = BoundsForDeclaredType(variable.declared_type);
-    if (const auto* unsigned_value = std::get_if<std::uint64_t>(&stored_value)) {
-        if (!bounds.unsigned_only || *unsigned_value > bounds.max) {
-            return false;
-        }
-        if constexpr (std::is_unsigned_v<T>) {
-            if (*unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) {
-                return false;
-            }
-            *output = static_cast<T>(*unsigned_value);
-            return true;
-        } else {
-            if (*unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) {
-                return false;
-            }
-            *output = static_cast<T>(*unsigned_value);
-            return true;
-        }
-    }
-
-    const auto* signed_value = std::get_if<std::int64_t>(&stored_value);
-    if (signed_value == nullptr) {
-        return false;
-    }
-    if (bounds.unsigned_only && *signed_value < 0) {
-        return false;
-    }
-    if constexpr (std::is_unsigned_v<T>) {
-        if (*signed_value < 0) {
-            return false;
-        }
-        const auto value = static_cast<std::uint64_t>(*signed_value);
-        if (value > bounds.max || value > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) {
-            return false;
-        }
-        *output = static_cast<T>(value);
-        return true;
-    } else {
-        if (*signed_value < bounds.min) {
-            return false;
-        }
-        if (*signed_value >= 0 && static_cast<std::uint64_t>(*signed_value) > bounds.max) {
-            return false;
-        }
-        if (*signed_value < static_cast<std::int64_t>(std::numeric_limits<T>::min()) ||
-            *signed_value > static_cast<std::int64_t>(std::numeric_limits<T>::max())) {
-            return false;
-        }
-        *output = static_cast<T>(*signed_value);
-        return true;
-    }
-}
-
-std::optional<ScalarValue> ConvertIntegerArrayValue(
-    const JsonArray& items,
-    const VariableInfo& variable
-) {
-    const auto bounds = BoundsForDeclaredType(variable.declared_type);
-    if (bounds.unsigned_only) {
+std::optional<ScalarValue> DecodeIntegerArray(const JsonArray& items, const VariableInfo& variable) {
+    if (BoundsForDeclaredType(variable.declared_type).unsigned_only) {
         UnsignedIntegerArray values;
         values.reserve(items.size());
         for (const auto& item : items) {
-            const auto parsed = ParseUnsignedIntegerJsonValue(item);
+            const auto parsed = ParseUnsignedInteger(item);
             if (!parsed.has_value()) {
                 return std::nullopt;
             }
@@ -292,7 +191,7 @@ std::optional<ScalarValue> ConvertIntegerArrayValue(
     IntegerArray values;
     values.reserve(items.size());
     for (const auto& item : items) {
-        const auto parsed = ParseSignedIntegerJsonValue(item);
+        const auto parsed = ParseSignedInteger(item);
         if (!parsed.has_value()) {
             return std::nullopt;
         }
@@ -330,8 +229,9 @@ std::optional<ScalarValue> ConvertJsonValue(const JsonValue& value, const Variab
             }
             case ScalarType::kInteger:
             case ScalarType::kEnumeration:
-                return ConvertIntegerArrayValue(*items, variable);
-            case ScalarType::kBoolean: {
+                return DecodeIntegerArray(*items, variable);
+            case ScalarType::kBoolean:
+            case ScalarType::kClock: {
                 BooleanArray values;
                 values.reserve(items->size());
                 for (const auto& item : *items) {
@@ -363,7 +263,7 @@ std::optional<ScalarValue> ConvertJsonValue(const JsonValue& value, const Variab
                     if (!item.IsString()) {
                         return std::nullopt;
                     }
-                    const auto decoded = DecodeBase64(item.AsString());
+                    const auto decoded = scalar_value_codec::DecodeBase64(item.AsString());
                     if (!decoded.has_value()) {
                         return std::nullopt;
                     }
@@ -371,22 +271,9 @@ std::optional<ScalarValue> ConvertJsonValue(const JsonValue& value, const Variab
                 }
                 return ScalarValue(std::move(values));
             }
-            case ScalarType::kClock: {
-                BooleanArray values;
-                values.reserve(items->size());
-                for (const auto& item : *items) {
-                    if (item.IsBool()) {
-                        values.push_back(item.AsBool());
-                    } else if (item.IsNumber()) {
-                        values.push_back(item.AsNumber() != 0.0);
-                    } else {
-                        return std::nullopt;
-                    }
-                }
-                return ScalarValue(std::move(values));
-            }
         }
     }
+
     switch (variable.type) {
         case ScalarType::kReal:
             if (value.IsNumber()) {
@@ -396,15 +283,14 @@ std::optional<ScalarValue> ConvertJsonValue(const JsonValue& value, const Variab
         case ScalarType::kInteger:
         case ScalarType::kEnumeration:
             if (value.IsNumber() || value.IsString()) {
-                const auto bounds = BoundsForDeclaredType(variable.declared_type);
                 ScalarValue normalized;
-                if (bounds.unsigned_only) {
-                    const auto parsed = ParseUnsignedIntegerJsonValue(value);
+                if (BoundsForDeclaredType(variable.declared_type).unsigned_only) {
+                    const auto parsed = ParseUnsignedInteger(value);
                     if (parsed.has_value() && TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
                         return normalized;
                     }
                 } else {
-                    const auto parsed = ParseSignedIntegerJsonValue(value);
+                    const auto parsed = ParseSignedInteger(value);
                     if (parsed.has_value() && TryNormalizeIntegerValue(variable, *parsed, &normalized)) {
                         return normalized;
                     }
@@ -426,7 +312,7 @@ std::optional<ScalarValue> ConvertJsonValue(const JsonValue& value, const Variab
             break;
         case ScalarType::kBinary:
             if (value.IsString()) {
-                const auto decoded = DecodeBase64(value.AsString());
+                const auto decoded = scalar_value_codec::DecodeBase64(value.AsString());
                 if (decoded.has_value()) {
                     return ScalarValue(*decoded);
                 }
@@ -442,6 +328,57 @@ std::optional<ScalarValue> ConvertJsonValue(const JsonValue& value, const Variab
             break;
     }
     return std::nullopt;
+}
+
+template <typename T>
+bool TryCastStoredInteger(const VariableInfo& variable, const ScalarValue& stored_value, T* output) {
+    if (output == nullptr) {
+        return false;
+    }
+
+    const auto bounds = BoundsForDeclaredType(variable.declared_type);
+    if (const auto* unsigned_value = std::get_if<std::uint64_t>(&stored_value)) {
+        if (!bounds.unsigned_only || *unsigned_value > bounds.max) {
+            return false;
+        }
+        if (*unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) {
+            return false;
+        }
+        *output = static_cast<T>(*unsigned_value);
+        return true;
+    }
+
+    const auto* signed_value = std::get_if<std::int64_t>(&stored_value);
+    if (signed_value == nullptr) {
+        return false;
+    }
+    if (bounds.unsigned_only && *signed_value < 0) {
+        return false;
+    }
+    if constexpr (std::is_unsigned_v<T>) {
+        if (*signed_value < 0) {
+            return false;
+        }
+        const auto value = static_cast<std::uint64_t>(*signed_value);
+        if (value > bounds.max || value > static_cast<std::uint64_t>(std::numeric_limits<T>::max())) {
+            return false;
+        }
+        *output = static_cast<T>(value);
+        return true;
+    } else {
+        if (*signed_value < bounds.min) {
+            return false;
+        }
+        if (*signed_value >= 0 && static_cast<std::uint64_t>(*signed_value) > bounds.max) {
+            return false;
+        }
+        if (*signed_value < static_cast<std::int64_t>(std::numeric_limits<T>::min()) ||
+            *signed_value > static_cast<std::int64_t>(std::numeric_limits<T>::max())) {
+            return false;
+        }
+        *output = static_cast<T>(*signed_value);
+        return true;
+    }
 }
 
 std::optional<std::int32_t> ScalarValueToInt32(const ScalarValue& value) {
@@ -607,37 +544,63 @@ std::optional<std::int32_t> ProxyRuntime::ResolveDimensionExtent(const Dimension
 }
 
 std::size_t ProxyRuntime::ResolveVariableFlatSize(const VariableInfo& variable) const {
+    std::size_t flat_size = 0;
+    return TryResolveVariableFlatSize(variable, &flat_size) ? flat_size : 0;
+}
+
+bool ProxyRuntime::TryResolveVariableFlatSize(const VariableInfo& variable, std::size_t* flat_size) const {
+    if (flat_size == nullptr) {
+        return false;
+    }
     if (variable.dimensions.empty()) {
-        return 1;
+        *flat_size = 1;
+        return true;
     }
     std::size_t size = 1;
     for (const auto& dimension : variable.dimensions) {
         const auto extent = ResolveDimensionExtent(dimension);
         if (!extent.has_value() || *extent < 0) {
-            return 0;
+            return false;
         }
-        size *= static_cast<std::size_t>(*extent);
+        const auto unsigned_extent = static_cast<std::size_t>(*extent);
+        if (unsigned_extent != 0 && size > std::numeric_limits<std::size_t>::max() / unsigned_extent) {
+            return false;
+        }
+        size *= unsigned_extent;
     }
-    return size;
+    *flat_size = size;
+    return true;
 }
 
 std::size_t ProxyRuntime::ExpectedValueCount(const std::uint32_t* value_references, const std::size_t count) const {
-    if (value_references == nullptr) {
+    std::size_t expected = 0;
+    if (!TryExpectedValueCount(value_references, count, &expected)) {
         return 0;
+    }
+    return expected;
+}
+
+bool ProxyRuntime::TryExpectedValueCount(const std::uint32_t* value_references,
+                                         const std::size_t count,
+                                         std::size_t* expected_value_count) const {
+    if (expected_value_count == nullptr || (count > 0 && value_references == nullptr)) {
+        return false;
     }
     std::size_t expected = 0;
     for (std::size_t index = 0; index < count; ++index) {
         const VariableInfo* variable = FindVariableByValueReference(model_, value_references[index]);
         if (variable == nullptr) {
-            return 0;
+            return false;
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0) {
-            return 0;
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size)
+            || flat_size > std::numeric_limits<std::size_t>::max() - expected) {
+            return false;
         }
         expected += flat_size;
     }
-    return expected;
+    *expected_value_count = expected;
+    return true;
 }
 
 OperationResult ProxyRuntime::Configure(const std::string& instance_name, const std::string& resource_location) {
@@ -672,42 +635,291 @@ OperationResult ProxyRuntime::Configure(const std::string& instance_name, const 
     if (!model) {
         return model.status;
     }
-    if (!model.value.supports_co_simulation) {
+    if (!model.value.supports_co_simulation && !model.value.supports_model_exchange) {
         return OperationResult::Failure(
             "MODEL_DESCRIPTION_UNSUPPORTED",
-            "The proxy runtime currently supports only Co-Simulation FMUs");
+            "The proxy declares no supported FMI simulation interface");
     }
 
     instance_name_ = instance_name;
     config_ = std::move(config.value);
     model_ = std::move(model.value);
+    model_exchange_mode_ = false;
+    model_exchange_external_solver_active_ = false;
+    remote_fmu_initialized_ = false;
+    remote_fmu_terminated_ = false;
+    model_exchange_remote_mode_ = "instantiated";
     experiment_.start_time = model_.default_start_time.value_or(0.0);
-    experiment_.stop_time = model_.default_stop_time.value_or(10.0);
+    experiment_.stop_time = model_.default_stop_time;
     experiment_.step_size = model_.default_step_size.value_or(0.01);
     current_time_ = experiment_.start_time;
+    configuration_mode_ = false;
+    configuration_mode_initialization_ = false;
     last_step_early_return_ = false;
     last_step_event_handling_needed_ = false;
     last_step_terminated_ = false;
     simulation_finished_ = false;
+    initialization_evaluated_ = false;
+    initialization_evaluation_dirty_ = false;
+    initialization_outputs_evaluated_ = false;
     gateway_client_ = std::make_unique<GatewayClient>(transport_factory_());
     SeedCacheFromModelDefaults();
     initial_inputs_.clear();
     pending_inputs_.clear();
+    reconfiguration_values_.clear();
     string_cache_.clear();
     last_error_.clear();
 
     return Transition(SessionState::kInstantiated);
 }
 
-OperationResult ProxyRuntime::SetupExperiment(const double start_time, const double stop_time, const double step_size) {
+OperationResult ProxyRuntime::SetModelExchangeMode(const bool enabled) {
+    if (state_ != SessionState::kInstantiated) {
+        return OperationResult::Failure("STATE_ERROR", "FMI interface must be selected before initialization");
+    }
+    if (enabled && !model_.supports_model_exchange) {
+        return OperationResult::Failure("MODEL_EXCHANGE_UNAVAILABLE", "The proxy does not declare Model Exchange");
+    }
+    if (!enabled && !model_.supports_co_simulation) {
+        return OperationResult::Failure("CO_SIMULATION_UNAVAILABLE", "The proxy does not declare Co-Simulation");
+    }
+    model_exchange_mode_ = enabled;
+    initialization_mode_entered_ = false;
+    return OperationResult::Success();
+}
+
+bool ProxyRuntime::IsModelExchangeMode() const {
+    return model_exchange_mode_;
+}
+
+ValueResult<JsonObject> ProxyRuntime::ModelExchangeCall(
+    const std::string& operation,
+    const JsonObject& arguments) {
+    if (!model_exchange_mode_ || gateway_client_ == nullptr) {
+        return ValueResult<JsonObject>::Failure(
+            "MODEL_EXCHANGE_NOT_ACTIVE",
+            "External Model Exchange execution is not active");
+    }
+    if (!model_exchange_external_solver_active_) {
+        const bool initialization_read = operation == "getValues"
+            || operation == "getContinuousStates"
+            || operation == "getDerivatives"
+            || operation == "getContinuousStateDerivatives"
+            || operation == "getEventIndicators"
+            || operation == "getNominalsOfContinuousStates";
+        if (!initialization_read || state_ != SessionState::kSessionCreated || !initialization_mode_entered_) {
+            return ValueResult<JsonObject>::Failure(
+                "MODEL_EXCHANGE_NOT_ACTIVE",
+                "External Model Exchange execution is not active");
+        }
+        const auto initialization_status = EvaluateInitialization();
+        if (!initialization_status) {
+            return ValueResult<JsonObject>::Failure(
+                initialization_status.code,
+                initialization_status.message);
+        }
+    }
+    auto result = gateway_client_->ModelExchangeCall(operation, arguments);
+    if (!result) {
+        last_error_ = result.status.message;
+        return result;
+    }
+    if (operation == "setTime") {
+        const JsonValue* time_value = FindObjectValue(arguments, "time");
+        if (time_value != nullptr && time_value->IsNumber()) {
+            current_time_ = time_value->AsNumber();
+        }
+    } else if (operation == "exitInitializationMode" || operation == "enterEventMode") {
+        model_exchange_remote_mode_ = "event";
+        if (operation == "exitInitializationMode") {
+            initialization_mode_entered_ = false;
+            initialization_evaluated_ = true;
+            initialization_evaluation_dirty_ = false;
+        }
+    } else if (operation == "enterContinuousTimeMode") {
+        model_exchange_remote_mode_ = "continuous";
+    }
+    return result;
+}
+
+std::string ProxyRuntime::ModelExchangeValueType(const VariableInfo& variable) const {
+    if (model_.fmi_version.rfind("2.", 0) == 0) {
+        switch (variable.type) {
+            case ScalarType::kReal: return "Real";
+            case ScalarType::kInteger:
+            case ScalarType::kEnumeration: return "Integer";
+            case ScalarType::kBoolean: return "Boolean";
+            case ScalarType::kString: return "String";
+            case ScalarType::kBinary: return "Binary";
+            case ScalarType::kClock: return "Clock";
+        }
+    }
+    if (variable.type == ScalarType::kEnumeration) {
+        return "Int64";
+    }
+    if (!variable.declared_type.empty()) {
+        return variable.declared_type;
+    }
+    switch (variable.type) {
+        case ScalarType::kReal: return "Float64";
+        case ScalarType::kInteger: return "Int32";
+        case ScalarType::kBoolean: return "Boolean";
+        case ScalarType::kString: return "String";
+        case ScalarType::kBinary: return "Binary";
+        case ScalarType::kClock: return "Clock";
+        case ScalarType::kEnumeration: return "Int64";
+    }
+    return {};
+}
+
+OperationResult ProxyRuntime::RefreshModelExchangeValues(
+    const std::uint32_t* value_references,
+    const std::size_t count,
+    const ScalarType expected_type,
+    const std::optional<std::size_t> value_count) {
+    if (!model_exchange_external_solver_active_ || count == 0) {
+        return OperationResult::Success();
+    }
+    if (value_references == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "Model Exchange read received null value references");
+    }
+    const std::size_t expected_values = value_count.value_or(count);
+    std::size_t model_values = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_values) || model_values != expected_values) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "Model Exchange read size does not match the referenced variables");
+    }
+
+    std::vector<std::uint32_t> remote_references;
+    remote_references.reserve(count);
+    std::string value_type;
+    std::size_t remote_value_count = 0;
+    for (std::size_t index = 0; index < count; ++index) {
+        const VariableInfo* variable = FindVariableByValueReference(model_, value_references[index]);
+        if (variable == nullptr) {
+            return OperationResult::Failure("UNKNOWN_VALUE_REFERENCE", "Unknown value reference");
+        }
+        if (variable->type != expected_type
+            && !(expected_type == ScalarType::kInteger && variable->type == ScalarType::kEnumeration)) {
+            return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match getter");
+        }
+        if (variable->causality == "independent") {
+            continue;
+        }
+        const std::string current_type = ModelExchangeValueType(*variable);
+        if (current_type.empty() || (!value_type.empty() && current_type != value_type)) {
+            return OperationResult::Failure("TYPE_MISMATCH", "Model Exchange read contains incompatible FMI types");
+        }
+        value_type = current_type;
+        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
+        if (flat_size > std::numeric_limits<std::size_t>::max() - remote_value_count) {
+            return OperationResult::Failure("INVALID_ARGUMENT", "Model Exchange read size overflows");
+        }
+        remote_value_count += flat_size;
+        remote_references.push_back(value_references[index]);
+    }
+    if (remote_references.empty()) {
+        return OperationResult::Success();
+    }
+
+    JsonArray json_references;
+    json_references.reserve(remote_references.size());
+    for (const auto reference : remote_references) {
+        json_references.emplace_back(static_cast<double>(reference));
+    }
+    const JsonObject arguments = {
+        {"valueType", JsonValue(value_type)},
+        {"valueReferences", JsonValue(std::move(json_references))},
+    };
+    const auto response = ModelExchangeCall("getValues", arguments);
+    if (!response) {
+        return response.status;
+    }
+    const JsonValue* raw_values = FindObjectValue(response.value, "values");
+    const JsonArray* values = raw_values == nullptr ? nullptr : raw_values->AsArray();
+    if (values == nullptr || values->size() != remote_value_count) {
+        return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway returned an invalid Model Exchange value count");
+    }
+
+    std::size_t offset = 0;
+    for (const auto reference : remote_references) {
+        const VariableInfo* variable = FindVariableByValueReference(model_, reference);
+        if (variable == nullptr) {
+            return OperationResult::Failure("UNKNOWN_VALUE_REFERENCE", "Unknown value reference");
+        }
+        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
+        JsonValue raw_value;
+        if (flat_size == 1) {
+            raw_value = (*values)[offset];
+        } else {
+            JsonArray items;
+            items.reserve(flat_size);
+            for (std::size_t element = 0; element < flat_size; ++element) {
+                items.push_back((*values)[offset + element]);
+            }
+            raw_value = JsonValue(std::move(items));
+        }
+        const auto converted = ConvertJsonValue(raw_value, *variable);
+        if (!converted.has_value()) {
+            return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway returned a value that does not match the FMI variable type");
+        }
+        cached_values_[reference] = *converted;
+        offset += flat_size;
+    }
+    return OperationResult::Success();
+}
+
+OperationResult ProxyRuntime::SetModelExchangeValue(const VariableInfo& variable, const ScalarValue& value) {
+    if (!model_exchange_external_solver_active_ || gateway_client_ == nullptr) {
+        return OperationResult::Failure("MODEL_EXCHANGE_NOT_ACTIVE", "External Model Exchange execution is not active");
+    }
+    if (model_exchange_remote_mode_ != "initialization"
+        && model_exchange_remote_mode_ != "event"
+        && model_exchange_remote_mode_ != "continuous") {
+        return OperationResult::Failure("STATE_ERROR", "Model Exchange value writes are not allowed in the current mode");
+    }
+    JsonArray references{JsonValue(static_cast<double>(variable.value_reference))};
+    JsonArray values;
+    const JsonValue encoded = scalar_value_codec::EncodeJsonValue(value);
+    if (const JsonArray* array = encoded.AsArray()) {
+        values = *array;
+    } else {
+        values.push_back(encoded);
+    }
+    const JsonObject arguments = {
+        {"valueType", JsonValue(ModelExchangeValueType(variable))},
+        {"valueReferences", JsonValue(std::move(references))},
+        {"values", JsonValue(std::move(values))},
+    };
+    const auto response = ModelExchangeCall("setValues", arguments);
+    return response ? OperationResult::Success() : response.status;
+}
+
+OperationResult ProxyRuntime::EnterModelExchangeEventMode() {
+    const auto response = ModelExchangeCall("enterEventMode");
+    return response ? OperationResult::Success() : response.status;
+}
+
+OperationResult ProxyRuntime::EnterModelExchangeContinuousTimeMode() {
+    const auto response = ModelExchangeCall("enterContinuousTimeMode");
+    return response ? OperationResult::Success() : response.status;
+}
+
+OperationResult ProxyRuntime::SetupExperiment(
+    const double start_time,
+    const std::optional<double> stop_time,
+    const double step_size) {
     experiment_.start_time = start_time;
     experiment_.stop_time = stop_time;
     experiment_.step_size = step_size;
     current_time_ = start_time;
+    initialization_mode_entered_ = false;
     return OperationResult::Success();
 }
 
 OperationResult ProxyRuntime::EnterInitializationMode() {
+    if (configuration_mode_) {
+        return OperationResult::Failure("STATE_ERROR", "Exit Configuration Mode before initialization");
+    }
     if (gateway_client_ == nullptr) {
         return OperationResult::Failure("RUNTIME_NOT_CONFIGURED", "Runtime is not configured");
     }
@@ -727,7 +939,137 @@ OperationResult ProxyRuntime::EnterInitializationMode() {
     if (!status) {
         return status;
     }
-    return Transition(SessionState::kSessionCreated);
+    status = Transition(SessionState::kSessionCreated);
+    if (status) {
+        initialization_mode_entered_ = true;
+    }
+    return status;
+}
+
+OperationResult ProxyRuntime::EnterConfigurationMode() {
+    if (configuration_mode_) {
+        return OperationResult::Failure("STATE_ERROR", "Runtime is already in Configuration Mode");
+    }
+    if (state_ == SessionState::kInstantiated) {
+        if (!HasStructuralParameters()) {
+            return OperationResult::Failure("STATE_ERROR", "The model has no structural parameters");
+        }
+        configuration_mode_initialization_ = true;
+    } else if (state_ == SessionState::kInitialized || state_ == SessionState::kRunning) {
+        if (!HasTunableStructuralParameters()) {
+            return OperationResult::Failure("STATE_ERROR", "The model has no tunable structural parameters");
+        }
+        configuration_mode_initialization_ = false;
+        reconfiguration_values_.clear();
+    } else {
+        return OperationResult::Failure("STATE_ERROR", "Configuration Mode is not available in the current state");
+    }
+    configuration_mode_ = true;
+    return OperationResult::Success();
+}
+
+OperationResult ProxyRuntime::ExitConfigurationMode() {
+    if (!configuration_mode_) {
+        return OperationResult::Failure("STATE_ERROR", "Runtime is not in Configuration Mode");
+    }
+    if (!configuration_mode_initialization_ && !reconfiguration_values_.empty()) {
+        if (gateway_client_ == nullptr) {
+            return OperationResult::Failure("RUNTIME_NOT_CONFIGURED", "Runtime is not configured");
+        }
+        const auto status = gateway_client_->Reconfigure(reconfiguration_values_);
+        if (!status) {
+            SetError(status.message);
+            return status;
+        }
+        std::vector<std::string> affected_output_names;
+        for (const auto& [name, value] : reconfiguration_values_) {
+            (void)value;
+            const VariableInfo* variable = FindVariableByName(model_, name);
+            if (variable != nullptr) {
+                InvalidateArraysForStructuralParameter(*variable, false);
+                for (const auto& candidate : model_.variables) {
+                    const bool depends_on_parameter = std::any_of(
+                        candidate.dimensions.begin(), candidate.dimensions.end(),
+                        [variable](const DimensionInfo& dimension) {
+                            return dimension.value_reference == variable->value_reference;
+                        });
+                    if (depends_on_parameter && candidate.causality == "output") {
+                        affected_output_names.push_back(candidate.name);
+                    }
+                }
+            }
+        }
+        if (!affected_output_names.empty()) {
+            const auto outputs = gateway_client_->GetOutputs(affected_output_names);
+            if (!outputs) {
+                SetError(outputs.status.message);
+                return outputs.status;
+            }
+            ApplyOutputSnapshot(outputs.value);
+        }
+    }
+    configuration_mode_ = false;
+    configuration_mode_initialization_ = false;
+    reconfiguration_values_.clear();
+    return OperationResult::Success();
+}
+
+bool ProxyRuntime::HasStructuralParameters() const {
+    return std::any_of(model_.variables.begin(), model_.variables.end(), [](const VariableInfo& variable) {
+        return variable.causality == "structuralParameter";
+    });
+}
+
+bool ProxyRuntime::HasTunableStructuralParameters() const {
+    return std::any_of(model_.variables.begin(), model_.variables.end(), [](const VariableInfo& variable) {
+        return variable.causality == "structuralParameter" && variable.variability == "tunable";
+    });
+}
+
+void ProxyRuntime::InvalidateArraysForStructuralParameter(
+    const VariableInfo& structural_parameter,
+    const bool initialization_configuration) {
+    for (const auto& candidate : model_.variables) {
+        const bool depends_on_parameter = std::any_of(
+            candidate.dimensions.begin(), candidate.dimensions.end(),
+            [&structural_parameter](const DimensionInfo& dimension) {
+                return dimension.value_reference == structural_parameter.value_reference;
+            });
+        if (!depends_on_parameter) {
+            continue;
+        }
+        cached_values_.erase(candidate.value_reference);
+        std::size_t flat_size = 0;
+        if (TryResolveVariableFlatSize(candidate, &flat_size) && flat_size == 0) {
+            switch (candidate.type) {
+                case ScalarType::kReal:
+                    cached_values_[candidate.value_reference] = RealArray{};
+                    break;
+                case ScalarType::kInteger:
+                case ScalarType::kEnumeration:
+                    if (BoundsForDeclaredType(candidate.declared_type).unsigned_only) {
+                        cached_values_[candidate.value_reference] = UnsignedIntegerArray{};
+                    } else {
+                        cached_values_[candidate.value_reference] = IntegerArray{};
+                    }
+                    break;
+                case ScalarType::kBoolean:
+                case ScalarType::kClock:
+                    cached_values_[candidate.value_reference] = BooleanArray{};
+                    break;
+                case ScalarType::kString:
+                    cached_values_[candidate.value_reference] = StringArray{};
+                    break;
+                case ScalarType::kBinary:
+                    cached_values_[candidate.value_reference] = BinaryArray{};
+                    break;
+            }
+        }
+        pending_inputs_.erase(candidate.name);
+        if (initialization_configuration) {
+            initial_inputs_.erase(candidate.name);
+        }
+    }
 }
 
 OperationResult ProxyRuntime::ExitInitializationMode() {
@@ -738,19 +1080,161 @@ OperationResult ProxyRuntime::ExitInitializationMode() {
         return OperationResult::Failure("STATE_ERROR", "Runtime is not in session_created state");
     }
 
-    const auto status = gateway_client_->Initialize(
-        config_, experiment_, pending_inputs_, early_return_allowed_);
+    const auto status = EvaluateInitialization();
     if (!status) {
         state_ = SessionState::kError;
         SetError(status.message);
         return status;
     }
+    if (model_exchange_external_solver_active_) {
+        const auto exit_status = ModelExchangeCall("exitInitializationMode");
+        if (!exit_status) {
+            state_ = SessionState::kError;
+            SetError(exit_status.status.message);
+            return exit_status.status;
+        }
+    } else {
+        const auto exit_status = gateway_client_->ExitInitializationMode();
+        if (!exit_status) {
+            state_ = SessionState::kError;
+            SetError(exit_status.message);
+            return exit_status;
+        }
+    }
     pending_inputs_.clear();
-    current_time_ = experiment_.start_time;
     realtime_sim_origin_ = current_time_;
     realtime_wall_origin_ = std::chrono::steady_clock::now();
     realtime_clock_started_ = true;
-    return Transition(SessionState::kInitialized);
+    const auto transition = Transition(SessionState::kInitialized);
+    if (transition) {
+        initialization_mode_entered_ = false;
+    }
+    return transition;
+}
+
+OperationResult ProxyRuntime::EvaluateInitialization(const bool read_initial_outputs) {
+    if (gateway_client_ == nullptr) {
+        return OperationResult::Failure("RUNTIME_NOT_CONFIGURED", "Runtime is not configured");
+    }
+    if (state_ != SessionState::kSessionCreated) {
+        return OperationResult::Failure("STATE_ERROR", "Initialization evaluation requires Initialization Mode");
+    }
+    if (initialization_evaluated_ && !initialization_evaluation_dirty_) {
+        if (!read_initial_outputs || initialization_outputs_evaluated_ || model_exchange_mode_) {
+            return OperationResult::Success();
+        }
+        std::vector<std::string> output_variables;
+        for (const auto& variable : model_.variables) {
+            if (variable.causality == "output") {
+                output_variables.push_back(variable.name);
+            }
+        }
+        const auto initial_outputs = gateway_client_->GetOutputs(output_variables);
+        if (!initial_outputs) {
+            return initial_outputs.status;
+        }
+        ApplyOutputSnapshot(initial_outputs.value);
+        initialization_outputs_evaluated_ = true;
+        return OperationResult::Success();
+    }
+    if (initialization_evaluated_) {
+        const auto reset_status = gateway_client_->Reset();
+        if (!reset_status) {
+            return reset_status;
+        }
+        SeedCacheFromModelDefaults();
+        initialization_outputs_evaluated_ = false;
+        for (const auto& [name, value] : initial_inputs_) {
+            const VariableInfo* variable = FindVariableByName(model_, name);
+            if (variable != nullptr) {
+                cached_values_[variable->value_reference] = value;
+            }
+        }
+        current_time_ = experiment_.start_time;
+    }
+
+    std::map<std::string, ScalarValue> initialization_inputs;
+    std::map<std::string, ScalarValue> initialization_parameters;
+    for (const auto& [name, value] : initial_inputs_) {
+        const VariableInfo* variable = FindVariableByName(model_, name);
+        if (variable != nullptr && variable->causality == "input") {
+            initialization_inputs.emplace(name, value);
+        } else {
+            initialization_parameters.emplace(name, value);
+        }
+    }
+
+    const auto status = gateway_client_->Initialize(
+        config_,
+        experiment_,
+        initialization_inputs,
+        initialization_parameters,
+        early_return_allowed_,
+        model_exchange_mode_,
+        true);
+    if (!status) {
+        return status;
+    }
+    remote_fmu_initialized_ = true;
+    remote_fmu_terminated_ = false;
+    model_exchange_external_solver_active_ = model_exchange_mode_;
+    if (model_exchange_external_solver_active_) {
+        model_exchange_remote_mode_ = "initialization";
+    } else {
+        model_exchange_remote_mode_ = "instantiated";
+    }
+    if (model_exchange_mode_) {
+        initialization_evaluated_ = true;
+        initialization_evaluation_dirty_ = false;
+        initialization_outputs_evaluated_ = false;
+        return OperationResult::Success();
+    }
+
+    initialization_evaluated_ = true;
+    initialization_evaluation_dirty_ = false;
+    initialization_outputs_evaluated_ = false;
+    if (!read_initial_outputs) {
+        return OperationResult::Success();
+    }
+
+    std::vector<std::string> output_variables;
+    for (const auto& variable : model_.variables) {
+        if (variable.causality == "output") {
+            output_variables.push_back(variable.name);
+        }
+    }
+    const auto initial_outputs = gateway_client_->GetOutputs(output_variables);
+    if (!initial_outputs) {
+        return initial_outputs.status;
+    }
+    ApplyOutputSnapshot(initial_outputs.value);
+    initialization_evaluated_ = true;
+    initialization_evaluation_dirty_ = false;
+    initialization_outputs_evaluated_ = true;
+    return OperationResult::Success();
+}
+
+OperationResult ProxyRuntime::EvaluateInitializationForValues(
+    const std::uint32_t* value_references,
+    const std::size_t count,
+    const std::optional<std::size_t> value_count) {
+    if (state_ != SessionState::kSessionCreated || count == 0 || value_references == nullptr) {
+        return OperationResult::Success();
+    }
+    std::size_t expected_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &expected_count)
+        || expected_count != value_count.value_or(count)) {
+        return OperationResult::Success();
+    }
+    bool requests_output = false;
+    for (std::size_t index = 0; index < count; ++index) {
+        const VariableInfo* variable = FindVariableByValueReference(model_, value_references[index]);
+        if (variable == nullptr) {
+            return OperationResult::Success();
+        }
+        requests_output = requests_output || variable->causality == "output";
+    }
+    return (model_exchange_mode_ || requests_output) ? EvaluateInitialization() : OperationResult::Success();
 }
 
 void ProxyRuntime::SetEarlyReturnAllowed(const bool allowed) {
@@ -773,15 +1257,91 @@ OperationResult ProxyRuntime::ApplyOutputSnapshot(const OutputSnapshot& snapshot
     return OperationResult::Success();
 }
 
+OperationResult ProxyRuntime::UpdateDiscreteStates(bool* terminate_simulation,
+                                                   bool* next_event_time_defined,
+                                                   double* next_event_time,
+                                                   bool* discrete_states_need_update,
+                                                   bool* nominals_changed,
+                                                   bool* continuous_states_changed) {
+    if (gateway_client_ == nullptr || !gateway_client_->IsConnected()) {
+        return OperationResult::Failure("RUNTIME_NOT_CONNECTED", "Discrete-state update requires an active Gateway session");
+    }
+    if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning) {
+        return OperationResult::Failure("STATE_ERROR", "Discrete-state update requires an initialized simulation");
+    }
+    if (model_exchange_mode_) {
+        const std::string operation = model_.fmi_version.rfind("3.", 0) == 0
+            ? "updateDiscreteStates"
+            : "newDiscreteStates";
+        const auto response = ModelExchangeCall(operation);
+        if (!response) {
+            SetError(response.status.message);
+            return response.status;
+        }
+        const JsonObject& fields = response.value;
+        const bool needs_update = JsonBool(fields, "discreteStatesNeedUpdate");
+        const bool terminated = JsonBool(fields, "terminateSimulation");
+        const bool nominal_update = JsonBool(fields, "nominalsOfContinuousStatesChanged");
+        const bool state_update = JsonBool(fields, "valuesOfContinuousStatesChanged");
+        const bool next_defined = JsonBool(fields, "nextEventTimeDefined");
+        const JsonValue* next_value = FindObjectValue(fields, "nextEventTime");
+        if (next_defined && (next_value == nullptr || !next_value->IsNumber() || !std::isfinite(next_value->AsNumber()))) {
+            return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway omitted the next Model Exchange event time");
+        }
+        if (terminate_simulation != nullptr) *terminate_simulation = terminated;
+        if (next_event_time_defined != nullptr) *next_event_time_defined = next_defined;
+        if (next_event_time != nullptr) *next_event_time = next_defined ? next_value->AsNumber() : 0.0;
+        if (discrete_states_need_update != nullptr) *discrete_states_need_update = needs_update;
+        if (nominals_changed != nullptr) *nominals_changed = nominal_update;
+        if (continuous_states_changed != nullptr) *continuous_states_changed = state_update;
+        simulation_finished_ = terminated;
+        last_step_terminated_ = terminated;
+        return OperationResult::Success();
+    }
+    bool terminated = false;
+    const auto input_status = gateway_client_->SetInputs(pending_inputs_, &terminated);
+    if (!input_status) {
+        SetError(input_status.message);
+        return input_status;
+    }
+    pending_inputs_.clear();
+
+    std::vector<std::string> output_variables;
+    for (const auto& variable : model_.variables) {
+        if (variable.causality == "output") {
+            output_variables.push_back(variable.name);
+        }
+    }
+    const auto outputs = gateway_client_->GetOutputs(output_variables);
+    if (!outputs) {
+        SetError(outputs.status.message);
+        return outputs.status;
+    }
+    ApplyOutputSnapshot(outputs.value);
+    last_step_event_handling_needed_ = false;
+    last_step_terminated_ = terminated;
+    simulation_finished_ = terminated;
+    if (next_event_time_defined != nullptr) {
+        *next_event_time_defined = outputs.value.next_event_time_defined;
+    }
+    if (next_event_time != nullptr) {
+        *next_event_time = outputs.value.next_event_time.value_or(0.0);
+    }
+    if (terminate_simulation != nullptr) {
+        *terminate_simulation = terminated;
+    }
+    return OperationResult::Success();
+}
+
 OperationResult ProxyRuntime::DoStep(const double current_time, const double step_size) {
+    if (model_exchange_mode_) {
+        return OperationResult::Failure("MODEL_EXCHANGE_DO_STEP_UNAVAILABLE", "DoStep is not part of the Model Exchange interface");
+    }
     if (gateway_client_ == nullptr) {
         return OperationResult::Failure("RUNTIME_NOT_CONFIGURED", "Runtime is not configured");
     }
     if (state_ != SessionState::kInitialized && state_ != SessionState::kRunning) {
         return OperationResult::Failure("STATE_ERROR", "Runtime is not initialized");
-    }
-    if (simulation_finished_) {
-        return OperationResult::Failure("STATE_ERROR", "Simulation has finished");
     }
     if (!std::isfinite(current_time) || !std::isfinite(step_size) || step_size <= 0.0) {
         return OperationResult::Failure("INVALID_STEP", "Step time and size must be finite and step size positive");
@@ -794,13 +1354,28 @@ OperationResult ProxyRuntime::DoStep(const double current_time, const double ste
     last_step_early_return_ = false;
     last_step_event_handling_needed_ = false;
     last_step_terminated_ = false;
-    const double requested_time = current_time + step_size;
-    const double stop_tolerance = std::max(1e-12, std::abs(experiment_.stop_time) * 1e-12);
-    if (!std::isfinite(requested_time) || requested_time > experiment_.stop_time + stop_tolerance) {
+    // Use the last time confirmed by the Gateway as the communication point after
+    // accepting an importer timestamp within FMI's floating-point comparison tolerance.
+    const double effective_current_time = current_time_;
+    const double requested_time = effective_current_time + step_size;
+    constexpr double kMinimumExecutorAdvance = 1e-15;
+    if (requested_time <= effective_current_time + kMinimumExecutorAdvance) {
+        return OperationResult::Failure(
+            "NO_ADVANCE",
+            "Requested communication step does not advance beyond the current simulation time");
+    }
+    if (simulation_finished_) {
+        return OperationResult::Failure("STATE_ERROR", "Simulation has finished");
+    }
+    const double stop_tolerance = experiment_.stop_time.has_value()
+        ? std::max(1e-12, std::abs(*experiment_.stop_time) * 1e-12)
+        : 0.0;
+    if (!std::isfinite(requested_time)
+        || (experiment_.stop_time.has_value() && requested_time > *experiment_.stop_time + stop_tolerance)) {
         return OperationResult::Failure("INVALID_STEP", "Step would advance past stopTime");
     }
 
-    const auto snapshot = gateway_client_->Advance(current_time, step_size, pending_inputs_);
+    const auto snapshot = gateway_client_->Advance(effective_current_time, step_size, pending_inputs_);
     if (!snapshot) {
         if (snapshot.status.code == "INPUT_UPDATE_RATE_LIMIT"
             || snapshot.status.code == "OUTPUT_READ_RATE_LIMITED") {
@@ -818,6 +1393,17 @@ OperationResult ProxyRuntime::DoStep(const double current_time, const double ste
     }
     last_step_early_return_ = snapshot.value.early_return;
     last_step_event_handling_needed_ = snapshot.value.event_handling_needed;
+    for (const auto& variable : model_.variables) {
+        if (variable.type != ScalarType::kClock || variable.causality != "output") {
+            continue;
+        }
+        const ScalarValue* value = GetCachedValue(variable.value_reference);
+        const auto* active = value == nullptr ? nullptr : std::get_if<bool>(value);
+        if (active != nullptr && *active) {
+            last_step_event_handling_needed_ = true;
+            break;
+        }
+    }
     last_step_terminated_ = snapshot.value.terminate_simulation;
     simulation_finished_ = snapshot.value.finished;
     if (last_step_early_return_ && !early_return_allowed_) {
@@ -840,16 +1426,25 @@ OperationResult ProxyRuntime::DoStep(const double current_time, const double ste
 }
 
 OperationResult ProxyRuntime::Terminate() {
-    if (gateway_client_ == nullptr) {
+    if (gateway_client_ == nullptr || gateway_client_->SessionId().empty() || !remote_fmu_initialized_) {
+        state_ = SessionState::kTerminated;
         return OperationResult::Success();
     }
-    const auto status = gateway_client_->Terminate();
+    const auto status = gateway_client_->TerminateFmu();
     if (!status) {
         SetError(status.message);
         return status;
     }
+    remote_fmu_terminated_ = true;
     state_ = SessionState::kTerminated;
     return OperationResult::Success();
+}
+
+OperationResult ProxyRuntime::Close() {
+    if (gateway_client_ == nullptr) {
+        return OperationResult::Success();
+    }
+    return gateway_client_->Terminate();
 }
 
 OperationResult ProxyRuntime::Reset() {
@@ -862,20 +1457,436 @@ OperationResult ProxyRuntime::Reset() {
         }
     }
     SeedCacheFromModelDefaults();
-    pending_inputs_ = initial_inputs_;
-    for (const auto& [name, value] : initial_inputs_) {
-        const VariableInfo* variable = FindVariableByName(model_, name);
-        if (variable != nullptr) {
-            cached_values_[variable->value_reference] = value;
-        }
-    }
+    initial_inputs_.clear();
+    pending_inputs_.clear();
     current_time_ = experiment_.start_time;
     last_step_early_return_ = false;
     last_step_event_handling_needed_ = false;
     last_step_terminated_ = false;
     simulation_finished_ = false;
+    configuration_mode_ = false;
+    configuration_mode_initialization_ = false;
     realtime_clock_started_ = false;
+    initialization_evaluated_ = false;
+    initialization_evaluation_dirty_ = false;
+    initialization_outputs_evaluated_ = false;
+    model_exchange_external_solver_active_ = false;
+    remote_fmu_initialized_ = false;
+    remote_fmu_terminated_ = false;
+    model_exchange_remote_mode_ = "instantiated";
+    reconfiguration_values_.clear();
     state_ = SessionState::kInstantiated;
+    return OperationResult::Success();
+}
+
+OperationResult ProxyRuntime::CaptureFmuState(std::string& serialized_state) {
+    const bool remote_session = gateway_client_ != nullptr
+        && gateway_client_->IsConnected()
+        && !gateway_client_->SessionId().empty();
+    if (remote_session && state_ == SessionState::kSessionCreated && initialization_mode_entered_) {
+        const auto initialization_status = EvaluateInitialization(false);
+        if (!initialization_status) {
+            SetError(initialization_status.message);
+            return initialization_status;
+        }
+    }
+    const bool remote_state = remote_session && remote_fmu_initialized_;
+    if (!remote_state && state_ != SessionState::kInstantiated && state_ != SessionState::kTerminated) {
+        return OperationResult::Failure("RUNTIME_NOT_CONNECTED", "FMU state capture requires an active Gateway session");
+    }
+    const bool initialization_state = state_ == SessionState::kSessionCreated
+        && initialization_mode_entered_ && initialization_evaluated_;
+    const bool remote_initialization_mode = initialization_state && remote_state;
+    JsonObject remote_checkpoint;
+    if (remote_state) {
+        const auto checkpoint = gateway_client_->CaptureFmuState();
+        if (!checkpoint) {
+            SetError(checkpoint.status.message);
+            return checkpoint.status;
+        }
+        const JsonValue* remote_checkpoint_value = FindObjectValue(checkpoint.value, "checkpoint");
+        const JsonObject* checkpoint_object = remote_checkpoint_value == nullptr
+            ? nullptr
+            : remote_checkpoint_value->AsObject();
+        if (checkpoint_object == nullptr) {
+            return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway returned an invalid FMU checkpoint");
+        }
+        remote_checkpoint = *checkpoint_object;
+    }
+    std::map<std::string, ScalarValue> cached_by_name;
+    for (const auto& [reference, value] : cached_values_) {
+        const VariableInfo* variable = FindVariableByValueReference(model_, reference);
+        if (variable != nullptr) {
+            cached_by_name.emplace(variable->name, value);
+        }
+    }
+    JsonObject state = {
+        {"version", JsonValue(3)},
+        {"remote", JsonValue(remote_state)},
+        {"startTime", JsonValue(experiment_.start_time)},
+        {"stopTime", experiment_.stop_time.has_value() ? JsonValue(*experiment_.stop_time) : JsonValue(nullptr)},
+        {"stepSize", JsonValue(experiment_.step_size)},
+        {"earlyReturnAllowed", JsonValue(early_return_allowed_)},
+        {"sourceFmuTerminated", JsonValue(remote_fmu_terminated_)},
+        {"currentTime", JsonValue(current_time_)},
+        {"running", JsonValue(state_ == SessionState::kRunning)},
+        {"simulationFinished", JsonValue(simulation_finished_)},
+        {"lastStepEarlyReturn", JsonValue(last_step_early_return_)},
+        {"lastStepEventHandlingNeeded", JsonValue(last_step_event_handling_needed_)},
+        {"lastStepTerminated", JsonValue(last_step_terminated_)},
+        {"initialInputs", JsonValue(scalar_value_codec::EncodeJsonObject(initial_inputs_))},
+        {"pendingInputs", JsonValue(scalar_value_codec::EncodeJsonObject(pending_inputs_))},
+        {"cachedValues", JsonValue(scalar_value_codec::EncodeJsonObject(cached_by_name))},
+        {"reconfigurationValues", JsonValue(scalar_value_codec::EncodeJsonObject(reconfiguration_values_))},
+        {"initializationMode", JsonValue(remote_initialization_mode)},
+        {"modelExchangeRemoteMode", JsonValue(model_exchange_external_solver_active_ ? model_exchange_remote_mode_ : "")},
+        {"proxyState", JsonValue(ToString(state_))},
+        {"modelExchangeMode", JsonValue(model_exchange_mode_)},
+        {"externalSolverActive", JsonValue(model_exchange_external_solver_active_)},
+        {"configurationMode", JsonValue(configuration_mode_)},
+        {"configurationModeInitialization", JsonValue(configuration_mode_initialization_)},
+        {"initializationModeEntered", JsonValue(initialization_mode_entered_)},
+    };
+    if (remote_state) {
+        state.emplace("checkpoint", JsonValue(std::move(remote_checkpoint)));
+    }
+    serialized_state = SerializeJson(JsonValue(std::move(state)));
+    return OperationResult::Success();
+}
+
+OperationResult ProxyRuntime::RestoreFmuState(const std::string& serialized_state) {
+    const auto parsed = ParseJson(serialized_state);
+    if (!parsed || parsed.value.AsObject() == nullptr) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state is invalid");
+    }
+    const JsonObject* serialized_object = parsed.value.AsObject();
+    const JsonValue* version = FindObjectValue(*serialized_object, "version");
+    const JsonValue* remote_value = FindObjectValue(*serialized_object, "remote");
+    const JsonValue* checkpoint_value = FindObjectValue(*serialized_object, "checkpoint");
+    const JsonObject* checkpoint = checkpoint_value == nullptr ? nullptr : checkpoint_value->AsObject();
+    const JsonValue* time_value = FindObjectValue(*serialized_object, "currentTime");
+    const JsonValue* running_value = FindObjectValue(*serialized_object, "running");
+    const JsonValue* finished_value = FindObjectValue(*serialized_object, "simulationFinished");
+    const JsonValue* early_return_value = FindObjectValue(*serialized_object, "lastStepEarlyReturn");
+    const JsonValue* event_needed_value = FindObjectValue(*serialized_object, "lastStepEventHandlingNeeded");
+    const JsonValue* terminated_value = FindObjectValue(*serialized_object, "lastStepTerminated");
+    const JsonValue* initialization_mode_value = FindObjectValue(*serialized_object, "initializationMode");
+    const JsonValue* model_exchange_remote_mode_value = FindObjectValue(*serialized_object, "modelExchangeRemoteMode");
+    const bool legacy_version = version != nullptr && version->IsNumber() && version->AsNumber() == 2.0;
+    const bool current_version = version != nullptr && version->IsNumber() && version->AsNumber() == 3.0;
+    if ((!legacy_version && !current_version)
+        || time_value == nullptr || !time_value->IsNumber()
+        || running_value == nullptr || !running_value->IsBool()
+        || finished_value == nullptr || !finished_value->IsBool()
+        || early_return_value == nullptr || !early_return_value->IsBool()
+        || event_needed_value == nullptr || !event_needed_value->IsBool()
+        || terminated_value == nullptr || !terminated_value->IsBool()) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state is incomplete");
+    }
+    const bool restore_remote_state = legacy_version || (remote_value != nullptr && remote_value->IsBool() && remote_value->AsBool());
+    if (current_version && (remote_value == nullptr || !remote_value->IsBool())) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU remote-state flag is invalid");
+    }
+    if ((restore_remote_state && checkpoint == nullptr) || (!restore_remote_state && checkpoint_value != nullptr)) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU checkpoint does not match its state kind");
+    }
+    if ((initialization_mode_value != nullptr && !initialization_mode_value->IsBool())
+        || (model_exchange_remote_mode_value != nullptr
+            && (!model_exchange_remote_mode_value->IsString()
+                || (model_exchange_remote_mode_value->AsString() != ""
+                    && model_exchange_remote_mode_value->AsString() != "instantiated"
+                    && model_exchange_remote_mode_value->AsString() != "initialization"
+                    && model_exchange_remote_mode_value->AsString() != "event"
+                    && model_exchange_remote_mode_value->AsString() != "continuous")))) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU Model Exchange phase is invalid");
+    }
+    const bool restore_initialization_mode =
+        initialization_mode_value != nullptr && initialization_mode_value->AsBool();
+    const std::string serialized_model_exchange_remote_mode =
+        model_exchange_remote_mode_value == nullptr ? "" : model_exchange_remote_mode_value->AsString();
+    const double serialized_time = time_value->AsNumber();
+    if (!std::isfinite(serialized_time)) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU time is invalid");
+    }
+    bool source_fmu_terminated = false;
+    bool serialized_model_exchange_mode = model_exchange_mode_;
+    bool serialized_external_solver_active = model_exchange_mode_;
+    bool serialized_configuration_mode = false;
+    bool serialized_configuration_initialization = false;
+    bool serialized_initialization_entered = restore_initialization_mode;
+    bool serialized_early_return_allowed = early_return_allowed_;
+    double serialized_start_time = experiment_.start_time;
+    double serialized_step_size = experiment_.step_size;
+    std::optional<double> serialized_stop_time = experiment_.stop_time;
+    std::string serialized_proxy_state;
+    if (current_version) {
+        const auto get_bool = [serialized_object](const char* name, bool* output) {
+            const JsonValue* value = FindObjectValue(*serialized_object, name);
+            if (output == nullptr || value == nullptr || !value->IsBool()) {
+                return false;
+            }
+            *output = value->AsBool();
+            return true;
+        };
+        const JsonValue* start_value = FindObjectValue(*serialized_object, "startTime");
+        const JsonValue* stop_value = FindObjectValue(*serialized_object, "stopTime");
+        const JsonValue* step_value = FindObjectValue(*serialized_object, "stepSize");
+        const JsonValue* proxy_state_value = FindObjectValue(*serialized_object, "proxyState");
+        if (start_value == nullptr || !start_value->IsNumber()
+            || stop_value == nullptr || (!stop_value->IsNull() && !stop_value->IsNumber())
+            || step_value == nullptr || !step_value->IsNumber()
+            || proxy_state_value == nullptr || !proxy_state_value->IsString()
+            || !get_bool("sourceFmuTerminated", &source_fmu_terminated)
+            || !get_bool("modelExchangeMode", &serialized_model_exchange_mode)
+            || !get_bool("externalSolverActive", &serialized_external_solver_active)
+            || !get_bool("configurationMode", &serialized_configuration_mode)
+            || !get_bool("configurationModeInitialization", &serialized_configuration_initialization)
+            || !get_bool("initializationModeEntered", &serialized_initialization_entered)
+            || !get_bool("earlyReturnAllowed", &serialized_early_return_allowed)) {
+            return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU execution context is incomplete");
+        }
+        serialized_start_time = start_value->AsNumber();
+        serialized_stop_time = stop_value->IsNull()
+            ? std::nullopt
+            : std::optional<double>(stop_value->AsNumber());
+        serialized_step_size = step_value->AsNumber();
+        serialized_proxy_state = proxy_state_value->AsString();
+        if (!std::isfinite(serialized_start_time) || !std::isfinite(serialized_step_size)
+            || serialized_step_size <= 0.0
+            || (serialized_stop_time.has_value()
+                && (!std::isfinite(*serialized_stop_time) || *serialized_stop_time <= serialized_start_time))
+            || serialized_model_exchange_mode != model_exchange_mode_
+            || (restore_remote_state
+                ? serialized_external_solver_active != serialized_model_exchange_mode
+                : serialized_external_solver_active)
+            || (restore_remote_state && source_fmu_terminated != (serialized_proxy_state == "terminated"))) {
+            return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU execution context is invalid");
+        }
+    } else {
+        serialized_proxy_state = restore_initialization_mode
+            ? "session_created"
+            : running_value->AsBool() ? "running" : "initialized";
+    }
+    if (serialized_proxy_state == "instantiated") {
+        // Local FMI 3 Configuration Mode checkpoints remain in the instantiated superstate.
+    } else if (serialized_proxy_state == "session_created") {
+        if (!serialized_initialization_entered) {
+            return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMI initialization phase is invalid");
+        }
+    } else if (serialized_proxy_state == "initialized" || serialized_proxy_state == "running"
+               || serialized_proxy_state == "paused" || serialized_proxy_state == "terminated") {
+        if (restore_initialization_mode) {
+            return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMI state phase is inconsistent");
+        }
+    } else {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMI state phase is invalid");
+    }
+    if (restore_initialization_mode
+        && ((serialized_model_exchange_mode
+             && (!serialized_external_solver_active || serialized_model_exchange_remote_mode != "initialization"))
+            || (!serialized_model_exchange_mode && !serialized_model_exchange_remote_mode.empty()))) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state does not match the initialization phase");
+    }
+    if (restore_remote_state && !serialized_model_exchange_remote_mode.empty()
+        && !serialized_model_exchange_mode) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU state has an incompatible Model Exchange phase");
+    }
+    if (restore_remote_state && source_fmu_terminated && !remote_fmu_initialized_) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "A terminated remote FMU cannot be reconstructed from this session");
+    }
+    auto decode_values = [this, serialized_object](const char* field,
+                                                    std::map<std::string, ScalarValue>* output) {
+        if (output == nullptr) {
+            return false;
+        }
+        const JsonValue* value = FindObjectValue(*serialized_object, field);
+        const JsonObject* object = value == nullptr ? nullptr : value->AsObject();
+        if (object == nullptr) {
+            return false;
+        }
+        output->clear();
+        for (const auto& [name, item] : *object) {
+            const VariableInfo* variable = FindVariableByName(model_, name);
+            if (variable == nullptr) {
+                return false;
+            }
+            const auto converted = ConvertJsonValue(item, *variable);
+            if (!converted.has_value()) {
+                return false;
+            }
+            output->emplace(name, *converted);
+        }
+        return true;
+    };
+    std::map<std::string, ScalarValue> initial_inputs;
+    std::map<std::string, ScalarValue> pending_inputs;
+    std::map<std::string, ScalarValue> cached_by_name;
+    std::map<std::string, ScalarValue> reconfiguration_values;
+    if (!decode_values("initialInputs", &initial_inputs)
+        || !decode_values("pendingInputs", &pending_inputs)
+        || !decode_values("cachedValues", &cached_by_name)
+        || (current_version && !decode_values("reconfigurationValues", &reconfiguration_values))) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU proxy values are invalid");
+    }
+    if (serialized_time < serialized_start_time
+        || (serialized_stop_time.has_value() && serialized_time > *serialized_stop_time)) {
+        return OperationResult::Failure("INVALID_FMU_STATE", "Serialized FMU time is outside its experiment interval");
+    }
+
+    OutputSnapshot restored_snapshot;
+    if (!restore_remote_state) {
+        if (gateway_client_ != nullptr && gateway_client_->IsConnected()
+            && !gateway_client_->SessionId().empty()) {
+            const auto reset_status = gateway_client_->Reset();
+            if (!reset_status) {
+                SetError(reset_status.message);
+                return reset_status;
+            }
+        }
+        remote_fmu_initialized_ = false;
+        remote_fmu_terminated_ = false;
+    } else {
+        if (gateway_client_ == nullptr) {
+            return OperationResult::Failure("RUNTIME_NOT_CONNECTED", "FMU state restore requires a configured Gateway client");
+        }
+        experiment_.start_time = serialized_start_time;
+        experiment_.stop_time = serialized_stop_time;
+        experiment_.step_size = serialized_step_size;
+        early_return_allowed_ = serialized_early_return_allowed;
+        initial_inputs_ = initial_inputs;
+        pending_inputs_ = pending_inputs;
+        model_exchange_external_solver_active_ = serialized_external_solver_active;
+        model_exchange_remote_mode_ = serialized_model_exchange_remote_mode.empty()
+            ? "instantiated"
+            : serialized_model_exchange_remote_mode;
+        if (!remote_fmu_initialized_) {
+            if (source_fmu_terminated) {
+                return OperationResult::Failure("INVALID_FMU_STATE", "A terminated remote FMU cannot be reconstructed from this session");
+            }
+            configuration_mode_ = false;
+            configuration_mode_initialization_ = false;
+            initialization_mode_entered_ = false;
+            initialization_evaluated_ = false;
+            initialization_evaluation_dirty_ = false;
+            initialization_outputs_evaluated_ = false;
+            state_ = SessionState::kInstantiated;
+            const auto enter_status = EnterInitializationMode();
+            if (!enter_status) {
+                SetError(enter_status.message);
+                return enter_status;
+            }
+            const auto initialize_status = EvaluateInitialization(false);
+            if (!initialize_status) {
+                SetError(initialize_status.message);
+                return initialize_status;
+            }
+            if (!restore_initialization_mode) {
+                const auto exit_status = ExitInitializationMode();
+                if (!exit_status) {
+                    SetError(exit_status.message);
+                    return exit_status;
+                }
+                if (serialized_model_exchange_mode && serialized_model_exchange_remote_mode == "continuous") {
+                    const auto continuous_status = EnterModelExchangeContinuousTimeMode();
+                    if (!continuous_status) {
+                        SetError(continuous_status.message);
+                        return continuous_status;
+                    }
+                }
+            }
+        }
+        if (!gateway_client_->IsConnected() || gateway_client_->SessionId().empty()) {
+            return OperationResult::Failure("RUNTIME_NOT_CONNECTED", "Remote FMU checkpoint belongs to an unavailable Gateway session");
+        }
+        std::vector<std::string> output_variables;
+        output_variables.reserve(512);
+        for (const auto& variable : model_.variables) {
+            if (variable.causality == "output" && output_variables.size() < 512) {
+                output_variables.push_back(variable.name);
+            }
+        }
+        const auto restored = gateway_client_->RestoreFmuState(*checkpoint, output_variables);
+        if (!restored) {
+            SetError(restored.status.message);
+            return restored.status;
+        }
+        const double time_tolerance = std::max(1e-12, std::abs(serialized_time) * 1e-12);
+        if (!std::isfinite(restored.value.sim_time)
+            || std::abs(restored.value.sim_time - serialized_time) > time_tolerance) {
+            return OperationResult::Failure("INVALID_FMU_STATE", "Gateway restored a different simulation time");
+        }
+        restored_snapshot = restored.value;
+        remote_fmu_initialized_ = true;
+        remote_fmu_terminated_ = source_fmu_terminated;
+    }
+    current_time_ = serialized_time;
+    simulation_finished_ = finished_value->AsBool();
+    last_step_early_return_ = early_return_value->AsBool();
+    last_step_event_handling_needed_ = event_needed_value->AsBool();
+    last_step_terminated_ = terminated_value->AsBool();
+    initial_inputs_ = std::move(initial_inputs);
+    pending_inputs_ = std::move(pending_inputs);
+    cached_values_.clear();
+    SeedCacheFromModelDefaults();
+    if (restore_remote_state) {
+        restored_snapshot.sim_time = serialized_time;
+        const auto output_status = ApplyOutputSnapshot(restored_snapshot);
+        if (!output_status) {
+            return output_status;
+        }
+    }
+    for (const auto& [name, value] : cached_by_name) {
+        const VariableInfo* variable = FindVariableByName(model_, name);
+        if (variable != nullptr) {
+            cached_values_[variable->value_reference] = value;
+        }
+    }
+    if (restore_initialization_mode) {
+        state_ = SessionState::kSessionCreated;
+        initialization_mode_entered_ = true;
+        initialization_evaluated_ = true;
+        initialization_evaluation_dirty_ = false;
+        initialization_outputs_evaluated_ = false;
+        model_exchange_external_solver_active_ = model_exchange_mode_;
+        model_exchange_remote_mode_ = model_exchange_mode_ ? "initialization" : "instantiated";
+        initialization_mode_entered_ = true;
+    } else {
+        if (serialized_proxy_state == "terminated") {
+            state_ = SessionState::kTerminated;
+        } else if (serialized_proxy_state == "running") {
+            state_ = SessionState::kRunning;
+        } else if (serialized_proxy_state == "paused") {
+            state_ = SessionState::kPaused;
+        } else if (serialized_proxy_state == "instantiated") {
+            state_ = SessionState::kInstantiated;
+        } else {
+            state_ = SessionState::kInitialized;
+        }
+        initialization_mode_entered_ = false;
+        initialization_evaluated_ = state_ != SessionState::kInstantiated;
+        initialization_evaluation_dirty_ = false;
+        initialization_outputs_evaluated_ = state_ != SessionState::kInstantiated;
+        if (model_exchange_mode_ && model_exchange_external_solver_active_
+            && !serialized_model_exchange_remote_mode.empty()) {
+            model_exchange_remote_mode_ = serialized_model_exchange_remote_mode;
+        }
+    }
+    if (current_version) {
+        configuration_mode_ = serialized_configuration_mode;
+        configuration_mode_initialization_ = serialized_configuration_initialization;
+        initialization_mode_entered_ = serialized_initialization_entered;
+        model_exchange_external_solver_active_ = serialized_external_solver_active;
+        remote_fmu_initialized_ = restore_remote_state;
+        remote_fmu_terminated_ = restore_remote_state && source_fmu_terminated;
+        reconfiguration_values_ = std::move(reconfiguration_values);
+    } else {
+        configuration_mode_ = false;
+        configuration_mode_initialization_ = false;
+        reconfiguration_values_.clear();
+    }
+    realtime_sim_origin_ = current_time_;
+    realtime_wall_origin_ = std::chrono::steady_clock::now();
+    realtime_clock_started_ = true;
     return OperationResult::Success();
 }
 
@@ -883,11 +1894,57 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
     const bool initialization_state =
         state_ == SessionState::kInstantiated || state_ == SessionState::kSessionCreated;
     const bool runtime_state = state_ == SessionState::kInitialized || state_ == SessionState::kRunning;
-    const bool writable_input = variable.causality == "input" && (initialization_state || runtime_state);
+    const bool is_continuous_state = model_exchange_mode_
+        && std::find(model_.continuous_state_value_references.begin(),
+                     model_.continuous_state_value_references.end(),
+                     variable.value_reference) != model_.continuous_state_value_references.end();
+    const bool fmi3 = model_.fmi_version.rfind("3.", 0) == 0;
+    const bool fmi2 = model_.fmi_version.rfind("2.", 0) == 0;
+    const bool writable_initial_state = is_continuous_state
+        && ((fmi3 && (variable.initial == "exact"
+                      || (!initialization_mode_entered_ && variable.initial == "approx")))
+            || (fmi2 && (variable.initial == "exact"
+                         || (!initialization_mode_entered_ && variable.initial == "approx"))));
+    const bool external_model_exchange_value = model_exchange_external_solver_active_
+        && (initialization_state || runtime_state)
+        && !configuration_mode_
+        && variable.causality != "structuralParameter"
+        && variable.causality != "independent";
+    if (external_model_exchange_value) {
+        const bool state_settable =
+            (fmi2 && model_exchange_remote_mode_ == "initialization"
+             && initialization_mode_entered_ && variable.initial == "exact")
+            || (fmi3 && model_exchange_remote_mode_ == "initialization"
+                && initialization_mode_entered_ && variable.initial == "exact")
+            || (fmi3 && model_exchange_remote_mode_ == "continuous")
+            || (fmi3 && model_exchange_remote_mode_ == "event" && variable.reinit == false);
+        if (is_continuous_state && !state_settable) {
+            return OperationResult::Failure(
+                "VARIABLE_NOT_SETTABLE",
+                "Continuous states cannot be set in the current FMI Model Exchange mode");
+        }
+        const auto status = SetModelExchangeValue(variable, value);
+        if (!status) {
+            SetError(status.message);
+            return status;
+        }
+        cached_values_[variable.value_reference] = std::move(value);
+        return OperationResult::Success();
+    }
+    const bool writable_input = variable.causality == "input"
+        && (initialization_state || runtime_state)
+        && !configuration_mode_;
     const bool writable_parameter = variable.causality == "parameter"
+        && !configuration_mode_
         && ((initialization_state && variable.variability != "constant")
             || (runtime_state && variable.variability == "tunable"));
-    if (!writable_input && !writable_parameter) {
+    const bool writable_structural_parameter = variable.causality == "structuralParameter"
+        && (variable.variability == "fixed" || variable.variability == "tunable")
+        && configuration_mode_
+        && ((initialization_state && configuration_mode_initialization_)
+            || (runtime_state && !configuration_mode_initialization_ && variable.variability == "tunable"))
+        && model_.fmi_version.rfind("3.", 0) == 0;
+    if (!writable_input && !writable_parameter && !writable_structural_parameter && !writable_initial_state) {
         return OperationResult::Failure(
             "VARIABLE_NOT_SETTABLE",
             "Variable is not settable in the current FMI mode");
@@ -895,11 +1952,52 @@ OperationResult ProxyRuntime::SetValue(const VariableInfo& variable, ScalarValue
     if (simulation_finished_) {
         return OperationResult::Failure("SIMULATION_FINISHED", "Simulation has finished");
     }
+    if (state_ == SessionState::kSessionCreated) {
+        initialization_evaluation_dirty_ = true;
+    }
+    if (writable_structural_parameter) {
+        const bool defines_array_dimension = std::any_of(
+                model_.variables.begin(), model_.variables.end(), [&variable](const VariableInfo& candidate) {
+                    return std::any_of(candidate.dimensions.begin(), candidate.dimensions.end(), [&variable](const DimensionInfo& dimension) {
+                        return dimension.value_reference == variable.value_reference;
+                    });
+                });
+        if (defines_array_dimension) {
+            const auto* unsigned_value = std::get_if<std::uint64_t>(&value);
+            if (variable.declared_type != "UInt64" || unsigned_value == nullptr) {
+                return OperationResult::Failure("TYPE_MISMATCH", "A structural dimension must be a scalar UInt64");
+            }
+            if ((configuration_mode_initialization_ && *unsigned_value == 0) ||
+                *unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max())) {
+                return OperationResult::Failure(
+                    "INVALID_DIMENSION",
+                    configuration_mode_initialization_
+                        ? "Initial structural array dimensions must fit a positive 32-bit extent"
+                        : "Reconfigured structural array dimensions must fit a non-negative 32-bit extent");
+            }
+        }
+    }
+    if (initialization_state && !writable_structural_parameter && variable.start_value.has_value()
+        && *variable.start_value == value) {
+        cached_values_[variable.value_reference] = std::move(value);
+        initial_inputs_.erase(variable.name);
+        pending_inputs_.erase(variable.name);
+        return OperationResult::Success();
+    }
+
     const auto cached = cached_values_.find(variable.value_reference);
-    if (cached != cached_values_.end() && cached->second == value) {
+    if (runtime_state && variable.type != ScalarType::kClock
+        && cached != cached_values_.end() && cached->second == value) {
         return OperationResult::Success();
     }
     cached_values_[variable.value_reference] = value;
+    if (writable_structural_parameter && runtime_state) {
+        reconfiguration_values_[variable.name] = std::move(value);
+        return OperationResult::Success();
+    }
+    if (writable_structural_parameter) {
+        InvalidateArraysForStructuralParameter(variable, true);
+    }
     if (initialization_state) {
         initial_inputs_[variable.name] = value;
     }
@@ -919,14 +2017,18 @@ template <typename T>
 OperationResult ProxyRuntime::SetNumericValues(const std::uint32_t* value_references,
                                                const std::size_t count,
                                                const T* values,
-                                               const std::size_t value_count,
+                                               const std::optional<std::size_t> value_count,
                                                const ScalarType expected_type) {
-    if (value_references == nullptr || values == nullptr) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "Set values received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "Set values buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "Set values received null buffers");
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -938,8 +2040,8 @@ OperationResult ProxyRuntime::SetNumericValues(const std::uint32_t* value_refere
             !(expected_type == ScalarType::kInteger && variable->type == ScalarType::kEnumeration)) {
             return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match setter");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "Set values buffer is too short for referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1015,41 +2117,45 @@ OperationResult ProxyRuntime::SetNumericValues(const std::uint32_t* value_refere
 OperationResult ProxyRuntime::SetReal(const std::uint32_t* value_references,
                                       const std::size_t count,
                                       const double* values,
-                                      const std::size_t value_count) {
+                                      const std::optional<std::size_t> value_count) {
     return SetNumericValues(value_references, count, values, value_count, ScalarType::kReal);
 }
 
 OperationResult ProxyRuntime::SetInteger(const std::uint32_t* value_references,
                                          const std::size_t count,
                                          const std::int32_t* values,
-                                         const std::size_t value_count) {
+                                         const std::optional<std::size_t> value_count) {
     return SetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::SetSignedInteger(const std::uint32_t* value_references,
                                                const std::size_t count,
                                                const std::int64_t* values,
-                                               const std::size_t value_count) {
+                                               const std::optional<std::size_t> value_count) {
     return SetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::SetUnsignedInteger(const std::uint32_t* value_references,
                                                  const std::size_t count,
                                                  const std::uint64_t* values,
-                                                 const std::size_t value_count) {
+                                                 const std::optional<std::size_t> value_count) {
     return SetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::SetBoolean(const std::uint32_t* value_references,
                                          const std::size_t count,
                                          const bool* values,
-                                         const std::size_t value_count) {
-    if (value_references == nullptr || values == nullptr) {
+                                         const std::optional<std::size_t> value_count) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetBoolean received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetBoolean buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "SetBoolean received null buffers");
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1060,8 +2166,8 @@ OperationResult ProxyRuntime::SetBoolean(const std::uint32_t* value_references,
         if (variable->type != ScalarType::kBoolean) {
             return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match SetBoolean");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "SetBoolean buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1088,13 +2194,17 @@ OperationResult ProxyRuntime::SetBoolean(const std::uint32_t* value_references,
 OperationResult ProxyRuntime::SetString(const std::uint32_t* value_references,
                                         const std::size_t count,
                                         const char* const* values,
-                                        const std::size_t value_count) {
-    if (value_references == nullptr || values == nullptr) {
+                                        const std::optional<std::size_t> value_count) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetString received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetString buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "SetString received null buffers");
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1105,8 +2215,8 @@ OperationResult ProxyRuntime::SetString(const std::uint32_t* value_references,
         if (variable->type != ScalarType::kString) {
             return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match SetString");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "SetString buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1134,13 +2244,17 @@ OperationResult ProxyRuntime::SetBinary(const std::uint32_t* value_references,
                                         const std::size_t count,
                                         const std::size_t* value_sizes,
                                         const std::uint8_t* const* values,
-                                        const std::size_t value_count) {
-    if (value_references == nullptr || value_sizes == nullptr || values == nullptr) {
+                                        const std::optional<std::size_t> value_count) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetBinary received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetBinary buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && (value_sizes == nullptr || values == nullptr)) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "SetBinary received null buffers");
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1151,8 +2265,8 @@ OperationResult ProxyRuntime::SetBinary(const std::uint32_t* value_references,
         if (variable->type != ScalarType::kBinary) {
             return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match SetBinary");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "SetBinary buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1195,7 +2309,7 @@ OperationResult ProxyRuntime::SetBinary(const std::uint32_t* value_references,
 OperationResult ProxyRuntime::SetClock(const std::uint32_t* value_references,
                                        const std::size_t count,
                                        const bool* values) {
-    if (value_references == nullptr || values == nullptr) {
+    if (count > 0 && (value_references == nullptr || values == nullptr)) {
         return OperationResult::Failure("INVALID_ARGUMENT", "SetClock received null buffers");
     }
     for (std::size_t index = 0; index < count; ++index) {
@@ -1218,14 +2332,22 @@ template <typename T>
 OperationResult ProxyRuntime::GetNumericValues(const std::uint32_t* value_references,
                                                const std::size_t count,
                                                T* values,
-                                               const std::size_t value_count,
-                                               const ScalarType expected_type) const {
-    if (value_references == nullptr || values == nullptr) {
+                                               const std::optional<std::size_t> value_count,
+                                               const ScalarType expected_type) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "Get values received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "Get values buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "Get values received null buffers");
+    }
+    const auto remote_status = RefreshModelExchangeValues(value_references, count, expected_type, value_count);
+    if (!remote_status) {
+        return remote_status;
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1237,12 +2359,20 @@ OperationResult ProxyRuntime::GetNumericValues(const std::uint32_t* value_refere
             !(expected_type == ScalarType::kInteger && variable->type == ScalarType::kEnumeration)) {
             return OperationResult::Failure("TYPE_MISMATCH", "Variable type does not match getter");
         }
+        if (expected_type == ScalarType::kReal && variable->causality == "independent") {
+            const std::size_t flat_size = ResolveVariableFlatSize(*variable);
+            if (flat_size != 1 || offset >= expected_count) {
+                return OperationResult::Failure("INVALID_ARGUMENT", "Independent variable must be scalar");
+            }
+            values[offset++] = static_cast<T>(current_time_);
+            continue;
+        }
         const ScalarValue* cached = GetCachedValue(value_references[index]);
         if (cached == nullptr) {
             return OperationResult::Failure("VALUE_UNAVAILABLE", "Value is not cached");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "Get values buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1296,41 +2426,81 @@ OperationResult ProxyRuntime::GetNumericValues(const std::uint32_t* value_refere
 OperationResult ProxyRuntime::GetReal(const std::uint32_t* value_references,
                                       const std::size_t count,
                                       double* values,
-                                      const std::size_t value_count) const {
+                                      const std::optional<std::size_t> value_count) {
+    if (count > 0 && values == nullptr) {
+        return GetNumericValues(value_references, count, values, value_count, ScalarType::kReal);
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kReal);
 }
 
 OperationResult ProxyRuntime::GetInteger(const std::uint32_t* value_references,
                                          const std::size_t count,
                                          std::int32_t* values,
-                                         const std::size_t value_count) const {
+                                         const std::optional<std::size_t> value_count) {
+    if (count > 0 && values == nullptr) {
+        return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::GetSignedInteger(const std::uint32_t* value_references,
                                                const std::size_t count,
                                                std::int64_t* values,
-                                               const std::size_t value_count) const {
+                                               const std::optional<std::size_t> value_count) {
+    if (count > 0 && values == nullptr) {
+        return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::GetUnsignedInteger(const std::uint32_t* value_references,
                                                  const std::size_t count,
                                                  std::uint64_t* values,
-                                                 const std::size_t value_count) const {
+                                                 const std::optional<std::size_t> value_count) {
+    if (count > 0 && values == nullptr) {
+        return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
     return GetNumericValues(value_references, count, values, value_count, ScalarType::kInteger);
 }
 
 OperationResult ProxyRuntime::GetBoolean(const std::uint32_t* value_references,
                                          const std::size_t count,
                                          bool* values,
-                                         const std::size_t value_count) const {
-    if (value_references == nullptr || values == nullptr) {
+                                         const std::optional<std::size_t> value_count) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetBoolean received null buffers");
     }
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetBoolean buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "GetBoolean received null buffers");
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
+    const auto remote_status = RefreshModelExchangeValues(value_references, count, ScalarType::kBoolean, value_count);
+    if (!remote_status) {
+        return remote_status;
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1345,8 +2515,8 @@ OperationResult ProxyRuntime::GetBoolean(const std::uint32_t* value_references,
         if (cached == nullptr) {
             return OperationResult::Failure("VALUE_UNAVAILABLE", "Value is not cached");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "GetBoolean buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1372,14 +2542,26 @@ OperationResult ProxyRuntime::GetBoolean(const std::uint32_t* value_references,
 OperationResult ProxyRuntime::GetString(const std::uint32_t* value_references,
                                         const std::size_t count,
                                         const char** values,
-                                        const std::size_t value_count) {
-    if (value_references == nullptr || values == nullptr) {
+                                        const std::optional<std::size_t> value_count) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetString received null buffers");
     }
     string_cache_.clear();
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetString buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && values == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "GetString received null buffers");
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
+    const auto remote_status = RefreshModelExchangeValues(value_references, count, ScalarType::kString, value_count);
+    if (!remote_status) {
+        return remote_status;
     }
     string_cache_.reserve(expected_count);
     std::size_t offset = 0;
@@ -1395,8 +2577,8 @@ OperationResult ProxyRuntime::GetString(const std::uint32_t* value_references,
         if (cached == nullptr) {
             return OperationResult::Failure("VALUE_UNAVAILABLE", "Value is not cached");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "GetString buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1426,14 +2608,26 @@ OperationResult ProxyRuntime::GetBinary(const std::uint32_t* value_references,
                                         const std::size_t count,
                                         std::size_t* value_sizes,
                                         const std::uint8_t** values,
-                                        const std::size_t value_count) {
-    if (value_references == nullptr || value_sizes == nullptr || values == nullptr) {
+                                        const std::optional<std::size_t> value_count) {
+    if (count > 0 && value_references == nullptr) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetBinary received null buffers");
     }
-    string_cache_.clear();
-    const std::size_t expected_count = value_count == 0 ? count : value_count;
-    if (ExpectedValueCount(value_references, count) != expected_count) {
+    binary_cache_.clear();
+    const std::size_t expected_count = value_count.value_or(count);
+    std::size_t model_value_count = 0;
+    if (!TryExpectedValueCount(value_references, count, &model_value_count) || model_value_count != expected_count) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetBinary buffer length does not match referenced FMI variables");
+    }
+    if (expected_count > 0 && (value_sizes == nullptr || values == nullptr)) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "GetBinary received null buffers");
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, value_count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
+    const auto remote_status = RefreshModelExchangeValues(value_references, count, ScalarType::kBinary, value_count);
+    if (!remote_status) {
+        return remote_status;
     }
     std::size_t offset = 0;
     for (std::size_t index = 0; index < count; ++index) {
@@ -1448,8 +2642,8 @@ OperationResult ProxyRuntime::GetBinary(const std::uint32_t* value_references,
         if (cached == nullptr) {
             return OperationResult::Failure("VALUE_UNAVAILABLE", "Value is not cached");
         }
-        const std::size_t flat_size = ResolveVariableFlatSize(*variable);
-        if (flat_size == 0 || offset + flat_size > expected_count) {
+        std::size_t flat_size = 0;
+        if (!TryResolveVariableFlatSize(*variable, &flat_size) || offset + flat_size > expected_count) {
             return OperationResult::Failure("INVALID_ARGUMENT", "GetBinary buffer length does not match referenced FMI variables");
         }
         if (flat_size == 1) {
@@ -1477,9 +2671,17 @@ OperationResult ProxyRuntime::GetBinary(const std::uint32_t* value_references,
 
 OperationResult ProxyRuntime::GetClock(const std::uint32_t* value_references,
                                        const std::size_t count,
-                                       bool* values) const {
-    if (value_references == nullptr || values == nullptr) {
+                                       bool* values) {
+    if (count > 0 && (value_references == nullptr || values == nullptr)) {
         return OperationResult::Failure("INVALID_ARGUMENT", "GetClock received null buffers");
+    }
+    const auto initialization_status = EvaluateInitializationForValues(value_references, count, count);
+    if (!initialization_status) {
+        return initialization_status;
+    }
+    const auto remote_status = RefreshModelExchangeValues(value_references, count, ScalarType::kClock, count);
+    if (!remote_status) {
+        return remote_status;
     }
     for (std::size_t index = 0; index < count; ++index) {
         const VariableInfo* variable = FindVariableByValueReference(model_, value_references[index]);
@@ -1498,6 +2700,9 @@ OperationResult ProxyRuntime::GetClock(const std::uint32_t* value_references,
             return OperationResult::Failure("TYPE_MISMATCH", "Cached value type does not match GetClock");
         }
         values[index] = *typed;
+        if (variable->causality == "output" && values[index]) {
+            cached_values_[value_references[index]] = false;
+        }
     }
     return OperationResult::Success();
 }
@@ -1508,6 +2713,36 @@ const RuntimeConfig& ProxyRuntime::Config() const {
 
 const ModelDescription& ProxyRuntime::Model() const {
     return model_;
+}
+
+std::size_t ProxyRuntime::NumberOfContinuousStates() const {
+    if (model_.continuous_state_derivative_references.empty()) {
+        return model_.number_of_continuous_states;
+    }
+    std::size_t count = 0;
+    for (const auto reference : model_.continuous_state_derivative_references) {
+        const std::size_t size = ExpectedValueCount(&reference, 1);
+        if (size > std::numeric_limits<std::size_t>::max() - count) {
+            return 0;
+        }
+        count += size;
+    }
+    return count;
+}
+
+std::size_t ProxyRuntime::NumberOfEventIndicators() const {
+    if (model_.event_indicator_references.empty()) {
+        return model_.number_of_event_indicators;
+    }
+    std::size_t count = 0;
+    for (const auto reference : model_.event_indicator_references) {
+        const std::size_t size = ExpectedValueCount(&reference, 1);
+        if (size > std::numeric_limits<std::size_t>::max() - count) {
+            return 0;
+        }
+        count += size;
+    }
+    return count;
 }
 
 SessionState ProxyRuntime::State() const {

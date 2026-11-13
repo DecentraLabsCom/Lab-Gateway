@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-digital-twin-assets-v1">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-ssh-host-trust-dialog-v3">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=error-visibility-v1">
 </head>
 <body>
@@ -791,23 +791,28 @@
                             <div class="field full" id="fmuSyncAssetField" hidden>
                                 <span><label for="fmuSyncAssetType">Visualisation</label> <span class="muted-text">(optional)</span></span>
                                 <select id="fmuSyncAssetType">
+                                    <option value="auto" selected>Detect from FMI-LS-REF (webapp preferred)</option>
                                     <option value="">No visual asset</option>
                                     <option value="glb">GLB scene · Marketplace viewer and controls</option>
                                     <option value="threejs-app">Three.js application · Complete provider presentation</option>
                                 </select>
-                                <span class="mt-2"><label for="fmuSyncAssetUrl">Asset URL</label> <span class="muted-text">(optional)</span></span>
-                                <div class="digital-twin-asset-url-control">
-                                    <input type="text" id="fmuSyncAssetUrl" inputmode="url" maxlength="2048" placeholder="Gateway asset path or HTTPS GLB URL" autocomplete="url">
-                                    <button class="digital-twin-asset-import" id="fmuSyncImportAssetBtn" type="button"><i class="fas fa-file-import" aria-hidden="true"></i> Import asset</button>
+                                <small class="muted-text mt-2" id="fmuSyncAssetAutoHint">Automatic detection prefers a Three.js webapp ZIP declared by FMI-LS-REF or named Model.webapp.zip. If neither is available, it uses a declared GLB, then looks for Model.glb. Sync continues without a visual asset if no companion is found. To add one manually, choose GLB scene or Three.js application.</small>
+                                <div id="fmuSyncManualAssetOptions" hidden>
+                                    <span class="mt-2"><label for="fmuSyncAssetUrl">Asset URL</label> <span class="muted-text">(optional)</span></span>
+                                    <div class="digital-twin-asset-url-control">
+                                        <input type="text" id="fmuSyncAssetUrl" inputmode="url" maxlength="2048" placeholder="Gateway asset path or HTTPS GLB URL" autocomplete="url">
+                                        <button class="digital-twin-asset-import" id="fmuSyncImportAssetBtn" type="button"><i class="fas fa-file-import" aria-hidden="true"></i> Import asset</button>
+                                    </div>
+                                    <small class="muted-text">If no companion is found, you can enter a Gateway asset path or a public HTTPS GLB URL.</small>
+                                    <div class="file-picker mt-2">
+                                        <input class="file-picker-input" type="file" id="fmuSyncAssetFile" accept=".glb,model/gltf-binary" aria-label="Upload digital twin asset">
+                                        <label class="file-picker-button" for="fmuSyncAssetFile">Upload asset</label>
+                                        <span class="file-picker-name" id="fmuSyncAssetFileName" aria-live="polite">No file chosen</span>
+                                    </div>
+                                    <div class="digital-twin-validation" id="fmuSyncAssetValidation" role="status" aria-live="polite" hidden></div>
+                                    <div class="digital-twin-validation fmi-glb-binding-assistant" id="fmuSyncBindingAssistant" hidden></div>
+                                    <small class="muted-text">Alternatively, upload a GLB scene or Three.js app ZIP matching the selected visualisation type. An uploaded AASX must carry its own visual asset reference.</small>
                                 </div>
-                                <small class="muted-text">Import looks for an asset with the same base name as the FMU in the same location (for example, Model.glb or Model.webapp.zip for Model.fmu). You can instead enter a Gateway asset path or a public HTTPS URL for a GLB.</small>
-                                <div class="file-picker mt-2">
-                                    <input class="file-picker-input" type="file" id="fmuSyncAssetFile" accept=".glb,model/gltf-binary" aria-label="Upload digital twin asset">
-                                    <label class="file-picker-button" for="fmuSyncAssetFile">Upload asset</label>
-                                    <span class="file-picker-name" id="fmuSyncAssetFileName" aria-live="polite">No file chosen</span>
-                                </div>
-                                <div class="digital-twin-validation" id="fmuSyncAssetValidation" role="status" aria-live="polite" hidden></div>
-                                <small class="muted-text">Alternatively, upload a GLB scene or Three.js app ZIP. An uploaded AASX must carry its own visual asset reference.</small>
                             </div>
                             <label class="field full">
                                 <span>Contact Email <span class="muted-text">(optional)</span></span>
@@ -819,6 +824,17 @@
                         </div>
                         <div class="digital-twin-validation mt-3" id="fmuAccessPolicyStatus" role="status" aria-live="polite">
                             Select an FMU to check its variable access rules.
+                        </div>
+                        <div class="form-grid mt-3" id="fmuExecutionInterfaceEditor" hidden>
+                            <div class="field full">
+                                <span>Native proxy interfaces</span>
+                                <small class="muted-text">Choose which declared FMI interfaces can be used by the native proxy FMU.</small>
+                                <div class="inline-actions mt-2">
+                                    <label><input type="checkbox" id="fmuAuthorizeCoSimulation"> Co-Simulation</label>
+                                    <label><input type="checkbox" id="fmuAuthorizeModelExchange"> Model Exchange</label>
+                                    <button class="ghost-btn" id="fmuExecutionInterfacesSaveBtn" type="button" disabled>Save interface access</button>
+                                </div>
+                            </div>
                         </div>
                         <div class="actions inline-actions mt-2">
                             <button class="ghost-btn" id="fmuAccessPolicyCheckBtn" type="button">Check access rules</button>
@@ -1116,6 +1132,13 @@
                                     <option value="linux">Linux</option>
                                 </select>
                             </label>
+                            <label class="field" id="provisionContractField">
+                                <span>Station contract</span>
+                                <select id="provisionContractMajor">
+                                    <option value="3" selected>3.x (current)</option>
+                                    <option value="2">2.x (legacy Windows)</option>
+                                </select>
+                            </label>
                             <label class="field">
                                 <span>Name</span>
                                 <input type="text" id="provisionHostName" list="provisionHostNameCandidates" placeholder="lab-ws-01">
@@ -1240,6 +1263,106 @@
             </div>
         </div>
     </div>
+
+    <dialog class="ssh-host-trust-dialog" id="sshHostTrustConfirmDialog"
+        aria-labelledby="sshHostTrustConfirmTitle" aria-describedby="sshHostTrustConfirmInstructions sshHostTrustCommand sshHostTrustCompareInstructions">
+        <form method="dialog">
+            <div class="modal-header">
+                <h3 id="sshHostTrustConfirmTitle"><i class="fas fa-shield-halved" aria-hidden="true"></i> Trust SSH host key?</h3>
+                <button class="ghost-btn icon-btn" type="submit" value="cancel" aria-label="Cancel">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="sshHostTrustConfirmInstructions">
+                    On the target Linux lab station's local console, run this command to display its SSH host-key fingerprint:
+                </p>
+                <pre class="ssh-host-trust-command" id="sshHostTrustCommand"><code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256</code></pre>
+                <p id="sshHostTrustCompareInstructions">
+                    Compare the SHA-256 fingerprint shown below with the <code>SHA256:...</code> value printed by the command.
+                    Run the command on the station itself, not on Gateway.
+                    Continue only if every character matches exactly.
+                </p>
+                <dl class="ssh-host-trust-details">
+                    <div>
+                        <dt>Host</dt>
+                        <dd id="sshHostTrustConfirmHost"></dd>
+                    </div>
+                    <div>
+                        <dt>Key algorithm</dt>
+                        <dd id="sshHostTrustConfirmAlgorithm"></dd>
+                    </div>
+                    <div>
+                        <dt>SHA-256 fingerprint</dt>
+                        <dd><code class="ssh-host-trust-fingerprint" id="sshHostTrustConfirmFingerprint"></code></dd>
+                    </div>
+                </dl>
+                <p class="hint">
+                    Trusting pins this SSH host key for the configured host and port. Lab Manager will then verify
+                    the connection and Station Contract v3 identity.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="ghost-btn" type="submit" value="cancel" autofocus>Cancel</button>
+                <button class="primary-btn" type="submit" value="trust">Trust and verify</button>
+            </div>
+        </form>
+    </dialog>
+
+    <dialog class="ssh-credential-setup-dialog" id="sshCredentialSetupDialog"
+        aria-labelledby="sshCredentialSetupTitle" aria-describedby="sshCredentialSetupInstructions">
+        <form method="dialog">
+            <div class="modal-header">
+                <h3 id="sshCredentialSetupTitle"><i class="fas fa-key" aria-hidden="true"></i> SSH management key ready</h3>
+                <button class="ghost-btn icon-btn" type="submit" value="close" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="sshCredentialSetupInstructions">
+                    Install this public key on the Linux lab station to allow Lab Gateway to connect over SSH.
+                    Choose the command that matches how Lab Station Linux is installed.
+                </p>
+                <dl class="ssh-host-trust-details ssh-credential-host-details">
+                    <div>
+                        <dt>Host</dt>
+                        <dd id="sshCredentialSetupHost"></dd>
+                    </div>
+                    <div>
+                        <dt>SSH account</dt>
+                        <dd id="sshCredentialSetupUser"></dd>
+                    </div>
+                </dl>
+                <section class="ssh-credential-section" aria-labelledby="sshCredentialPublicKeyTitle">
+                    <div class="ssh-credential-section-heading">
+                        <h4 id="sshCredentialPublicKeyTitle">Management public key</h4>
+                        <button class="ghost-btn ssh-credential-copy-button" type="button" id="copySshCredentialPublicKey">Copy public key</button>
+                    </div>
+                    <pre class="ssh-credential-code"><code id="sshCredentialPublicKey"></code></pre>
+                </section>
+                <section class="ssh-credential-section" aria-labelledby="sshCredentialPortableTitle">
+                    <div class="ssh-credential-section-heading">
+                        <div>
+                            <h4 id="sshCredentialPortableTitle">Portable bundle · first installation</h4>
+                            <p>Run this from the extracted bundle directory. The installer detects the SSH port automatically.</p>
+                        </div>
+                        <button class="ghost-btn ssh-credential-copy-button" type="button" id="copySshCredentialPortableCommand">Copy command</button>
+                    </div>
+                    <pre class="ssh-credential-code"><code id="sshCredentialPortableCommand"></code></pre>
+                </section>
+                <section class="ssh-credential-section" aria-labelledby="sshCredentialExistingTitle">
+                    <div class="ssh-credential-section-heading">
+                        <div>
+                            <h4 id="sshCredentialExistingTitle">Existing installation</h4>
+                            <p>Use this after installing a package such as .deb or .rpm.</p>
+                        </div>
+                        <button class="ghost-btn ssh-credential-copy-button" type="button" id="copySshCredentialExistingCommand">Copy command</button>
+                    </div>
+                    <pre class="ssh-credential-code"><code id="sshCredentialExistingCommand"></code></pre>
+                </section>
+                <p class="hint">The private key remains encrypted in Lab Gateway. Only the public key is shown here.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="primary-btn" type="submit" value="close">Close</button>
+            </div>
+        </form>
+    </dialog>
 
     <div class="modal" id="editHostModal">
         <div class="modal-content">
@@ -1380,13 +1503,13 @@
     <script src="../assets/js/lab-manager-access-policy.js?v=lab-manager-access-policy-v1"></script>
     <script src="../assets/js/lab-manager-heartbeat-errors.js?v=lab-manager-heartbeat-errors-v2"></script>
     <script src="../assets/js/lab-manager-hosts.js?v=lab-manager-hosts-v9"></script>
-    <script src="../assets/js/lab-manager-host-renderers.js?v=lab-manager-host-renderers-v16"></script>
+    <script src="../assets/js/lab-manager-host-renderers.js?v=lab-manager-host-renderers-v17"></script>
     <script src="../assets/js/lab-manager-host-discovery.js?v=lab-manager-host-discovery-v2"></script>
     <script src="../assets/js/lab-manager-winrm-credentials.js?v=lab-manager-winrm-credentials-v1"></script>
     <script src="../assets/js/lab-manager-winrm-trust.js?v=lab-manager-winrm-trust-v1"></script>
     <script src="../assets/js/lab-manager-winrm-trust-modal.js?v=lab-manager-winrm-trust-modal-v1"></script>
     <script src="../assets/js/lab-manager-host-provisioning.js?v=lab-manager-host-provisioning-v2"></script>
-    <script src="../assets/js/lab-manager-host-modals.js?v=lab-manager-host-modals-v2"></script>
+    <script src="../assets/js/lab-manager-host-modals.js?v=lab-manager-host-modals-v5"></script>
     <script src="../assets/js/lab-manager-host-view.js?v=lab-manager-host-view-v2"></script>
     <script src="../assets/js/lab-manager-host-action-bindings.js?v=lab-manager-host-action-bindings-v5"></script>
     <script src="../assets/js/lab-manager-ops-access.js?v=lab-manager-ops-access-v1"></script>
@@ -1394,7 +1517,7 @@
     <script src="../assets/js/lab-manager-modal-bindings.js?v=lab-manager-modal-bindings-v2"></script>
     <script src="../assets/js/lab-manager-host-actions.js?v=lab-manager-host-actions-v7"></script>
     <script src="../assets/js/lab-manager-wake-ops.js?v=lab-manager-wake-ops-v3"></script>
-    <script src="../assets/js/lab-manager-host-feature.js?v=lab-manager-host-feature-v10"></script>
+    <script src="../assets/js/lab-manager-host-feature.js?v=lab-manager-host-feature-v12"></script>
     <script src="../assets/js/lab-manager-fmu-station.js?v=lab-manager-fmu-station-v3"></script>
     <script src="../assets/js/core/toast.js?v=lab-manager-toast-v3"></script>
     <script src="../assets/js/lab-manager-notifications-access.js?v=lab-manager-notifications-access-v2"></script>
@@ -1407,9 +1530,10 @@
     <script src="../assets/js/lab-manager-notifications-config.js?v=lab-manager-notifications-config-v2"></script>
     <script src="../assets/js/lab-manager-notifications.js?v=lab-manager-notifications-v2"></script>
     <script src="../assets/js/lab-manager-notifications-feature.js?v=lab-manager-notifications-feature-v1"></script>
-    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v13"></script>
+    <script src="../assets/js/lab-manager-fmu-glb-bindings.js?v=lab-manager-fmu-glb-bindings-v1"></script>
+    <script src="../assets/js/lab-manager-fmu-sync.js?v=lab-manager-fmu-sync-v16"></script>
     <script src="../assets/js/lab-manager-aas-link.js?v=lab-manager-aas-link-v7"></script>
-    <script src="../assets/js/lab-manager-aasx.js?v=lab-manager-aasx-v3"></script>
+    <script src="../assets/js/lab-manager-aasx.js?v=lab-manager-aasx-v4"></script>
     <script src="../assets/js/lab-manager-digital-twins.js?v=lab-manager-digital-twins-v7"></script>
     <script src="../assets/js/lab-manager-power-credentials.js?v=lab-manager-power-credentials-v2"></script>
             <script src="../assets/js/lab-manager-power-renderers.js?v=lab-manager-power-renderers-v12"></script>
@@ -1418,7 +1542,7 @@
     <script src="../assets/js/lab-manager-power-status.js?v=lab-manager-power-status-v2"></script>
     <script src="../assets/js/lab-manager-power-controllers.js?v=lab-manager-power-controllers-v6"></script>
         <script src="../assets/js/lab-manager-power-policies.js?v=lab-manager-power-policies-v5"></script>
-        <script src="../assets/js/lab-manager-energy-feature.js?v=lab-manager-energy-feature-v6"></script>
+        <script src="../assets/js/lab-manager-energy-feature.js?v=lab-manager-energy-feature-v8"></script>
     <script src="../assets/js/lab-manager-reservations-feature.js?v=lab-manager-reservations-feature-v1"></script>
     <script src="../assets/js/lab-manager.js?v=workflow-tabs-v23"></script>
     <script src="../assets/js/lab-publisher-values.js?v=publisher-values-v1"></script>

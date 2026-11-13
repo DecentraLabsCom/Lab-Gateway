@@ -243,16 +243,14 @@ test('host row renderer shows concrete connector states and scoped readiness rea
         fmu: { ready: false, issues: ['FMU executor is not running'] },
       },
     },
-  }, {});
-  assert.match(remoteAppHtml, /class="pill good ready-indicator"[^>]*>Physical lab/);
-  assert.match(
-    remoteAppHtml,
-    /Physical lab ready\./,
-  );
+  }, { hasStationFmuLab: false }, {
+    backendMode: 'station',
+    stationHost: 'station-remote-app',
+  });
+  assert.match(remoteAppHtml, /class="pill good">Physical lab/);
   assert.doesNotMatch(remoteAppHtml, /FMI\/FMU|FMU executor is not running/);
   assert.doesNotMatch(remoteAppHtml, /Ready:/);
-  assert.match(remoteAppHtml, /role="tooltip"/);
-  assert.match(remoteAppHtml, /class="ready-indicator-tooltip ready-indicator-tooltip-good"/);
+  assert.doesNotMatch(remoteAppHtml, /ready-indicator-tooltip|role="tooltip"/);
 
   const fmuHtml = renderer.renderHostRowMarkup('station-fmu', {
     heartbeat: {
@@ -262,12 +260,15 @@ test('host row renderer shows concrete connector states and scoped readiness rea
         fmu: { ready: true, issues: [] },
       },
     },
-  }, {});
-  assert.match(fmuHtml, /class="pill good ready-indicator"[^>]*>FMI\/FMU/);
-  assert.match(fmuHtml, /FMI\/FMU ready\./);
-  assert.doesNotMatch(fmuHtml, /Physical lab: WinRM not ready/);
+  }, { hasStationFmuLab: true }, {
+    backendMode: 'station',
+    stationHost: 'station-fmu',
+  });
+  assert.match(fmuHtml, /class="pill bad ready-indicator"[^>]*>Not ready/);
+  assert.match(fmuHtml, /Physical lab: WinRM not ready/);
+  assert.doesNotMatch(fmuHtml, /FMI\/FMU: FMU executor/);
   assert.doesNotMatch(fmuHtml, /Ready:/);
-  assert.match(fmuHtml, /class="ready-indicator-tooltip ready-indicator-tooltip-good"/);
+  assert.doesNotMatch(fmuHtml, /ready-indicator-tooltip-good/);
 
   const allConnectorsHtml = renderer.renderHostRowMarkup('station-all-connectors', {
     heartbeat: {
@@ -278,7 +279,10 @@ test('host row renderer shows concrete connector states and scoped readiness rea
         fmu: { ready: true, issues: [] },
       },
     },
-  }, {});
+  }, { hasStationFmuLab: true }, {
+    backendMode: 'station',
+    stationHost: 'station-all-connectors',
+  });
   assert.match(allConnectorsHtml, /class="pill good">Physical lab · FMI\/FMU/);
   assert.doesNotMatch(allConnectorsHtml, /ready-indicator-tooltip/);
 
@@ -300,7 +304,10 @@ test('host row renderer shows concrete connector states and scoped readiness rea
         fmu: { ready: false, issues: ['FMU executor is not running'] },
       },
     },
-  }, {});
+  }, { hasStationFmuLab: true }, {
+    backendMode: 'station',
+    stationHost: 'station-unavailable',
+  });
   assert.match(unavailableHtml, /class="pill bad ready-indicator"[^>]*>Not ready/);
   assert.match(
     unavailableHtml,
@@ -322,6 +329,8 @@ test('host row renderer keeps missing heartbeat and trust states public', () => 
 
   assert.match(html, /Address: <span class="mono">n\/a<\/span>/);
   assert.match(html, /Heartbeat: not available/);
+  assert.match(html, /class="pill warn ready-indicator"[^>]*>Readiness unknown/);
+  assert.doesNotMatch(html, />Not ready/);
   assert.doesNotMatch(html, /Last heartbeat:/);
   assert.match(html, /class="ready-indicator-tooltip"/);
   assert.doesNotMatch(html, /ready-indicator-tooltip-good/);
@@ -329,9 +338,35 @@ test('host row renderer keeps missing heartbeat and trust states public', () => 
   assert.doesNotMatch(html, /<div class="host-meta host-history">\s*<span class="host-history-item">Heartbeat:/);
   assert.match(html, /Forced logoff: not available/);
   assert.match(html, /Connections: <span class="host-status-text bad">No connections<\/span>/);
-  assert.match(html, /WinRM credentials:[\s\S]*class="host-status-text warn">missing/);
-  assert.match(html, /WinRM TLS trust:[\s\S]*class="host-status-text warn">missing/);
+  assert.match(html, /WinRM credentials \/ TLS: <button[^>]*data-action="set-winrm-credentials"[^>]*><span class="host-status-text warn">missing<\/span><\/button> \/ <button[^>]*data-action="manage-winrm-trust"[^>]*><span class="host-status-text warn">missing<\/span><\/button><\/div>/);
   assert.doesNotMatch(html, /data-action="edit-host"/);
+});
+
+test('host row renderer does not infer readiness from an incomplete heartbeat', () => {
+  const renderer = loadRenderers().createController(dependencies());
+  const html = renderer.renderHostRowMarkup('PC-Siemens', {
+    heartbeat: { timestamp: '2026-11-09T10:00:00Z', status: {} },
+  });
+
+  assert.match(html, /class="pill warn ready-indicator"[^>]*>Readiness unknown/);
+  assert.doesNotMatch(html, />Not ready/);
+});
+
+test('host row renderer separates configured and reported Station contracts', () => {
+  const renderer = loadRenderers().createController(dependencies());
+  const meta = { contractVersion: '2.x', winrmConfigured: true, winrmTrustStatus: 'ready' };
+  const unreported = renderer.renderHostRowMarkup('PC-Siemens', {}, meta);
+
+  assert.match(unreported, /Station contract: not reported \(configured: 2\.x\)/);
+
+  for (const data of [
+    { heartbeat: { schemaVersion: '3.0.0' } },
+    { heartbeat: { status: { schemaVersion: '3.0.0' } } },
+    { heartbeat: {}, normalized: { contractVersion: '3.0.0' } },
+  ]) {
+    const html = renderer.renderHostRowMarkup('PC-Siemens', data, meta);
+    assert.match(html, /Station contract: 3\.0\.0 \(configured: 2\.x\)/);
+  }
 });
 
 test('candidate renderer preserves discovery statuses and provisioning guard', () => {

@@ -10,8 +10,10 @@ from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from typing import cast
 
 from fmu_backend import StationFmuBackend
-from simulation_access_policy import build_effective_policy
-from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSession, _public_http_detail
+from simulation_access_policy import AccessDenied, build_effective_policy
+from station_ws_proxy import StationRealtimeWsProxyManager, _GatewayStationSession
+from station_ws_connection import _public_http_detail
+from station_ws_connection import _apply_internal_session_state
 
 
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu", "reservationKey": "res-1", "pucHash": "puc-user-1"}):
@@ -24,6 +26,366 @@ client = TestClient(app)
 
 def test_public_http_detail_uses_fallback_for_non_http_exceptions():
     assert _public_http_detail(ValueError("private details"), "Safe fallback") == "Safe fallback"
+
+
+def test_initialization_authorizes_structural_parameters_only_as_configuration_writes():
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationType": "CoSimulation",
+        "modelVariables": [
+            {"name": "sampleCount", "valueReference": 4, "type": "UInt64",
+             "causality": "structuralParameter", "variability": "fixed"},
+            {"name": "samplesIn", "valueReference": 6, "type": "Float64",
+             "causality": "input", "variability": "continuous"},
+        ],
+    }
+    policy = build_effective_policy(metadata)
+    policy["modelVariables"] = metadata["modelVariables"]
+
+    StationRealtimeWsProxyManager._validate_session_message({
+        "type": "sim.initialize",
+        "parameters": {"sampleCount": 3},
+        "options": {"inputs": {"samplesIn": [1.0, 2.0, 3.0]}},
+    }, policy)
+
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message({
+            "type": "sim.initialize",
+            "parameters": {},
+            "options": {"inputs": {"sampleCount": 3}},
+        }, policy)
+
+
+def test_runtime_reconfiguration_is_authorized_only_for_declared_dae_selector():
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationType": "ModelExchange",
+        "fmiLsDae": {"enableDAEParameter": "enableDAE"},
+        "modelVariables": [{
+            "name": "enableDAE",
+            "valueReference": 9,
+            "type": "Boolean",
+            "causality": "structuralParameter",
+            "variability": "tunable",
+            "start": False,
+        }],
+    }
+    policy = build_effective_policy(metadata)
+
+    StationRealtimeWsProxyManager._validate_session_message({
+        "type": "sim.reconfigure",
+        "values": {"enableDAE": True},
+    }, policy)
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message({
+            "type": "sim.setInputs",
+            "values": {"enableDAE": True},
+        }, policy)
+
+
+@pytest.mark.parametrize(("fmi_version", "allowed"), [("2.0", False), ("3.0", True)])
+def test_get_nominals_initialization_mode_matches_fmi_version(fmi_version, allowed):
+    metadata = {"fmiVersion": fmi_version}
+    policy = {"authorizedExecutionInterfaces": ["ModelExchange"]}
+    message = {
+        "type": "sim.modelExchangeCall",
+        "operation": "getNominalsOfContinuousStates",
+        "arguments": {},
+    }
+    active_session = SimpleNamespace(model_exchange_mode="initialization")
+
+    if allowed:
+        StationRealtimeWsProxyManager._validate_session_message(
+            message, policy, metadata, active_session
+        )
+    else:
+        with pytest.raises(AccessDenied):
+            StationRealtimeWsProxyManager._validate_session_message(
+                message, policy, metadata, active_session
+            )
+
+
+def test_model_exchange_get_values_allows_only_declared_mathematical_variables():
+    variables = [
+        {"name": "x1", "valueReference": 1, "type": "Float64", "causality": "local"},
+        {"name": "der_x1", "valueReference": 2, "type": "Float64", "causality": "local"},
+        {"name": "x2", "valueReference": 3, "type": "Float64", "causality": "local"},
+        {"name": "der_x2", "valueReference": 4, "type": "Float64", "causality": "local"},
+        {"name": "z", "valueReference": 5, "type": "Float64", "causality": "local"},
+        {"name": "event", "valueReference": 6, "type": "Float64", "causality": "local"},
+        {"name": "private", "valueReference": 7, "type": "Float64", "causality": "local"},
+        {"name": "res1", "valueReference": 11, "type": "Float64", "causality": "local"},
+        {"name": "res2", "valueReference": 12, "type": "Float64", "causality": "local"},
+    ]
+    metadata = {
+        "fmiVersion": "3.0",
+        "modelVariables": variables,
+        "modelStructure": {
+            "derivatives": [
+                {"valueReference": 2, "stateValueReference": 1},
+                {"valueReference": 4, "stateValueReference": 3},
+            ],
+            "eventIndicators": [{"valueReference": 6}],
+        },
+        "fmiLsDae": {
+            "algebraicValueReferences": [5],
+            "residualVariables": [
+                {"name": "res1", "type": "Float64", "valueReference": 11},
+                {"name": "res2", "type": "Float64", "valueReference": 12},
+            ],
+        },
+    }
+    policy = {
+        "variables": {variable["name"]: {"read": False} for variable in variables},
+        "authorizedExecutionInterfaces": ["ModelExchange"],
+    }
+    active_session = SimpleNamespace(model_exchange_mode="continuous")
+
+    for references in ([1, 2, 3, 4, 5, 6, 11, 12], [2, 4], [11, 12]):
+        StationRealtimeWsProxyManager._validate_session_message(
+            {
+                "type": "sim.modelExchangeCall",
+                "operation": "getValues",
+                "arguments": {"valueType": "Float64", "valueReferences": references},
+            },
+            policy,
+            metadata,
+            active_session,
+        )
+
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message(
+            {
+                "type": "sim.modelExchangeCall",
+                "operation": "getValues",
+                "arguments": {"valueType": "Float64", "valueReferences": [7]},
+            },
+            policy,
+            metadata,
+            active_session,
+        )
+
+
+def test_fmi3_approx_state_can_be_initialized_from_instantiated_values():
+    metadata = {
+        "fmiVersion": "3.0",
+        "modelVariables": [
+            {"name": "x", "valueReference": 1, "type": "Float64", "causality": "local", "initial": "approx"},
+            {"name": "der_x", "valueReference": 2, "type": "Float64", "causality": "local"},
+        ],
+        "modelStructure": {"derivatives": [{"valueReference": 2, "stateValueReference": 1}]},
+    }
+    policy = {
+        "variables": {"x": {"read": False, "writeAt": []}},
+        "modelVariables": [],
+        "authorizedExecutionInterfaces": ["ModelExchange"],
+    }
+
+    StationRealtimeWsProxyManager._validate_session_message(
+        {
+            "type": "sim.initialize",
+            "parameters": {"x": 0.8},
+            "options": {
+                "executionInterface": "ModelExchange",
+                "externalSolver": True,
+                "deferInitializationExit": True,
+            },
+        },
+        policy,
+        metadata,
+    )
+
+
+def test_fmi2_exact_state_can_be_set_after_entering_initialization_mode():
+    metadata = {
+        "fmiVersion": "2.0",
+        "modelVariables": [
+            {"name": "h", "valueReference": 1, "type": "Real", "causality": "local", "initial": "exact"},
+            {"name": "der_h", "valueReference": 2, "type": "Real", "causality": "local"},
+        ],
+        "modelStructure": {"derivatives": [{"valueReference": 2, "stateValueReference": 1}]},
+    }
+    policy = {
+        "variables": {"h": {"read": False, "writeAt": []}},
+        "authorizedExecutionInterfaces": ["ModelExchange"],
+    }
+    active_session = SimpleNamespace(model_exchange_mode="initialization")
+
+    StationRealtimeWsProxyManager._validate_session_message(
+        {
+            "type": "sim.modelExchangeCall",
+            "operation": "setValues",
+            "arguments": {"valueType": "Real", "valueReferences": [1], "values": [0.8]},
+        },
+        policy,
+        metadata,
+        active_session,
+    )
+
+
+def test_fmi3_approx_state_cannot_be_set_after_entering_initialization_mode():
+    metadata = {
+        "fmiVersion": "3.0",
+        "modelVariables": [
+            {"name": "x", "valueReference": 1, "type": "Float64", "causality": "local", "initial": "approx"},
+            {"name": "der_x", "valueReference": 2, "type": "Float64", "causality": "local"},
+        ],
+        "modelStructure": {"derivatives": [{"valueReference": 2, "stateValueReference": 1}]},
+    }
+    policy = {
+        "variables": {"x": {"read": False, "writeAt": []}},
+        "authorizedExecutionInterfaces": ["ModelExchange"],
+    }
+    active_session = SimpleNamespace(model_exchange_mode="initialization")
+
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message(
+            {
+                "type": "sim.modelExchangeCall",
+                "operation": "setValues",
+                "arguments": {"valueType": "Float64", "valueReferences": [1], "values": [0.8]},
+            },
+            policy,
+            metadata,
+            active_session,
+        )
+
+
+def test_restore_fmu_state_uses_opaque_token_and_waits_for_success_before_phase_update():
+    policy = {
+        "variables": {},
+        "authorizedExecutionInterfaces": ["ModelExchange"],
+    }
+    active_session = SimpleNamespace(
+        model_exchange_mode="continuous",
+        deferred_initialization_exit=False,
+        execution_interface="ModelExchange",
+    )
+
+    StationRealtimeWsProxyManager._validate_session_message(
+        {
+            "type": "sim.restoreFMUState",
+            "checkpoint": {
+                "checkpointId": "opaque-checkpoint-token",
+                "createdAt": 1793736591.253394,
+                "expiresAt": 1793822991.253394,
+                "format": "decentralabs-fmi-state-v1",
+                "scope": "scope",
+                "signature": "signature",
+            },
+            "variables": [],
+        },
+        policy,
+        {"modelVariables": []},
+        active_session,
+    )
+
+    assert active_session.model_exchange_mode == "continuous"
+
+    failed_restore = {
+        "type": "error",
+        "_restoredModelExchangeMode": "initialization",
+    }
+    _apply_internal_session_state(failed_restore, active_session)
+    assert active_session.model_exchange_mode == "continuous"
+
+    restored = {
+        "type": "sim.state",
+        "_restoredModelExchangeMode": "initialization",
+        "_restoredInitializationMode": True,
+        "_sourceFmuTerminated": False,
+    }
+    _apply_internal_session_state(restored, active_session)
+    assert active_session.model_exchange_mode == "initialization"
+    assert active_session.deferred_initialization_exit is True
+    assert active_session.source_fmu_terminated is False
+    assert "_restoredModelExchangeMode" not in restored
+    assert "_restoredInitializationMode" not in restored
+    assert "_sourceFmuTerminated" not in restored
+
+
+def test_terminated_source_allows_only_state_checkpoint_reset_and_close_operations():
+    policy = {"authorizedExecutionInterfaces": ["CoSimulation"], "variables": {}}
+    active_session = SimpleNamespace(
+        execution_interface="CoSimulation",
+        deferred_initialization_exit=False,
+        source_fmu_terminated=True,
+    )
+    for message in (
+        {"type": "sim.captureFMUState"},
+        {"type": "sim.restoreFMUState", "checkpoint": {}, "variables": []},
+        {"type": "sim.reset"},
+        {"type": "session.terminate"},
+    ):
+        StationRealtimeWsProxyManager._validate_session_message(message, policy, {}, active_session)
+
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message(
+            {"type": "sim.getOutputs", "variables": []}, policy, {}, active_session
+        )
+
+
+def test_source_terminate_requires_an_authorized_active_interface():
+    message = {"type": "sim.terminateFMU"}
+    session = SimpleNamespace(
+        execution_interface="CoSimulation",
+        source_fmu_terminated=False,
+    )
+    StationRealtimeWsProxyManager._validate_session_message(
+        message,
+        {"authorizedExecutionInterfaces": ["CoSimulation"], "variables": {}},
+        {},
+        session,
+    )
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message(
+            message,
+            {"authorizedExecutionInterfaces": ["ModelExchange"], "variables": {}},
+            {},
+            session,
+        )
+
+
+def test_cosimulation_initialization_exit_requires_a_successfully_deferred_session():
+    message = {"type": "sim.exitInitializationMode"}
+    policy = {"authorizedExecutionInterfaces": ["CoSimulation"]}
+    active_session = SimpleNamespace(
+        execution_interface="CoSimulation",
+        deferred_initialization_exit=True,
+    )
+
+    StationRealtimeWsProxyManager._validate_session_message(message, policy, {}, active_session)
+
+    active_session.deferred_initialization_exit = False
+    with pytest.raises(AccessDenied):
+        StationRealtimeWsProxyManager._validate_session_message(message, policy, {}, active_session)
+
+
+def test_deferred_cosimulation_initialization_is_authorized_without_mutating_phase_early():
+    policy = {
+        "variables": {},
+        "authorizedExecutionInterfaces": ["CoSimulation"],
+        "modelVariables": [],
+    }
+    active_session = SimpleNamespace(
+        model_exchange_mode="continuous",
+        execution_interface="ModelExchange",
+        deferred_initialization_exit=False,
+    )
+    message = {
+        "type": "sim.initialize",
+        "options": {
+            "executionInterface": "CoSimulation",
+            "externalSolver": False,
+            "deferInitializationExit": True,
+        },
+    }
+
+    StationRealtimeWsProxyManager._validate_session_message(message, policy, {"modelVariables": []}, active_session)
+
+    assert active_session.model_exchange_mode == "continuous"
+    assert active_session.execution_interface == "ModelExchange"
+    assert active_session.deferred_initialization_exit is False
 
 
 def _claims():
@@ -243,7 +605,7 @@ def test_station_realtime_rejects_denied_writes_and_reads_and_filters_responses(
     manager.get_effective_policy = _get_policy
     original_send = fake_station.send
 
-    async def _send_with_outputs(raw_message: str, text=None):
+    async def _send_with_outputs(raw_message: str) -> None:
         await original_send(raw_message)
         message = json.loads(raw_message)
         if message.get("type") == "sim.getOutputs":
@@ -870,12 +1232,12 @@ async def test_station_proxy_connect_station_supports_both_websocket_header_sign
     manager = _build_manager()
     calls = []
 
-    async def _connect_additional(url, additional_headers=None):
-        calls.append((url, {"additional_headers": additional_headers}))
+    async def _connect_additional(url, additional_headers=None, **kwargs):
+        calls.append((url, {"additional_headers": additional_headers, **kwargs}))
         return "connected-additional"
 
-    async def _connect_extra(url, extra_headers=None):
-        calls.append((url, {"extra_headers": extra_headers}))
+    async def _connect_extra(url, extra_headers=None, **kwargs):
+        calls.append((url, {"extra_headers": extra_headers, **kwargs}))
         return "connected-extra"
 
     module_with_additional = SimpleNamespace(connect=_connect_additional)
@@ -885,11 +1247,15 @@ async def test_station_proxy_connect_station_supports_both_websocket_header_sign
     connected = await manager._connect_station({"Authorization": "Bearer test-token"})
     assert connected == "connected-additional"
     assert calls[0][1]["additional_headers"]["Authorization"] == "Bearer test-token"
+    assert calls[0][1]["max_size"] == 32 * 1024 * 1024
+    assert calls[0][1]["max_queue"] == 1
 
     monkeypatch.setitem(sys.modules, "websockets", module_with_extra)
     connected = await manager._connect_station({"Authorization": "Bearer test-token"})
     assert connected == "connected-extra"
     assert calls[1][1]["extra_headers"]["Authorization"] == "Bearer test-token"
+    assert calls[1][1]["max_size"] == 32 * 1024 * 1024
+    assert calls[1][1]["max_queue"] == 1
 
     monkeypatch.delitem(sys.modules, "websockets", raising=False)
 

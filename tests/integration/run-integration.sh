@@ -8,7 +8,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.integration.yml"
 CERTS_DIR="$SCRIPT_DIR/certs"
-TEST_RESULTS=""
 PASSED=0
 FAILED=0
 DEMO_TMP_DIR="$(mktemp -d)"

@@ -22,11 +22,17 @@ MIME type and therefore Marketplace's viewer:
 POST /aas-admin/fmu/{accessKey}/sync?labId={labId}&digitalTwinAssetUrl={encoded-Gateway-asset-path}
 ~~~
 
-The visual link is optional: FMU simulation and the standard results viewer
-continue to work when it is omitted or AAS is unavailable. Lab Manager lets the
-provider select no visual asset, a GLB, or a static Three.js application. The
-provider can import a same-stem companion from the active FMU backend or upload
-the asset. A public HTTPS URL is supported for GLB scenes only.
+The visual link is optional. When no GLB scene or Three.js app is linked or
+discoverable, Marketplace provides a proxy-FMU download guide for execution
+with an external FMI tool. Lab Manager defaults to automatic discovery. It
+reads local visual assets declared in the
+FMI-LS-REF manifest at
+`extra/org.fmi-standard.fmi-ls-ref/fmi-ls-manifest.xml`. A Three.js webapp ZIP
+is preferred whenever one is declared or available as the same-stem
+`{model}.webapp.zip`; otherwise Gateway uses a declared GLB, then a same-stem
+`{model}.glb`. If neither exists, the provider can continue without a visual
+asset or upload one. The provider can still select a specific asset type. A
+public HTTPS URL is supported for GLB scenes only.
 
 Smart Warehouse includes both a GLB scene and a companion Three.js application.
 The canonical FMU, scene, app ZIP and license live in FMU-Executor; Gateway
@@ -55,31 +61,95 @@ content-addressed path. It accepts self-contained glTF 2.0 binary scenes up to
 asset paths and bundled modules, and stay within the configured file-count and
 expanded-size limits. Assets are served as static files; there is no per-app
 filename or file-format allowlist. Native executable files, symlinks, special
-files and unsafe paths are rejected. Gateway executes no provider server code.
+files and unsafe paths are rejected. Apps may include HTTPS links for user
+navigation, while scripts, styles and other loaded assets must stay bundled.
+Gateway executes no provider server code.
 
 The authenticated Gateway import endpoint is
 `POST /lab-admin/digital-twin-assets/{labId}/from-fmu` with JSON
-`{"accessKey":"...","assetType":"glb|threejs-app"}`. A direct upload uses
+`{"accessKey":"...","assetType":"auto|glb|threejs-app"}`. Auto returns the
+resolved `assetType` and whether it came from `fmi-ls-ref` or a legacy same-stem
+companion. A direct upload uses
 `PUT /lab-admin/digital-twin-assets/{labId}` with `model/gltf-binary` or
 `application/zip`.
 
 ## Validation and scene bindings
 
 For a GLB upload or FMU companion import, Gateway compares each
-`extras.fmiBindings` entry with the selected FMU's declared outputs and the
-targets supported by Marketplace. The response includes a transient
-`validation` report with the binding counts and any findings; it is derived
-from the FMU and GLB and is not stored in the AAS. A scene with warnings can
+`extras.fmiBindings` entry with the selected FMU's declared inputs or outputs
+and the targets supported by Marketplace. Bindings support glTF core
+`translation`, quaternion `rotation`, `scale` and morph `weights`, along with
+scalar transform, visibility and material-color targets. Numeric FMI input
+bindings may target a scalar translation or Euler-rotation axis for dragging.
+FMI array bindings can select an element by zero-based dimension coordinates.
+Whole glTF vectors
+require one-dimensional FMI arrays of a compatible runtime shape; `weights`
+can select an individual morph target with `index`, combining it with
+`indices` when the source is an FMI array. Input bindings require a numeric FMI
+input mapped to one translation or rotation axis with a finite, non-zero
+scale. The response includes a transient `validation` report with binding counts and any
+findings; it is derived from the FMU and GLB and is not stored in the AAS. A scene with warnings can
 still be stored, but Lab Manager shows the findings and asks the provider to
 review them before synchronizing. Public HTTPS GLBs cannot be inspected by
 Gateway and are labelled unchecked. Three.js ZIP validation checks the
 package structure and bundled paths; Marketplace checks the app's startup
 handshake when it is opened.
 
-For an FMU-driven GLB scene, the provider must author the `extras.fmiBindings`
-that connect its visual elements to the relevant FMU outputs. A GLB without
-bindings may render as static geometry, but it cannot behave as an
-output-driven digital twin.
+For an FMU-driven GLB scene, the provider authors `extras.fmiBindings` on nodes
+that represent relevant FMU outputs or writable numeric inputs. Output bindings
+drive scene targets from model samples. An input binding to a scalar
+`translation.*`, `position.*` or `rotation.*` axis enables constrained dragging
+in Marketplace. `position.*` is an alias for the corresponding translation
+axis. The existing `scale` and `offset` map the drag to the FMI input; rotation
+components represent local Euler angles in radians, and dragging them uses a
+horizontal pointer gesture. A whole-quaternion `rotation` target is not a
+draggable input. FMI array inputs must select an element using `indices`.
+
+Each node can have only one draggable input binding per effective position or
+rotation axis. The Gateway reports competing input bindings; an output may
+share an axis with an input so the scene can show the model response. FMI
+minimum and maximum values constrain the drag. Scene dragging is available
+only during live Step by step or Continuous execution when Gateway permits
+runtime writes. Continuous execution pauses during the drag and resumes after
+the changed value is applied at a model step. The generic input binding does
+not itself change scene geometry or model state; the FMU must implement the
+response, and an output binding must drive the scene transform to display it.
+Initialization values remain editable through the standard input controls. A
+GLB without bindings may render as static geometry, but it cannot behave as an
+FMU-driven digital twin.
+
+See the [DecentraLabs FMI GLB bindings contract](https://github.com/DecentraLabsCom/Marketplace/blob/main/docs/provider/fmi-glb-bindings-contract.md)
+for the canonical versioned specification, target semantics, examples and JSON
+Schema.
+
+## Author bindings in Lab Manager
+
+On a Full Gateway, choose an FMU and upload a GLB in **Lab Manager > Digital
+Twins** to open the binding editor. A GLB companion already stored by that
+Gateway can also be imported into the editor. Existing node-level
+`extras.fmiBindings`, including any `valueMap`, are loaded into the form so the
+provider can review or extend them.
+
+For each node, the editor ranks variable suggestions using matching tokens from
+the node name and FMI variable name, display name, description, quantity and
+enumeration labels. Variable choices show the FMI type, unit or display unit,
+and available enumeration states. Array dimensions determine the number of
+coordinates required when a binding selects an array element; the editor
+validates the coordinate count and known dimension bounds. The provider still
+chooses the node, variable and scene target explicitly, including the axis for
+scalar transforms.
+
+For translation targets, enter the GLB's metres per scene unit. The editor can
+suggest a scale only for an FMI base unit matching metres or radians and with a
+zero base-unit offset. It does not infer non-zero offsets or display-unit
+conversions. `scale` and `offset` in the binding use the contract mapping
+`sceneValue = fmiValue * scale + offset`, so review both values against the
+FMU's FMI unit definitions and the scene's coordinate system. Apply the edits
+to create a new GLB upload; the existing immutable Gateway asset is not
+modified. Upload validation reports bindings that do not match the selected
+FMU or supported scene targets before the provider synchronizes the AAS shell.
+External public GLB URLs that Gateway cannot import are outside this editor
+workflow.
 
 ## Marketplace runtime flow
 
@@ -90,13 +160,16 @@ content-addressed digest; it does not proxy arbitrary URLs. Gateway applies a
 restrictive CSP sandbox to the public app route, and Marketplace serves the app
 entry page in an isolated iframe with its own restrictive CSP and no
 credentials. For a Three.js app, Marketplace's postMessage integration handles
-iframe startup, the one-use connection grant and optional shared HMI controls.
-The app opens the provider Gateway's FMU session WebSocket; FMU requests and
-simulation samples travel directly between the app and Gateway, then to the
-private Station Executor. Marketplace never relays simulation requests or
-samples, and never sends the FMU, access key or reservation token. GLB scenes
-and generated interfaces retain their Marketplace execution path. Generated
-GLB viewers use the batch stream for scheduled runs. For reserved FMI 2/3
+iframe startup, connection authorization and optional shared HMI controls.
+Finite Fastest SDK runs are fetched by the Marketplace host page directly from
+Gateway using a short-lived reservation ticket. The host keeps that ticket out
+of the opaque-origin iframe and relays bounded, acknowledged sample batches
+back to it. Interactive SDK runs open the provider Gateway's FMU session
+WebSocket from the iframe. In both cases, execution continues through the
+private Station Executor; the Marketplace server does not proxy the simulation
+stream. GLB scenes and generated interfaces retain their Marketplace-owned UI
+and execution orchestration. Their Batch mode uses the same direct browser
+POST/NDJSON route. For reserved FMI 2/3
 Co-Simulation models, step-by-step and continuous live modes request the same
 reservation-scoped connection grant used by provider apps, then open the
 Gateway session WebSocket from the Marketplace page. Step mode sends one
@@ -115,8 +188,8 @@ variable-access policy on every write and filters output values returned to the
 browser. The page's exact
 origin must be allowed by the Gateway's `MARKETPLACE_URL` or
 `CORS_ALLOWED_ORIGINS` configuration, and the Marketplace operator must include
-this Gateway's WSS origin in `CSP_CONNECT_SRC` so its browser policy permits the
-direct session connection.
+this Gateway's HTTPS and WSS origins in `CSP_CONNECT_SRC` so its browser policy
+permits direct batch and interactive connections.
 This section documents the AAS asset reference and Gateway storage, validation
 and delivery responsibilities; message names, payloads and lifecycle belong in
 Marketplace's **Three.js digital twin app contract**. The app owns the complete
@@ -151,10 +224,12 @@ sequenceDiagram
     M-->>U: Render generated controls and GLB viewer
     alt Batch
         U->>M: Set inputs and schedule changes
-        M->>G: POST /fmu/api/v1/simulations/stream with reservation authorization
+        M->>G: POST /fmu/api/v1/fmu/connection/{labId} to issue a short-lived ticket
+        G-->>M: Return reservation-scoped ticket
+        M->>G: Browser POST /fmu/api/v1/simulations/stream with ticket in Authorization
         G->>S: Forward execution through the private Station connection
         S-->>G: Stream FMU output samples
-        G-->>M: Return output stream
+        G-->>M: Return output stream directly to the browser page
         M->>M: Apply output values using GLB extras.fmiBindings
         M-->>U: Update the scene, timeline and output indicators
     else Step by step or continuous live
@@ -184,7 +259,7 @@ sequenceDiagram
             end
         end
     end
-    Note over M,S: Batch samples pass through Marketplace. Interactive steps and samples travel directly between the browser and Gateway.
+    Note over M,S: Batch HTTP and interactive WebSocket requests travel from the browser directly to Gateway. For SDK batch, Marketplace's host page relays bounded samples to the isolated iframe; its server does not proxy the stream.
 ~~~
 
 ## AASX and public GLB constraints
@@ -192,10 +267,19 @@ sequenceDiagram
 The AAS File stores the visual asset location and MIME type only. FMI remains the
 source of model execution; the generated GLB interface reads its variable
 descriptions from AAS `SimulationModels` ports when present. Provider-authored
-GLB `extras.fmiBindings` map FMI output names to allowed scene targets and are
-required for output-driven scene behavior, while a Three.js app owns its
-rendering logic. No separate manifest is used. When uploading an `.aasx`
+GLB `extras.fmiBindings` map FMI input and output names to allowed scene targets
+and are required for output-driven or input-interactive scene behavior, while a
+Three.js app owns its rendering logic. No additional GLB-specific manifest is
+used; an FMU can separately declare the asset as a related file in
+FMI-LS-REF. When
+uploading an `.aasx`
 package, its Handover Documentation remains authoritative
 and cannot be combined with a separate visual-asset upload. Public HTTPS GLB
 URLs must allow browser CORS, use an origin permitted by Marketplace
 `CSP_CONNECT_SRC`, and contain no credentials or access tokens.
+
+Generated AAS shells also include a `FmiLsRelatedResources` submodel when the
+FMU declares embedded resources in FMI-LS-REF. It records descriptors for all
+declared local resources, while `HandoverDocumentation` points to the visual
+asset selected by the Gateway. Neither submodel copies the GLB or webapp ZIP
+bytes into AASX by itself.

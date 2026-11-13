@@ -1,10 +1,9 @@
 # Pin the upstream OpenResty image version for reproducibility and security.
 # Check https://hub.docker.com/r/openresty/openresty/tags for supported tags.
-FROM openresty/openresty:1.31.1.1-4-alpine-fat
+FROM openresty/openresty:1.31.8.1-0-alpine-fat
 
 # Use the default system tree
 ENV TREE=/usr/local
-ENV LD_LIBRARY_PATH="/usr/local/openresty/openssl3/lib:/usr/lib"
 
 # Configure paths explicitly
 ENV LUA_PATH="$TREE/share/lua/5.1/?.lua;$TREE/share/lua/5.1/?/init.lua;;"
@@ -17,6 +16,9 @@ RUN apk add --no-cache \
     git \
     luarocks \
     curl
+
+# Keep this after apk so system package downloads use Alpine's system OpenSSL.
+ENV LD_LIBRARY_PATH="/usr/local/openresty/openssl3/lib:/usr/lib"
 
 # Install pinned Lua modules. Download the artifacts with curl because the
 # bundled LuaRocks 3.13 client can crash when a transient CDN response omits

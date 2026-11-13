@@ -156,3 +156,40 @@ async def record_browser_session_started(
     with observation_lock:
         observed_credentials.add(observation_key)
     return True
+
+
+async def record_redeemed_session_started(
+    session_ticket: str,
+    claims: dict,
+    sim_id: str,
+    *,
+    observation_lock: Any,
+    observed_credentials: Any,
+    retry_confirmation: Any,
+    confirm_session: Any,
+    max_attempts: int,
+    sleep: Any,
+) -> bool:
+    """Observe a stream that was authenticated with an already redeemed ticket."""
+    puc_hash = str(claims.get("pucHash") or "").strip().lower()
+    reservation_key = str(claims.get("reservationKey") or "").strip().lower()
+    if not puc_hash or not reservation_key:
+        raise HTTPException(status_code=403, detail="Missing credential identity for session observation")
+    observation_key = f"{reservation_key}:{puc_hash}"
+    with observation_lock:
+        if observation_key in observed_credentials:
+            return False
+
+    await retry_confirmation(
+        confirm_session=confirm_session,
+        session_ticket=session_ticket,
+        claims=claims,
+        reservation_key=reservation_key,
+        session_id=f"fmu:{sim_id}",
+        request_id=f"stream_{sim_id[:12]}",
+        max_attempts=max_attempts,
+        sleep=sleep,
+    )
+    with observation_lock:
+        observed_credentials.add(observation_key)
+    return True

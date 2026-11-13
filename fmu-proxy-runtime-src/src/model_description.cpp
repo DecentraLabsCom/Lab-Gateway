@@ -1,6 +1,7 @@
 #include "decentralabs_proxy/model_description.hpp"
 
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -113,6 +114,36 @@ std::optional<BinaryValue> DecodeBase64(const std::string& text) {
         if (d != -2) {
             output.push_back(static_cast<std::uint8_t>(triple & 0xFFU));
         }
+    }
+    return output;
+}
+
+std::optional<BinaryValue> DecodeHexBinary(const std::string& text) {
+    std::string compact;
+    compact.reserve(text.size());
+    for (const unsigned char ch : text) {
+        if (!std::isspace(ch)) {
+            compact.push_back(static_cast<char>(ch));
+        }
+    }
+    if (compact.size() % 2 != 0) {
+        return std::nullopt;
+    }
+    const auto digit = [](const unsigned char ch) -> int {
+        if (ch >= '0' && ch <= '9') return ch - '0';
+        if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+        if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+        return -1;
+    };
+    BinaryValue output;
+    output.reserve(compact.size() / 2);
+    for (std::size_t index = 0; index < compact.size(); index += 2) {
+        const int high = digit(static_cast<unsigned char>(compact[index]));
+        const int low = digit(static_cast<unsigned char>(compact[index + 1]));
+        if (high < 0 || low < 0) {
+            return std::nullopt;
+        }
+        output.push_back(static_cast<std::uint8_t>((high << 4) | low));
     }
     return output;
 }
@@ -353,6 +384,27 @@ bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
         if (auto it = attributes.find("variability"); it != attributes.end()) {
             info.variability = it->second;
         }
+        if (auto it = attributes.find("initial"); it != attributes.end()) {
+            info.initial = it->second;
+        }
+        if (auto it = attributes.find("reinit"); it != attributes.end()) {
+            if (it->second == "true") {
+                info.reinit = true;
+            } else if (it->second == "false") {
+                info.reinit = false;
+            } else {
+                return false;
+            }
+        }
+        if (auto it = attributes.find("derivative"); it != attributes.end()) {
+            try {
+                const auto raw_reference = std::stoull(it->second);
+                if (raw_reference > std::numeric_limits<std::uint32_t>::max()) return false;
+                info.derivative_reference = static_cast<std::uint32_t>(raw_reference);
+            } catch (...) {
+                return false;
+            }
+        }
         if (auto it = attributes.find("unit"); it != attributes.end()) {
             info.unit = it->second;
         }
@@ -371,7 +423,44 @@ bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
             }
             info.dimensions.emplace_back(std::move(dimension));
         }
-        if (!info.dimensions.empty()) {
+        if (info.type == ScalarType::kString || info.type == ScalarType::kBinary) {
+            std::vector<std::string> starts;
+            const std::regex start_pattern(R"tag(<Start\b([^>]*)/?>)tag");
+            for (std::sregex_iterator it(block.begin(), block.end(), start_pattern), end; it != end; ++it) {
+                const auto start_attributes = ParseAttributes((*it)[0].str());
+                const auto value = start_attributes.find("value");
+                starts.push_back(value == start_attributes.end() ? std::string() : value->second);
+            }
+            if (!starts.empty()) {
+                const bool is_array = !info.dimensions.empty() || starts.size() > 1;
+                if (info.type == ScalarType::kString) {
+                    if (is_array) {
+                        info.start_value = ScalarValue(StringArray(starts.begin(), starts.end()));
+                    } else {
+                        info.start_value = ScalarValue(starts.front());
+                    }
+                } else {
+                    BinaryArray values;
+                    values.reserve(starts.size());
+                    bool valid = true;
+                    for (const auto& start : starts) {
+                        auto decoded = DecodeHexBinary(start);
+                        if (!decoded.has_value()) {
+                            valid = false;
+                            break;
+                        }
+                        values.push_back(std::move(*decoded));
+                    }
+                    if (valid) {
+                        if (is_array) {
+                            info.start_value = ScalarValue(std::move(values));
+                        } else {
+                            info.start_value = ScalarValue(std::move(values.front()));
+                        }
+                    }
+                }
+            }
+        } else if (!info.dimensions.empty()) {
             if (auto it = attributes.find("start"); it != attributes.end()) {
                 info.start_value = ParseArrayValue(info.declared_type, info.type, it->second);
             }
@@ -400,7 +489,9 @@ bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
     if (auto it = scalar_attributes.find("variability"); it != scalar_attributes.end()) {
         info.variability = it->second;
     }
-
+    if (auto it = scalar_attributes.find("initial"); it != scalar_attributes.end()) {
+        info.initial = it->second;
+    }
     const char* type_names[] = {"Real", "Integer", "Boolean", "String", "Enumeration", "Binary", "Clock"};
     for (const char* type_name : type_names) {
         const std::string needle = std::string("<") + type_name;
@@ -415,6 +506,17 @@ bool ParseVariableBlock(const std::string& block, VariableInfo* output) {
         info.type = ParseScalarType(type_name);
         const auto type_attributes = ParseAttributes(block.substr(type_start, type_end - type_start + 1));
         info.declared_type = type_name;
+        if (std::string(type_name) == "Real") {
+            if (auto derivative_it = type_attributes.find("derivative"); derivative_it != type_attributes.end()) {
+                try {
+                    const auto raw_reference = std::stoull(derivative_it->second);
+                    if (raw_reference > std::numeric_limits<std::uint32_t>::max()) return false;
+                    info.derivative_reference = static_cast<std::uint32_t>(raw_reference);
+                } catch (...) {
+                    return false;
+                }
+            }
+        }
         if (auto unit_it = type_attributes.find("unit"); unit_it != type_attributes.end()) {
             info.unit = unit_it->second;
         }
@@ -498,6 +600,19 @@ ValueResult<ModelDescription> ParseModelDescriptionXml(const std::string& xml) {
     }
 
     model.supports_co_simulation = xml.find("<CoSimulation") != std::string::npos;
+    model.supports_model_exchange = xml.find("<ModelExchange") != std::string::npos;
+    if (auto count = root_attributes.find("numberOfEventIndicators"); count != root_attributes.end()) {
+        try {
+            const auto parsed = std::stoull(count->second);
+            if (parsed <= std::numeric_limits<std::size_t>::max()) {
+                model.number_of_event_indicators = static_cast<std::size_t>(parsed);
+            }
+        } catch (...) {
+            return ValueResult<ModelDescription>::Failure(
+                "MODEL_DESCRIPTION_INVALID",
+                "Invalid numberOfEventIndicators attribute");
+        }
+    }
 
     const std::size_t default_start = xml.find("<DefaultExperiment");
     if (default_start != std::string::npos) {
@@ -591,6 +706,188 @@ ValueResult<ModelDescription> ParseModelDescriptionXml(const std::string& xml) {
                     variable_cursor = block_end;
                 }
             }
+        }
+    }
+
+    auto parse_reference = [](const std::string& text) -> std::optional<std::uint32_t> {
+        try {
+            const unsigned long long value = std::stoull(text);
+            if (value <= std::numeric_limits<std::uint32_t>::max()) {
+                return static_cast<std::uint32_t>(value);
+            }
+        } catch (...) {
+        }
+        return std::nullopt;
+    };
+    auto reference_from_fmi2_index = [&model](const std::string& text) -> std::optional<std::uint32_t> {
+        try {
+            const unsigned long long index = std::stoull(text);
+            if (index > 0 && index <= model.variables.size()) {
+                return model.variables[static_cast<std::size_t>(index - 1)].value_reference;
+            }
+        } catch (...) {
+        }
+        return std::nullopt;
+    };
+    auto parse_fmi3_structure_list = [&](const std::string& element_name,
+                                         const std::string& destination_name) -> bool {
+        std::vector<std::uint32_t>* destination = destination_name == "derivatives"
+            ? &model.continuous_state_derivative_references
+            : &model.event_indicator_references;
+        const std::string opening = "<" + element_name;
+        std::size_t structure_start = xml.find("<ModelStructure");
+        if (structure_start == std::string::npos) {
+            return true;
+        }
+        const std::size_t structure_end = xml.find("</ModelStructure>", structure_start);
+        if (structure_end == std::string::npos) {
+            return true;
+        }
+        std::size_t position = structure_start;
+        while ((position = xml.find(opening, position)) != std::string::npos && position < structure_end) {
+            const std::size_t boundary = position + opening.size();
+            if (boundary < xml.size() && !std::isspace(static_cast<unsigned char>(xml[boundary]))
+                && xml[boundary] != '>' && xml[boundary] != '/') {
+                position = boundary;
+                continue;
+            }
+            const std::size_t element_end = xml.find('>', position);
+            if (element_end == std::string::npos || element_end > structure_end) {
+                return false;
+            }
+            const auto attributes = ParseAttributes(xml.substr(position, element_end - position + 1));
+            const auto raw_reference = attributes.find("valueReference");
+            const auto reference = raw_reference == attributes.end()
+                ? std::nullopt
+                : parse_reference(raw_reference->second);
+            if (!reference.has_value() || model.by_value_reference.find(*reference) == model.by_value_reference.end()) {
+                return false;
+            }
+            destination->push_back(*reference);
+            position = element_end + 1;
+        }
+        return true;
+    };
+    auto parse_fmi2_unknown_group = [&](const std::string& group_name,
+                                        std::vector<std::uint32_t>* destination) -> bool {
+        const std::string opening = "<" + group_name;
+        const std::size_t group_start = xml.find(opening);
+        if (group_start == std::string::npos) {
+            return true;
+        }
+        const std::size_t group_open_end = xml.find('>', group_start);
+        const std::size_t group_end = xml.find("</" + group_name + ">", group_start);
+        if (group_open_end == std::string::npos || group_end == std::string::npos) {
+            return false;
+        }
+        std::size_t position = group_open_end + 1;
+        while ((position = xml.find("<Unknown", position)) != std::string::npos && position < group_end) {
+            const std::size_t element_end = xml.find('>', position);
+            if (element_end == std::string::npos || element_end > group_end) {
+                return false;
+            }
+            const auto attributes = ParseAttributes(xml.substr(position, element_end - position + 1));
+            const auto raw_index = attributes.find("index");
+            const auto reference = raw_index == attributes.end()
+                ? std::nullopt
+                : reference_from_fmi2_index(raw_index->second);
+            if (!reference.has_value()) {
+                return false;
+            }
+            destination->push_back(*reference);
+            position = element_end + 1;
+        }
+        return true;
+    };
+
+    if (model.fmi_version.rfind("3", 0) == 0) {
+        if (!parse_fmi3_structure_list("ContinuousStateDerivative", "derivatives")
+            || !parse_fmi3_structure_list("EventIndicator", "eventIndicators")) {
+            return ValueResult<ModelDescription>::Failure(
+                "MODEL_DESCRIPTION_INVALID",
+                "Invalid FMI 3 ModelStructure state or event indicator reference");
+        }
+    } else {
+        if (!parse_fmi2_unknown_group("Derivatives", &model.continuous_state_derivative_references)) {
+            return ValueResult<ModelDescription>::Failure(
+                "MODEL_DESCRIPTION_INVALID",
+                "Invalid FMI 2 ModelStructure derivative reference");
+        }
+    }
+
+    if (model.supports_model_exchange) {
+        for (const std::uint32_t derivative_reference : model.continuous_state_derivative_references) {
+            const VariableInfo* derivative_variable = FindVariableByValueReference(model, derivative_reference);
+            if (derivative_variable == nullptr || !derivative_variable->derivative_reference.has_value()) {
+                return ValueResult<ModelDescription>::Failure(
+                    "MODEL_DESCRIPTION_INVALID",
+                    "Model Exchange derivative is missing its state-variable mapping");
+            }
+            const auto state_reference = model.fmi_version.rfind("3", 0) == 0
+                ? derivative_variable->derivative_reference
+                : reference_from_fmi2_index(std::to_string(*derivative_variable->derivative_reference));
+            if (!state_reference.has_value() || FindVariableByValueReference(model, *state_reference) == nullptr) {
+                return ValueResult<ModelDescription>::Failure(
+                    "MODEL_DESCRIPTION_INVALID",
+                    "Model Exchange derivative references an unknown state variable");
+            }
+            model.continuous_state_value_references.push_back(*state_reference);
+        }
+    }
+
+    auto variable_extent = [&model](const VariableInfo& variable) -> std::optional<std::size_t> {
+        const auto scalar_extent = [](const ScalarValue& value) -> std::optional<std::size_t> {
+            if (const auto* signed_value = std::get_if<std::int64_t>(&value)) {
+                if (*signed_value >= 0) return static_cast<std::size_t>(*signed_value);
+            } else if (const auto* unsigned_value = std::get_if<std::uint64_t>(&value)) {
+                if (*unsigned_value <= std::numeric_limits<std::size_t>::max()) return static_cast<std::size_t>(*unsigned_value);
+            } else if (const auto* real_value = std::get_if<double>(&value)) {
+                if (std::isfinite(*real_value) && *real_value >= 0.0 && std::floor(*real_value) == *real_value
+                    && *real_value <= static_cast<double>(std::numeric_limits<std::size_t>::max())) {
+                    return static_cast<std::size_t>(*real_value);
+                }
+            }
+            return std::nullopt;
+        };
+        std::size_t size = 1;
+        for (const auto& dimension : variable.dimensions) {
+            std::optional<std::size_t> extent;
+            if (dimension.start.has_value() && *dimension.start >= 0) {
+                extent = static_cast<std::size_t>(*dimension.start);
+            } else if (dimension.value_reference.has_value()) {
+                const VariableInfo* dimension_variable = FindVariableByValueReference(model, *dimension.value_reference);
+                if (dimension_variable != nullptr && dimension_variable->start_value.has_value()) {
+                    extent = scalar_extent(*dimension_variable->start_value);
+                }
+            }
+            if (!extent.has_value() || (*extent != 0 && size > std::numeric_limits<std::size_t>::max() / *extent)) {
+                return std::nullopt;
+            }
+            size *= *extent;
+        }
+        return size;
+    };
+    for (const std::uint32_t reference : model.continuous_state_derivative_references) {
+        const VariableInfo* variable = FindVariableByValueReference(model, reference);
+        const auto size = variable == nullptr ? std::nullopt : variable_extent(*variable);
+        if (!size.has_value() || *size > std::numeric_limits<std::size_t>::max() - model.number_of_continuous_states) {
+            return ValueResult<ModelDescription>::Failure(
+                "MODEL_DESCRIPTION_INVALID",
+                "Unable to resolve FMI continuous-state dimensions");
+        }
+        model.number_of_continuous_states += *size;
+    }
+    if (!model.event_indicator_references.empty()) {
+        model.number_of_event_indicators = 0;
+        for (const std::uint32_t reference : model.event_indicator_references) {
+            const VariableInfo* variable = FindVariableByValueReference(model, reference);
+            const auto size = variable == nullptr ? std::nullopt : variable_extent(*variable);
+            if (!size.has_value() || *size > std::numeric_limits<std::size_t>::max() - model.number_of_event_indicators) {
+                return ValueResult<ModelDescription>::Failure(
+                    "MODEL_DESCRIPTION_INVALID",
+                    "Unable to resolve FMI event-indicator dimensions");
+            }
+            model.number_of_event_indicators += *size;
         }
     }
 

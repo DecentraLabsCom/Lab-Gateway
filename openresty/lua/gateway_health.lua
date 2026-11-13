@@ -211,12 +211,11 @@ local ops = capture("/__health_ops")
 local fmu_runner = fmu_runner_enabled and capture("/__health_fmu_runner") or { ok = false, status = nil, body = {} }
 local aas = aas_enabled and capture("/__health_aas") or { ok = false, status = nil, body = {} }
 local ops_body = ops.body or {}
-local mysql_ok, mysql_err
+local mysql_ok
 if ops_body.db ~= nil then
     mysql_ok = ops_body.db == true
-    mysql_err = mysql_ok and nil or "ops-worker reports MySQL unavailable"
 else
-    mysql_ok, mysql_err = check_mysql()
+    mysql_ok = check_mysql()
 end
 local guacd_ok, guacd_err = check_guacd()
 local guac_api_ok = guac_api.status and guac_api.status < 500
@@ -243,7 +242,7 @@ for _, h in ipairs(dns_hosts) do
     if h == "mysql" and ops_body.db ~= nil then
         dns[h] = ops_body.db == true
     else
-        local ok, err = check_dns(h)
+        local ok = check_dns(h)
         dns[h] = ok and true or false
     end
 end

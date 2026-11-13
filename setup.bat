@@ -13,8 +13,10 @@ set "compose_full="
 set "cf_enabled=0"
 set "certbot_enabled=0"
 set "aas_enabled=0"
+set "aas_support_enabled=0"
 set "fmu_runner_enabled=0"
 set "fmu_runner_profile=fmu-runner"
+set "compose_profile_list="
 set "external_aas_url="
 set "existing_mysql_root_password="
 set "existing_guacamole_mysql_password="
@@ -380,7 +382,7 @@ if "!fmu_local_executor_internal_token!"=="" (
 )
 call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN" "!fmu_local_executor_internal_token!"
 call :ReadEnvValue "%ROOT_ENV_FILE%" "FMU_EXECUTOR_IMAGE" fmu_executor_image
-if not defined fmu_executor_image set "fmu_executor_image=ghcr.io/decentralabscom/fmu-executor:0.3.4"
+if not defined fmu_executor_image set "fmu_executor_image=ghcr.io/decentralabscom/fmu-executor:0.3.10"
 call :UpdateEnv "%ROOT_ENV_FILE%" "FMU_EXECUTOR_IMAGE" "!fmu_executor_image!"
 call :RemoveEnv "%ROOT_ENV_FILE%" "FMU_EXECUTOR_SOURCE_PATH"
 call :RemoveEnv "%ROOT_ENV_FILE%" "FMU_LOCAL_REALTIME_ENABLED"
@@ -405,24 +407,27 @@ if "!lab_manager_allowed_cidrs!"=="" (
 )
 echo.
 
-echo Lab Station WinRM Management Network
+echo Lab Station Management Network
 echo ====================================
-echo This restricts Ops Worker WinRM access to the private management network used by Lab Stations.
+echo These destination CIDRs must contain the IP addresses of the Lab Stations Ops Worker will manage.
+echo They may differ from the Gateway/macvlan subnet; routes do not identify authorized networks.
 echo Enter comma-separated CIDRs. Leave empty only if no Ops hosts will be configured yet.
-call :ReadEnvValue "%ROOT_ENV_FILE%" "WINRM_MANAGEMENT_CIDRS" winrm_management_cidrs_default
-set "winrm_management_cidrs="
-if defined winrm_management_cidrs_default (
-    set /p "winrm_management_cidrs=WINRM_MANAGEMENT_CIDRS [!winrm_management_cidrs_default!]: "
+call :ReadEnvValue "%ROOT_ENV_FILE%" "STATION_MANAGEMENT_CIDRS" station_management_cidrs_default
+if not defined station_management_cidrs_default call :ReadEnvValue "%ROOT_ENV_FILE%" "WINRM_MANAGEMENT_CIDRS" station_management_cidrs_default
+set "station_management_cidrs="
+if defined station_management_cidrs_default (
+    set /p "station_management_cidrs=STATION_MANAGEMENT_CIDRS [!station_management_cidrs_default!]: "
 ) else (
-    set /p "winrm_management_cidrs=WINRM_MANAGEMENT_CIDRS [empty -^> configure before adding hosts]: "
+    set /p "station_management_cidrs=STATION_MANAGEMENT_CIDRS [e.g. 10.192.38.0/24; empty only if no hosts yet]: "
 )
-if not defined winrm_management_cidrs set "winrm_management_cidrs=!winrm_management_cidrs_default!"
-if defined winrm_management_cidrs set "winrm_management_cidrs=!winrm_management_cidrs: =!"
-call :UpdateEnv "%ROOT_ENV_FILE%" "WINRM_MANAGEMENT_CIDRS" "!winrm_management_cidrs!"
-if "!winrm_management_cidrs!"=="" (
-    echo    * WINRM_MANAGEMENT_CIDRS left empty; configure it before adding Ops hosts.
+if not defined station_management_cidrs set "station_management_cidrs=!station_management_cidrs_default!"
+if defined station_management_cidrs set "station_management_cidrs=!station_management_cidrs: =!"
+call :UpdateEnv "%ROOT_ENV_FILE%" "STATION_MANAGEMENT_CIDRS" "!station_management_cidrs!"
+call :RemoveEnv "%ROOT_ENV_FILE%" "WINRM_MANAGEMENT_CIDRS"
+if "!station_management_cidrs!"=="" (
+    echo    * STATION_MANAGEMENT_CIDRS left empty; configure it before adding Ops hosts.
 ) else (
-    echo    * WINRM_MANAGEMENT_CIDRS set to: !winrm_management_cidrs!
+    echo    * STATION_MANAGEMENT_CIDRS set to: !station_management_cidrs!
 )
 echo.
 
@@ -834,6 +839,7 @@ if not "!issuer_value!"=="" (
             echo No URL provided. AAS support disabled.
             call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" ""
         ) else (
+            set "aas_support_enabled=1"
             echo    * External AAS server: !external_aas_url!
             echo    * Bundled basyx-aas-server / basyx-mongo containers will NOT be started.
             call :UpdateEnv "%ROOT_ENV_FILE%" "BASYX_AAS_URL" "!external_aas_url!"
@@ -861,6 +867,17 @@ if not "!issuer_value!"=="" (
         call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ALLOWED_HOSTS" ""
         call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_SERVICE_TOKEN" ""
         set "aas_enabled=1"
+        set "aas_support_enabled=1"
+    )
+)
+if "!aas_enabled!"=="1" (
+    call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ENABLED" "true"
+) else (
+    if "!aas_support_enabled!"=="1" (
+        REM BASYX_AAS_URL auto-enables an external AAS; do not store the same fact twice.
+        call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ENABLED" ""
+    ) else (
+        call :UpdateEnv "%ROOT_ENV_FILE%" "AAS_ENABLED" "false"
     )
 )
 echo.
@@ -912,8 +929,14 @@ if "!cf_enabled!"=="1" (
 )
 REM Build complete compose command: base + files + profile
 set "compose_full=%compose_cmd% !compose_files!"
-if "!cf_enabled!"=="1" set "compose_full=!compose_full! --profile !cf_profile!"
-if "!fmu_runner_enabled!"=="1" set "compose_full=!compose_full! --profile !fmu_runner_profile!"
+if "!cf_enabled!"=="1" (
+    set "compose_full=!compose_full! --profile !cf_profile!"
+    call :AppendComposeProfile "!cf_profile!"
+)
+if "!fmu_runner_enabled!"=="1" (
+    set "compose_full=!compose_full! --profile !fmu_runner_profile!"
+    call :AppendComposeProfile "!fmu_runner_profile!"
+)
 set "compose_up_args=up -d"
 if "!fmu_runner_enabled!"=="0" set "compose_up_args=up -d --scale fmu-runner=0"
 echo.
@@ -1000,8 +1023,15 @@ set "certbot_email="
 call :ReadEnvValue "%ROOT_ENV_FILE%" "CERTBOT_DOMAINS" certbot_domains
 call :ReadEnvValue "%ROOT_ENV_FILE%" "CERTBOT_EMAIL" certbot_email
 if not "!certbot_domains!"=="" if not "!certbot_email!"=="" set "certbot_enabled=1"
-if "!certbot_enabled!"=="1" set "compose_full=!compose_full! --profile certbot"
-if "!aas_enabled!"=="1" set "compose_full=!compose_full! --profile aas"
+if "!certbot_enabled!"=="1" (
+    set "compose_full=!compose_full! --profile certbot"
+    call :AppendComposeProfile "certbot"
+)
+if "!aas_enabled!"=="1" (
+    set "compose_full=!compose_full! --profile aas"
+    call :AppendComposeProfile "aas"
+)
+call :UpdateEnv "%ROOT_ENV_FILE%" "COMPOSE_PROFILES" "!compose_profile_list!"
 echo.
 
 echo Blockchain Services Configuration
@@ -1235,6 +1265,8 @@ call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_PARENT"
 call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_SUBNET"
 call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_IP_RANGE"
 call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_GATEWAY"
+call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_GUACD_IPV4"
+call :RemoveEnv "%ROOT_ENV_FILE%" "WOL_LAN_OPS_WORKER_IPV4"
 exit /b
 
 :RemoveWolOverlayFromComposeFile
@@ -1259,6 +1291,16 @@ set "env_file=%~1"
 set "env_key=%~2"
 set "env_value=%~3"
 powershell -NoLogo -NoProfile -Command "& { param($file,$key,$value); if (-not (Test-Path -LiteralPath $file)) { New-Item -Path $file -ItemType File -Force | Out-Null }; $content = @(); if (Test-Path -LiteralPath $file) { $content = @(Get-Content -LiteralPath $file) }; $pattern = '^' + [regex]::Escape($key) + '=.*$'; $replacement = $key + '=' + $value; $updated = $false; for ($i = 0; $i -lt $content.Count; $i++) { if ($content[$i] -match $pattern) { $content[$i] = $replacement; $updated = $true } }; if (-not $updated) { $content += $replacement }; Set-Content -LiteralPath $file -Value $content -Encoding Ascii }" "%env_file%" "%env_key%" "%env_value%"
+exit /b
+
+:AppendComposeProfile
+set "profile_to_add=%~1"
+if not defined profile_to_add exit /b
+if defined compose_profile_list (
+    set "compose_profile_list=!compose_profile_list!,!profile_to_add!"
+) else (
+    set "compose_profile_list=!profile_to_add!"
+)
 exit /b
 
 :SyncComposeSecrets

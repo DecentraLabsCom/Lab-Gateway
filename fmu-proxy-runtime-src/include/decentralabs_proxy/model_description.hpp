@@ -55,6 +55,9 @@ struct VariableInfo {
     std::string declared_type;
     std::string causality = "local";
     std::string variability = "continuous";
+    std::string initial;
+    std::optional<bool> reinit;
+    std::optional<std::uint32_t> derivative_reference;
     std::string unit;
     std::optional<ScalarValue> start_value;
     std::vector<DimensionInfo> dimensions;
@@ -65,6 +68,12 @@ struct ModelDescription {
     std::string model_name = "DecentraLabsProxy";
     std::string guid;
     bool supports_co_simulation = false;
+    bool supports_model_exchange = false;
+    std::size_t number_of_continuous_states = 0;
+    std::size_t number_of_event_indicators = 0;
+    std::vector<std::uint32_t> continuous_state_derivative_references;
+    std::vector<std::uint32_t> continuous_state_value_references;
+    std::vector<std::uint32_t> event_indicator_references;
     std::optional<double> default_start_time;
     std::optional<double> default_stop_time;
     std::optional<double> default_step_size;

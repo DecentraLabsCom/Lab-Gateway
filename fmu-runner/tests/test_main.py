@@ -30,8 +30,6 @@ with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": 1, "acc
     import runner_application
     from auth import verify_jwt as _original_verify_jwt
 
-from config import CONFIG
-
 app = runner_application.app
 _build_proxy_model_description_xml = runner_application._build_proxy_model_description_xml
 _model_metadata_from_model_description = runner_application._model_metadata_from_model_description
@@ -633,6 +631,9 @@ def test_proxy_model_description_preserves_zero_value_reference():
     xml_bytes = _build_proxy_model_description_xml({
         "modelName": "ProxyDemo",
         "guid": "{proxy-guid}",
+        "fmiVersion": "2.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {
                 "name": "u",
@@ -663,6 +664,7 @@ def test_proxy_model_description_fmi2_excludes_independent_and_corrects_output_i
         "modelName": "BouncingBall",
         "guid": "{bb-guid}",
         "fmiVersion": "2.0",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {"name": "time",   "type": "Real", "causality": "independent", "variability": "continuous",  "valueReference": 0},
             {"name": "h",      "type": "Real", "causality": "output",      "variability": "continuous",  "valueReference": 1, "start": 1.0, "initial": "exact"},
@@ -689,6 +691,9 @@ def test_proxy_model_description_fmi2_excludes_independent_and_corrects_output_i
     xml_bytes = _build_proxy_model_description_xml({
         "modelName": "ProxyDemo",
         "guid": "{proxy-guid}",
+        "fmiVersion": "2.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {
                 "name": "u",
@@ -742,6 +747,7 @@ def test_proxy_model_description_preserves_fmi2_enumeration_declared_type_defini
         "modelName": "ProxyEnumDemo",
         "guid": "{proxy-guid}",
         "fmiVersion": "2.0",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {
                 "name": "Enumeration_input",
@@ -802,6 +808,8 @@ def test_proxy_model_description_generates_fmi3_model_description():
         "instantiationToken": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
+        "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {
                 "name": "time",
@@ -846,6 +854,8 @@ def test_proxy_model_description_generates_fmi3_dimensioned_variables():
         "instantiationToken": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
+        "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {
                 "name": "m",
@@ -893,12 +903,123 @@ def test_proxy_model_description_generates_fmi3_dimensioned_variables():
     assert y_dimension.attrib["valueReference"] == "1"
 
 
+def test_proxy_model_description_with_structural_arrays_passes_fmpy_validation(tmp_path):
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyStructuralArrayFmi3",
+        "instantiationToken": "{proxy-guid}",
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
+        "modelVariables": [
+            {"name": "time", "type": "Float64", "causality": "independent", "variability": "continuous", "valueReference": 0},
+            {"name": "n", "type": "UInt64", "causality": "structuralParameter", "variability": "fixed", "valueReference": 1, "start": 3},
+            {"name": "u", "type": "Float64", "causality": "input", "variability": "continuous", "valueReference": 2, "start": [1.0, 2.0, 3.0], "dimensions": [{"valueReference": 1}]},
+            {"name": "y", "type": "Float64", "causality": "output", "variability": "continuous", "valueReference": 3, "dimensions": [{"valueReference": 1}]},
+        ],
+    })
+    fmu_path = tmp_path / "proxy-structural-array.fmu"
+    with zipfile.ZipFile(fmu_path, "w") as archive:
+        archive.writestr("modelDescription.xml", xml_bytes)
+
+    read_model_description(str(fmu_path), validate=True)
+
+
+def test_proxy_model_description_with_local_dimension_constants_passes_fmpy_validation(tmp_path):
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyLocalDimensionConstantsFmi3",
+        "instantiationToken": "{proxy-guid}",
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
+        "modelVariables": [
+            {"name": "time", "type": "Float64", "causality": "independent", "variability": "continuous", "valueReference": 0},
+            {"name": "m", "type": "UInt64", "causality": "local", "variability": "constant", "valueReference": 90, "start": 2},
+            {"name": "n", "type": "UInt64", "causality": "local", "variability": "constant", "valueReference": 91, "start": 2},
+            {"name": "r", "type": "UInt64", "causality": "local", "variability": "constant", "valueReference": 92, "start": 1},
+            {"name": "A", "type": "Float64", "causality": "parameter", "variability": "tunable", "valueReference": 41, "dimensions": [{"valueReference": 90}, {"valueReference": 91}], "start": [1.0, 0.0, 0.0, 1.0]},
+            {"name": "u", "type": "Float64", "causality": "input", "variability": "continuous", "valueReference": 42, "dimensions": [{"valueReference": 92}], "start": [0.0]},
+        ],
+    })
+    fmu_path = tmp_path / "proxy-local-dimension-constants.fmu"
+    with zipfile.ZipFile(fmu_path, "w") as archive:
+        archive.writestr("modelDescription.xml", xml_bytes)
+
+    model_description = read_model_description(str(fmu_path), validate=True)
+
+    assert [variable.name for variable in model_description.modelVariables] == ["time", "m", "n", "r", "A", "u"]
+
+
+def test_proxy_generation_supports_tunable_structural_dimension_parameters():
+    _validate_proxy_generation_supported({
+        "fmiVersion": "3.0",
+        "supportsCoSimulation": True,
+        "modelVariables": [
+            {"name": "n", "type": "UInt64", "causality": "structuralParameter", "variability": "tunable", "valueReference": 1, "start": 3},
+            {"name": "u", "type": "Float64", "causality": "input", "dimensions": [{"valueReference": 1}], "valueReference": 2},
+        ],
+    })
+
+
+def test_proxy_generation_supports_tunable_boolean_structural_parameters(tmp_path):
+    metadata = {
+        "modelName": "SimpleDAE",
+        "instantiationToken": "{simple-dae}",
+        "fmiVersion": "3.0",
+        "simulationKind": "modelExchange",
+        "supportsModelExchange": True,
+        "numberOfContinuousStates": 0,
+        "numberOfEventIndicators": 0,
+        "modelStructure": {"derivatives": [], "eventIndicators": []},
+        "modelVariables": [
+            {
+                "name": "time",
+                "type": "Float64",
+                "causality": "independent",
+                "variability": "continuous",
+                "valueReference": 0,
+            },
+            {
+                "name": "ODE_DAE_Switch",
+                "type": "Boolean",
+                "causality": "structuralParameter",
+                "variability": "tunable",
+                "valueReference": 7,
+                "start": False,
+            },
+            {
+                "name": "y",
+                "type": "Float64",
+                "causality": "output",
+                "variability": "continuous",
+                "valueReference": 8,
+                "start": 0.0,
+                "initial": "exact",
+            },
+        ],
+    }
+
+    _validate_proxy_generation_supported(metadata)
+    proxy_path = tmp_path / "proxy-simple-dae.fmu"
+    xml_bytes = _build_proxy_model_description_xml(metadata)
+    with zipfile.ZipFile(proxy_path, "w") as archive:
+        archive.writestr("modelDescription.xml", xml_bytes)
+    description = read_model_description(str(proxy_path), validate=True)
+
+    selector = next(variable for variable in description.modelVariables if variable.name == "ODE_DAE_Switch")
+    assert selector.type == "Boolean"
+    assert selector.causality == "structuralParameter"
+    assert selector.variability == "tunable"
+    assert selector.start == "false"
+
+
 def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
     xml_bytes = _build_proxy_model_description_xml({
         "modelName": "ProxyFmi3BinaryClock",
         "instantiationToken": "{proxy-guid}",
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
+        "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {
                 "name": "blob",
@@ -913,6 +1034,8 @@ def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
                 "type": "Clock",
                 "causality": "output",
                 "variability": "discrete",
+                "initial": "exact",
+                "intervalVariability": "triggered",
                 "valueReference": 12,
                 "start": True,
             },
@@ -929,6 +1052,46 @@ def test_proxy_model_description_generates_fmi3_binary_and_clock_variables():
     clock_el = root.find("./ModelVariables/Clock")
     assert clock_el is not None
     assert "start" not in clock_el.attrib
+    assert "initial" not in clock_el.attrib
+    assert clock_el.attrib["intervalVariability"] == "triggered"
+    co_simulation = root.find("./CoSimulation")
+    assert co_simulation is not None
+    assert co_simulation.attrib["hasEventMode"] == "true"
+
+
+def test_proxy_model_description_with_clock_passes_fmpy_validation(tmp_path):
+    from fmpy import read_model_description
+
+    xml_bytes = _build_proxy_model_description_xml({
+        "modelName": "ProxyFmi3Clock",
+        "instantiationToken": "{proxy-guid}",
+        "fmiVersion": "3.0",
+        "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
+        "capabilities": {"hasEventMode": True},
+        "modelVariables": [
+            {
+                "name": "time",
+                "type": "Float64",
+                "causality": "independent",
+                "variability": "continuous",
+                "valueReference": 1,
+            },
+            {
+                "name": "tick",
+                "type": "Clock",
+                "causality": "output",
+                "variability": "discrete",
+                "intervalVariability": "triggered",
+                "valueReference": 12,
+            },
+        ],
+    })
+    fmu_path = tmp_path / "proxy-clock.fmu"
+    with zipfile.ZipFile(fmu_path, "w") as archive:
+        archive.writestr("modelDescription.xml", xml_bytes)
+
+    read_model_description(str(fmu_path), validate=True)
 
 
 def test_proxy_model_description_binary_start_from_metadata_pipeline_is_hex_encoded():
@@ -962,6 +1125,7 @@ def test_validate_proxy_generation_supports_extended_fmi3_integer_types():
     metadata = {
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {"name": "i8", "type": "Int8", "valueReference": 1},
             {"name": "u8", "type": "UInt8", "valueReference": 2},
@@ -980,9 +1144,18 @@ def test_validate_proxy_generation_supports_fmi3_binary_and_clock_types():
     metadata = {
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
+        "capabilities": {"hasEventMode": True},
         "modelVariables": [
             {"name": "blob", "type": "Binary", "valueReference": 1},
-            {"name": "tick", "type": "Clock", "valueReference": 2},
+            {
+                "name": "tick",
+                "type": "Clock",
+                "causality": "output",
+                "variability": "discrete",
+                "intervalVariability": "triggered",
+                "valueReference": 2,
+            },
         ],
     }
 
@@ -993,6 +1166,7 @@ def test_validate_proxy_generation_rejects_dimensioned_clock_for_fmi3_proxy():
     metadata = {
         "fmiVersion": "3.0",
         "simulationKind": "coSimulation",
+        "supportsCoSimulation": True,
         "modelVariables": [
             {
                 "name": "tick",

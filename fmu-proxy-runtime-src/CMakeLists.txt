@@ -17,6 +17,7 @@ add_library(
   src/protocol.cpp
   src/runtime.cpp
   src/runtime_config.cpp
+  src/scalar_value_codec.cpp
   src/session_state.cpp
   src/transport.cpp
   src/transport_linux.cpp
@@ -91,6 +92,7 @@ set_target_properties(
 if(BUILD_TESTING)
   add_executable(
     decentralabs_proxy_unit_tests
+    src/fmi2_exports.cpp
     tests/unit_tests.cpp
   )
 

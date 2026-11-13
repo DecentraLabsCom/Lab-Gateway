@@ -17,6 +17,7 @@ def build_fmu_backend(
     health_loader: Any,
     model_metadata_loader: Any,
     list_loader: Any,
+    related_resources_loader: Any = None,
     logger: Any,
     station_backend_factory: Any = StationFmuBackend,
     local_metadata_backend_factory: Any = LocalFmuMetadataBackend,
@@ -55,6 +56,7 @@ def build_fmu_backend(
         health_loader=health_loader,
         model_metadata_loader=model_metadata_loader,
         list_loader=list_loader,
+        related_resources_loader=related_resources_loader,
     )
 
 

@@ -22,6 +22,65 @@ _MAX_EXPANDED_DEFINITION_ITEMS = 20_000
 _MAX_FORMULA_DEPTH = 12
 _MAX_FORMULA_NODES = 128
 _IDSHORT_UNSAFE_RE = re.compile(r"[^a-zA-Z0-9]+")
+_EXECUTION_INTERFACES = ("CoSimulation", "ModelExchange")
+
+
+def available_execution_interfaces(metadata: Mapping[str, Any]) -> list[str]:
+    """Return executable FMI interfaces declared by the current model metadata."""
+    raw_available = metadata.get("availableExecutionInterfaces")
+    if raw_available is None:
+        raw_available = [
+            name
+            for name, field in (
+                ("CoSimulation", "supportsCoSimulation"),
+                ("ModelExchange", "supportsModelExchange"),
+            )
+            if metadata.get(field) is True
+        ]
+        if not raw_available:
+            simulation_type = str(metadata.get("simulationType") or metadata.get("simulationKind") or "")
+            normalized_type = re.sub(r"[^a-z]", "", simulation_type.lower())
+            if normalized_type == "cosimulation":
+                raw_available = ["CoSimulation"]
+            elif normalized_type == "modelexchange":
+                raw_available = ["ModelExchange"]
+    if (
+        not isinstance(raw_available, list)
+        or any(not isinstance(name, str) or name not in _EXECUTION_INTERFACES for name in raw_available)
+        or len(raw_available) != len(set(raw_available))
+    ):
+        raise ValueError("FMU execution interface metadata is invalid")
+    return [name for name in _EXECUTION_INTERFACES if name in raw_available]
+
+
+def default_authorized_execution_interfaces(metadata: Mapping[str, Any]) -> list[str]:
+    """Default to CS for dual-interface FMUs; select the sole mode otherwise."""
+    available = available_execution_interfaces(metadata)
+    if not available:
+        raise ValueError("FMU has no executable FMI interface")
+    return ["CoSimulation"] if "CoSimulation" in available else ["ModelExchange"]
+
+
+def normalize_authorized_execution_interfaces(
+    metadata: Mapping[str, Any],
+    configured: Any = None,
+) -> list[str]:
+    """Validate the provider's AAS authorization against executable FMU modes."""
+    available = available_execution_interfaces(metadata)
+    if not available:
+        raise ValueError("FMU has no executable FMI interface")
+    if configured is None:
+        return default_authorized_execution_interfaces(metadata)
+    if (
+        not isinstance(configured, list)
+        or not configured
+        or len(configured) > len(_EXECUTION_INTERFACES)
+        or any(not isinstance(name, str) or name not in _EXECUTION_INTERFACES for name in configured)
+        or len(configured) != len(set(configured))
+        or any(name not in available for name in configured)
+    ):
+        raise ValueError("Authorized FMI execution interfaces are invalid for this FMU")
+    return [name for name in _EXECUTION_INTERFACES if name in configured]
 
 
 def _sanitize_idshort(value: str) -> str:
@@ -54,7 +113,11 @@ def fmi_interface_digest(metadata: Mapping[str, Any]) -> str:
             if field in variable
         })
     variables.sort(key=lambda variable: str(variable.get("name") or ""))
-    canonical = json.dumps(variables, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    interface = {
+        "executionInterfaces": available_execution_interfaces(metadata),
+        "variables": variables,
+    }
+    canonical = json.dumps(interface, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 

@@ -12,7 +12,13 @@ from typing import Any, Callable, Mapping
 
 import httpx
 
-from simulation_access_policy import build_effective_policy, compile_part4_access_rules
+from simulation_access_policy import (
+    available_execution_interfaces,
+    build_effective_policy,
+    compile_part4_access_rules,
+    fmi_interface_digest,
+    normalize_authorized_execution_interfaces,
+)
 
 
 _ACCESS_CONTROL_SEMANTIC_ID = "urn:decentralabs:aas:SimulationAccessControl:1"
@@ -47,6 +53,7 @@ class AasAccessPolicyResolver:
         self.cache_ttl_seconds = max(0.0, min(float(cache_ttl_seconds), 60.0))
         self.max_cache_entries = max(1, min(int(max_cache_entries), _MAX_CACHE_ENTRIES))
         self._cache: OrderedDict[str, tuple[float, dict[str, Any] | None]] = OrderedDict()
+        self._compiled_cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
 
     @staticmethod
     def _claim_text(claims: Mapping[str, Any], name: str) -> str:
@@ -289,12 +296,22 @@ class AasAccessPolicyResolver:
                     raise RuntimeError("AAS access rules Blob is invalid") from exc
                 interface_digest = self._property(submodel, "InterfaceDigest")
                 generated_digest = self._property(submodel, "GeneratedPolicyDigest")
+                raw_authorized_interfaces = self._property(submodel, "AuthorizedExecutionInterfaces")
+                try:
+                    authorized_interfaces = (
+                        json.loads(raw_authorized_interfaces)
+                        if raw_authorized_interfaces is not None
+                        else None
+                    )
+                except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise RuntimeError("AAS authorized execution interfaces are invalid") from exc
                 actual_blob_digest = hashlib.sha256(raw_rules).hexdigest()
                 source = "aas-generated" if generated_digest and generated_digest == actual_blob_digest else "aas-provider"
                 return {
                     "document": document,
                     "interfaceDigest": interface_digest,
                     "source": source,
+                    "authorizedExecutionInterfaces": authorized_interfaces,
                     "submodelId": str(submodel.get("id") or ""),
                     "referencedSubmodelIds": referenced_ids,
                 }
@@ -325,25 +342,83 @@ class AasAccessPolicyResolver:
     def invalidate(self, lab_id: str | None = None) -> None:
         if lab_id is None:
             self._cache.clear()
+            self._compiled_cache.clear()
             return
         prefix = f"{lab_id}:"
         for key in list(self._cache):
             if key.startswith(prefix):
                 self._cache.pop(key, None)
+        for key in list(self._compiled_cache):
+            if key.startswith(prefix):
+                self._compiled_cache.pop(key, None)
+
+    @staticmethod
+    def _claims_fingerprint(claims: Mapping[str, Any]) -> str | None:
+        try:
+            encoded = json.dumps(
+                dict(claims), ensure_ascii=False, sort_keys=True,
+                separators=(",", ":"), allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError):
+            return None
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _compiled_policy_get(
+        self,
+        key: str,
+        *,
+        policy_data_cached: bool,
+    ) -> dict[str, Any] | None:
+        if not policy_data_cached or self.cache_ttl_seconds <= 0:
+            return None
+        entry = self._compiled_cache.get(key)
+        if entry is None:
+            return None
+        expires_at, policy = entry
+        if expires_at <= time.monotonic():
+            self._compiled_cache.pop(key, None)
+            return None
+        self._compiled_cache.move_to_end(key)
+        return policy
+
+    def _compiled_policy_set(
+        self,
+        key: str,
+        policy: dict[str, Any],
+    ) -> None:
+        if self.cache_ttl_seconds <= 0:
+            return
+        self._compiled_cache[key] = (time.monotonic() + self.cache_ttl_seconds, policy)
+        self._compiled_cache.move_to_end(key)
+        while len(self._compiled_cache) > self.max_cache_entries:
+            self._compiled_cache.popitem(last=False)
 
     async def resolve(self, claims: Mapping[str, Any], metadata: Mapping[str, Any]) -> dict[str, Any]:
-        fallback = build_effective_policy(metadata)
         lab_id = self._claim_text(claims, "labId")
         access_key = self._claim_text(claims, "accessKey")
         if not lab_id or not access_key:
             raise RuntimeError("authorized FMU claims are incomplete")
+        metadata_digest = fmi_interface_digest(metadata)
+        claims_fingerprint = self._claims_fingerprint(claims)
         link = self._read_link(claims)
         target_id = link["aasId"] if link else f"urn:decentralabs:lab:{lab_id}"
         basyx_url = str(self.get_basyx_url() or "").rstrip("/")
         if not basyx_url:
             if link:
                 raise RuntimeError("linked AAS access policy is unavailable")
-            return fallback
+            compiled_key = (
+                f"{lab_id}:fmi-default:{claims_fingerprint}:{metadata_digest}"
+                if claims_fingerprint
+                else ""
+            )
+            if compiled_key:
+                compiled = self._compiled_policy_get(compiled_key, policy_data_cached=True)
+                if compiled is not None:
+                    return compiled
+            policy = self._fallback_policy(metadata)
+            if compiled_key:
+                self._compiled_policy_set(compiled_key, policy)
+            return policy
 
         cache_key = f"{lab_id}:{target_id}"
         cached, policy_data = self._cache_get(cache_key)
@@ -364,12 +439,25 @@ class AasAccessPolicyResolver:
             except FileNotFoundError as exc:
                 if link:
                     raise RuntimeError("linked AAS access policy is unavailable") from exc
-                return fallback
+                policy_data = None
             self._cache_set(cache_key, policy_data)
+
+        compiled_key = f"{cache_key}:{claims_fingerprint}:{metadata_digest}" if claims_fingerprint else ""
+        if compiled_key:
+            compiled = self._compiled_policy_get(
+                compiled_key,
+                policy_data_cached=cached,
+            )
+            if compiled is not None:
+                return compiled
+
         if policy_data is None:
-            return fallback
+            policy = self._fallback_policy(metadata)
+            if compiled_key:
+                self._compiled_policy_set(compiled_key, policy)
+            return policy
         try:
-            return compile_part4_access_rules(
+            policy = compile_part4_access_rules(
                 policy_data["document"],
                 metadata,
                 None,
@@ -378,12 +466,146 @@ class AasAccessPolicyResolver:
                 source=policy_data["source"],
                 allowed_submodel_ids=set(policy_data["referencedSubmodelIds"]),
             )
+            available_interfaces = available_execution_interfaces(metadata)
+            policy["availableExecutionInterfaces"] = available_interfaces
+            policy["authorizedExecutionInterfaces"] = normalize_authorized_execution_interfaces(
+                metadata,
+                policy_data.get("authorizedExecutionInterfaces"),
+            )
+            policy["aasPolicyPresent"] = True
+            if compiled_key:
+                self._compiled_policy_set(compiled_key, policy)
+            return policy
         except ValueError as exc:
             if "stale" in str(exc).lower():
                 raise RuntimeError("AAS FMI access policy is stale") from exc
             raise RuntimeError("AAS FMI access policy is invalid") from exc
         except (KeyError, TypeError) as exc:
             raise RuntimeError("AAS FMI access policy is invalid") from exc
+
+    @staticmethod
+    def _fallback_policy(metadata: Mapping[str, Any]) -> dict[str, Any]:
+        policy = build_effective_policy(metadata)
+        policy["availableExecutionInterfaces"] = available_execution_interfaces(metadata)
+        policy["authorizedExecutionInterfaces"] = normalize_authorized_execution_interfaces(metadata)
+        policy["aasPolicyPresent"] = False
+        return policy
+
+    async def update_authorized_execution_interfaces(
+        self,
+        claims: Mapping[str, Any],
+        metadata: Mapping[str, Any],
+        configured: Any,
+    ) -> list[str]:
+        """Persist a provider's FMI interface authorization in the linked AAS."""
+        lab_id = self._claim_text(claims, "labId")
+        if not lab_id:
+            raise ValueError("Authorized laboratory is missing")
+        available_interfaces = available_execution_interfaces(metadata)
+        if len(available_interfaces) < 2:
+            raise ValueError(
+                "FMI interface authorization is selectable only when the FMU "
+                "declares multiple executable interfaces"
+            )
+        interfaces = normalize_authorized_execution_interfaces(metadata, configured)
+        link = self._read_link(claims)
+        target_aas_id = link["aasId"] if link else f"urn:decentralabs:lab:{lab_id}"
+        hinted_submodel_ids = link["submodelIds"] if link else []
+        access_control_submodel_id = link["accessControlSubmodelId"] if link else None
+        basyx_url = str(self.get_basyx_url() or "").rstrip("/")
+        if not basyx_url:
+            raise RuntimeError("AAS access policy is unavailable")
+
+        try:
+            async with self.client_factory(
+                base_url=basyx_url,
+                headers=dict(self.get_request_headers()),
+                timeout=8.0,
+            ) as client:
+                shell_response = await client.get(f"/shells/{self._encode_id(target_aas_id)}")
+                if shell_response.status_code != 200:
+                    raise RuntimeError("Linked AAS shell cannot be updated")
+                shell = shell_response.json()
+                if not isinstance(shell, Mapping) or shell.get("id") != target_aas_id:
+                    raise RuntimeError("Linked AAS shell response is invalid")
+                referenced_ids = self._submodel_ids(shell)
+                candidates = (
+                    [access_control_submodel_id]
+                    if access_control_submodel_id
+                    else list(dict.fromkeys([*hinted_submodel_ids, *referenced_ids]))
+                )
+                matches = []
+                for submodel_id in candidates:
+                    if submodel_id not in referenced_ids:
+                        raise RuntimeError("AAS access-control submodel is outside the linked shell")
+                    response = await client.get(f"/submodels/{self._encode_id(submodel_id)}")
+                    if response.status_code == 404:
+                        continue
+                    if response.status_code != 200:
+                        raise RuntimeError("AAS access-control submodel cannot be read")
+                    payload = response.json()
+                    if not isinstance(payload, dict) or payload.get("id") != submodel_id:
+                        raise RuntimeError("AAS access-control submodel response is invalid")
+                    if self._is_access_control_submodel(payload, access_control_submodel_id):
+                        matches.append(payload)
+                if len(matches) != 1:
+                    raise RuntimeError("AAS must contain one linked access-control submodel")
+                submodel = matches[0]
+                self._find_access_blob(submodel)
+                elements = submodel.get("submodelElements")
+                if not isinstance(elements, list) or len(elements) > 128:
+                    raise RuntimeError("AAS access-control submodel is invalid")
+                mode_properties = [
+                    item for item in elements
+                    if isinstance(item, dict) and item.get("idShort") == "AuthorizedExecutionInterfaces"
+                ]
+                if len(mode_properties) > 1 or (
+                    mode_properties and mode_properties[0].get("modelType") != "Property"
+                ):
+                    raise RuntimeError("AAS authorized execution-interface property is invalid")
+                encoded = json.dumps(interfaces, separators=(",", ":"))
+                if mode_properties:
+                    mode_properties[0]["valueType"] = "xs:string"
+                    mode_properties[0]["value"] = encoded
+                else:
+                    elements.append({
+                        "idShort": "AuthorizedExecutionInterfaces",
+                        "semanticId": {
+                            "type": "ExternalReference",
+                            "keys": [{
+                                "type": "GlobalReference",
+                                "value": "urn:decentralabs:aas:SimulationAccessControl:AuthorizedExecutionInterfaces:1",
+                            }],
+                        },
+                        "modelType": "Property",
+                        "valueType": "xs:string",
+                        "value": encoded,
+                    })
+                try:
+                    serialized_submodel = json.dumps(
+                        submodel,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ).encode("utf-8")
+                except (TypeError, ValueError) as exc:
+                    raise RuntimeError("AAS access-control submodel is invalid") from exc
+                if len(serialized_submodel) > 2 * 1_048_576:
+                    raise RuntimeError("AAS access-control submodel exceeds its update size limit")
+                update = await client.put(
+                    f"/submodels/{self._encode_id(str(submodel.get('id') or ''))}",
+                    json=submodel,
+                    headers={"Content-Type": "application/json"},
+                )
+                if update.status_code not in (200, 201, 204):
+                    raise RuntimeError("AAS access-control submodel update failed")
+        except (httpx.RequestError, ValueError, RuntimeError) as exc:
+            if isinstance(exc, RuntimeError):
+                raise
+            raise RuntimeError("AAS access-control submodel update failed") from exc
+
+        self.invalidate(lab_id)
+        return interfaces
 
     async def inspect(self, claims: Mapping[str, Any], metadata: Mapping[str, Any]) -> dict[str, Any]:
         """Return an admin-safe policy status summary without exposing the rules."""
@@ -454,6 +676,10 @@ class AasAccessPolicyResolver:
             "regenerationAvailable": managed and state in {"generated", "customized", "fmi-default"},
             "readableVariableCount": readable_count,
             "writableVariableCount": writable_count,
+            "availableExecutionInterfaces": policy.get("availableExecutionInterfaces", []),
+            "authorizedExecutionInterfaces": policy.get("authorizedExecutionInterfaces", []),
+            "executionInterfaceSelectionAvailable": len(policy.get("availableExecutionInterfaces", [])) > 1,
+            "executionInterfacePolicyEditable": policy.get("aasPolicyPresent") is True,
         }
 
 

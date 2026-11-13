@@ -68,7 +68,7 @@ BLOCKCHAIN_MYSQL_USER=blockchain_app
 OPS_BACKEND_MYSQL_USER=ops_backend
 OPS_GUACAMOLE_MYSQL_USER=ops_guac
 OPS_SECRETS_KEY=<stable-fernet-key>
-STATION_MANAGEMENT_CIDRS=10.7.74.0/24
+STATION_MANAGEMENT_CIDRS=10.192.38.0/24
 OPS_WINRM_TRUST_PATH=/app/data/winrm-certificates
 
 # Guacamole admin (do not use 'guacadmin' in production)
@@ -88,17 +88,26 @@ CORS_ALLOWED_ORIGINS=https://www.decentralabs-marketplace.app
 FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
 ```
 
-`STATION_MANAGEMENT_CIDRS` is the private management-network allowlist for the
-Ops Worker to reach configured Lab Stations. Windows v2 uses WinRM HTTPS on
-port 5986; Linux v3 uses SSH on the host's configured port. It is required
-before configuring any Ops host, and every configured Station address must
-belong to one of these networks. `WINRM_MANAGEMENT_CIDRS` remains a compatibility
-alias. This value is a security policy, not a value inferred from Guacamole:
+`STATION_MANAGEMENT_CIDRS` contains the destination networks of the Lab Station
+addresses that Ops Worker is allowed to manage. Every configured Station
+address must resolve within one of these networks. This is not the Gateway's
+source subnet and is not necessarily the
+same as `WOL_LAN_SUBNET`; a route only shows how to reach an address, not which
+network should be authorized. Set the actual Station network(s) for each
+Gateway; they may differ between Gateways and several CIDRs can be comma
+separated. This allowlist is required before configuring any Ops host. Windows Stations use
+WinRM HTTPS on port 5986; Lab Manager provisions new Windows hosts with Station
+Contract v3 by default and keeps v2 available for legacy Stations. Linux v3
+uses SSH on the host's configured port. If a host is entered directly in the
+static catalog, set
+`contract.major` to `3` for a current Station or `2` for a legacy Station.
+`WINRM_MANAGEMENT_CIDRS` remains a compatibility alias for existing deployments.
+This value is a security policy, not a value inferred from Guacamole:
 Guacamole may also contain administration-only desktop connections and does
 not provide the authorized network mask.
 
-Use the actual management VLAN CIDR. If only one Station is authorized, use a
-host-specific `/32`, for example:
+Use the actual Station network CIDR(s) for this Gateway. If only one Station
+is authorized, use a host-specific `/32`, for example:
 
 ```env
 STATION_MANAGEMENT_CIDRS=10.192.38.82/32
@@ -107,6 +116,37 @@ STATION_MANAGEMENT_CIDRS=10.192.38.82/32
 For several Stations on the same `/24`, use that actual subnet instead, for
 example `10.192.38.0/24`. On a Lite gateway, configure the CIDR of the local
 Stations managed by that Lite gateway.
+
+### Optional Linux physical Station LAN overlay
+
+If the Linux Gateway's physical NIC reaches the Station VLAN and `guacd` needs
+direct RDP access or `ops-worker` needs WoL/management access, enable the
+macvlan overlay in `.env`:
+
+```env
+COMPOSE_FILE=docker-compose.yml:docker-compose.wol.yml
+WOL_LAN_PARENT=eno3
+WOL_LAN_SUBNET=10.192.38.0/24
+WOL_LAN_IP_RANGE=10.192.38.240/28
+WOL_LAN_GUACD_IPV4=10.192.38.241
+WOL_LAN_OPS_WORKER_IPV4=10.192.38.242
+# WOL_LAN_GATEWAY=10.192.38.1
+```
+
+Exclude `WOL_LAN_IP_RANGE` from the dynamic pool of the actual DHCP server,
+whether that is the router or `dnsmasq` running on the Gateway host. Docker IPAM
+does not coordinate with DHCP, and neither Compose nor `setup.sh` modifies that
+service. Check leases before changing an existing pool. For example, with a
+`/24` subnet and `WOL_LAN_IP_RANGE=10.192.38.240/28`, reserve hosts `.240–.254`
+for macvlan and end the DHCP pool at `.239` or earlier; `.255` is broadcast. If
+`dnsmasq` loads `/etc/dnsmasq.d` through `conf-dir`, keep backup files outside
+that directory. Choose two distinct unused host addresses inside the reserved
+range for `guacd` and `ops-worker`. Compose pins them so the RDP and WinRM source
+addresses remain stable after container recreation. `WOL_LAN_GATEWAY` is
+optional for an isolated VLAN; if configured,
+it must be the Station VLAN router. The overlay is Linux-only and preserves
+the services' existing private Compose networks. Validate it with
+`docker compose config --quiet` before starting the stack.
 
 For a Full gateway, configure the credentials used by opaque access-code
 redemption and FMU session observation. The JSON values must be valid JSON
@@ -310,6 +350,21 @@ before running `docker compose`.
 If you run the stack through `sudo`, preserve the deployment account's
 `HOST_UID` and `HOST_GID`; do not silently replace them with root's IDs.
 
+Ops Worker also needs to read the public Station Contract v3 schemas from its
+read-only bind mount. On Linux/macOS, set the repository permissions before
+starting Compose (repeat after an update if the checkout no longer has these
+modes):
+
+```bash
+chmod 755 contracts contracts/station contracts/station/v3
+chmod 644 contracts/station/v3/*.json
+```
+
+If the repository files are owned by root, run these commands with `sudo`.
+The setup script repairs these permissions automatically. If you change them
+on a running manual deployment, restart the worker with
+`docker compose restart ops-worker`.
+
 ## Step 6 — Add SSL certificates
 
 **Production** — place your CA-issued or Let's Encrypt certificates here:
@@ -386,7 +441,7 @@ docker compose --profile fmu-runner up -d --build
 
 For development-only FMU execution, use `fmu-local-dev` instead; never start
 both FMU profiles. The profile pulls the shared FMU Executor image configured
-by `FMU_EXECUTOR_IMAGE` (default `ghcr.io/decentralabscom/fmu-executor:0.3.4`)
+by `FMU_EXECUTOR_IMAGE` (default `ghcr.io/decentralabscom/fmu-executor:0.3.10`)
 and delegates execution to it. No additional repository clone is needed. Set
 the local mode explicitly in `.env`:
 
@@ -399,10 +454,12 @@ cancellation, and the new history routes.
 FMU_RUNNER_ENABLED=true
 FMU_BACKEND_MODE=local
 FMU_LOCAL_DEV_MODE=true
+AAS_ENABLED=true
+COMPOSE_PROFILES=fmu-local-dev,aas
 ```
 
 ```bash
-docker compose --profile fmu-local-dev up -d --build openresty fmu-runner-local
+docker compose --profile fmu-local-dev --profile aas up -d --build openresty fmu-runner-local
 ```
 
 The local runner needs `secrets/session_observer_signing_secret`, generated

@@ -6,6 +6,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,7 +20,7 @@ namespace decentralabs::proxy {
 
 struct ExperimentConfig {
     double start_time = 0.0;
-    double stop_time = 1.0;
+    std::optional<double> stop_time;
     double step_size = 0.01;
 };
 
@@ -30,6 +31,8 @@ struct OutputSnapshot {
     bool event_handling_needed = false;
     bool terminate_simulation = false;
     bool finished = false;
+    bool next_event_time_defined = false;
+    std::optional<double> next_event_time;
 };
 
 class GatewayClient {
@@ -40,8 +43,17 @@ public:
     OperationResult Initialize(const RuntimeConfig& config,
                                const ExperimentConfig& experiment,
                                const std::map<std::string, ScalarValue>& initial_inputs,
-                               bool early_return_allowed = false);
-    OperationResult SetInputs(const std::map<std::string, ScalarValue>& values);
+                               const std::map<std::string, ScalarValue>& initial_parameters,
+                               bool early_return_allowed = false,
+                               bool model_exchange = false,
+                               bool defer_initialization_exit = false);
+    OperationResult ExitInitializationMode();
+    OperationResult TerminateFmu();
+    ValueResult<JsonObject> ModelExchangeCall(const std::string& operation,
+                                              const JsonObject& arguments = {});
+    OperationResult Reconfigure(const std::map<std::string, ScalarValue>& values);
+    OperationResult SetInputs(const std::map<std::string, ScalarValue>& values,
+                              bool* terminate_simulation = nullptr);
     ValueResult<OutputSnapshot> Step(double delta_t);
     ValueResult<OutputSnapshot> Step(double current_time, double delta_t);
     ValueResult<OutputSnapshot> Advance(
@@ -49,6 +61,10 @@ public:
         double delta_t,
         const std::map<std::string, ScalarValue>& input_values);
     ValueResult<OutputSnapshot> GetOutputs(const std::vector<std::string>& variables);
+    ValueResult<JsonObject> CaptureFmuState();
+    ValueResult<OutputSnapshot> RestoreFmuState(
+        const JsonObject& checkpoint,
+        const std::vector<std::string>& variables);
     OperationResult Reset();
     OperationResult Terminate();
 

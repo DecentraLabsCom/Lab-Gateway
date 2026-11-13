@@ -18,6 +18,15 @@ typedef void (*fmi2CallbackFreeMemory)(void* obj);
 typedef void (*fmi2StepFinished)(fmi2ComponentEnvironment componentEnvironment, fmi2Status status);
 
 typedef struct {
+    fmi2Boolean newDiscreteStatesNeeded;
+    fmi2Boolean terminateSimulation;
+    fmi2Boolean nominalsOfContinuousStatesChanged;
+    fmi2Boolean valuesOfContinuousStatesChanged;
+    fmi2Boolean nextEventTimeDefined;
+    fmi2Real nextEventTime;
+} fmi2EventInfo;
+
+typedef struct {
     fmi2CallbackLogger logger;
     fmi2CallbackAllocateMemory allocateMemory;
     fmi2CallbackFreeMemory freeMemory;

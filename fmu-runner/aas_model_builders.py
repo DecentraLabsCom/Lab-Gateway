@@ -10,10 +10,16 @@ import platform
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Optional, Sequence
 from urllib.parse import urlsplit
 
-from simulation_access_policy import build_part4_access_rules, fmi_interface_digest
+from simulation_access_policy import (
+    build_effective_policy,
+    build_part4_access_rules,
+    default_authorized_execution_interfaces,
+    fmi_interface_digest,
+)
+from fmi_ls_struct import normalize_fmi_ls_struct
 
 FMU_DATA_PATH = os.getenv("FMU_DATA_PATH", "/app/fmu-data")
 
@@ -38,9 +44,17 @@ _SEMANTIC_ID_ARBITRARY = "https://admin-shell.io/SMT/General/Arbitrary"
 
 _SEMANTIC_ID_SIMULATION_ACCESS_CONTROL = "urn:decentralabs:aas:SimulationAccessControl:1"
 
+_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES = "urn:decentralabs:aas:FmiLsRelatedResources:1"
+
+_SEMANTIC_ID_FMI_LS_STRUCT = "urn:decentralabs:aas:FmiLsStruct:1"
+
 _SEMANTIC_ID_ACCESS_INTERFACE_DIGEST = "urn:decentralabs:aas:SimulationAccessControl:InterfaceDigest:1"
 
 _SEMANTIC_ID_ACCESS_GENERATED_DIGEST = "urn:decentralabs:aas:SimulationAccessControl:GeneratedPolicyDigest:1"
+
+_SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES = (
+    "urn:decentralabs:aas:SimulationAccessControl:AuthorizedExecutionInterfaces:1"
+)
 
 _SIMULATION_SEMANTICS = {
     "summary": "https://admin-shell.io/idta/SimulationModels/Summary/1/0",
@@ -75,6 +89,8 @@ _SIMULATION_SEMANTICS = {
 _FMI_VARIABLE_METADATA_EXTENSION = "decentralabs.fmi.variableMetadata.v1"
 
 _MAX_FMI_VARIABLE_METADATA_BYTES = 262_144
+_FMI_MODEL_DESCRIPTION_EXTENSION = "decentralabs.fmi.modelDescription.v1"
+_MAX_FMI_MODEL_DESCRIPTION_METADATA_BYTES = 1_048_576
 
 def _validate_lab_id(lab_id: str) -> str:
     """Return a lab identifier safe to embed in an AAS resource identifier."""
@@ -103,6 +119,12 @@ def _submodel_id_for_contact(lab_id: str) -> str:
 
 def _submodel_id_for_handover(lab_id: str) -> str:
     return f"urn:decentralabs:lab:{lab_id}:sm:handoverDocumentation"
+
+def _submodel_id_for_fmi_ls_related_resources(lab_id: str) -> str:
+    return f"urn:decentralabs:lab:{lab_id}:sm:fmiLsRelatedResources"
+
+def _submodel_id_for_fmi_ls_struct(lab_id: str) -> str:
+    return f"urn:decentralabs:lab:{lab_id}:sm:fmiLsStruct"
 
 def _submodel_id_for_access_control(lab_id: str) -> str:
     return f"urn:decentralabs:lab:{lab_id}:sm:simulationAccessControl"
@@ -245,8 +267,11 @@ def _fmi_variable_metadata_extension(variable: dict) -> Optional[dict]:
     Extension carries FMI-specific details that the template cannot express.
     """
     metadata_fields = (
-        "type", "causality", "valueReference", "variability", "initial", "start", "nominal",
+        "type", "causality", "valueReference", "alias", "aliasOf", "aliases", "variability", "initial", "start", "nominal",
         "quantity", "displayName", "displayUnit", "dimensions", "enumItems", "declaredType",
+        "mimeType", "maxSize", "relativeQuantity", "unbounded", "canBeDeactivated",
+        "priority", "intervalDecimal", "shiftDecimal", "supportsFraction", "resolution",
+        "intervalCounter", "shiftCounter",
     )
     metadata = {
         field: variable[field]
@@ -268,11 +293,97 @@ def _fmi_variable_metadata_extension(variable: dict) -> Optional[dict]:
     if not metadata:
         return None
 
+    # FMI 3 contains unsigned 64-bit metadata such as array extents and binary
+    # limits. Keep values outside JavaScript's exact integer range as decimal
+    # strings inside this JSON extension.
+    wide_integer_fields = {"maxSize", "resolution", "intervalCounter", "shiftCounter"}
+    for field in wide_integer_fields:
+        value = metadata.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and abs(value) > (2**53 - 1):
+            metadata[field] = str(value)
+    if isinstance(metadata.get("enumItems"), list):
+        enum_items = [dict(item) for item in metadata["enumItems"] if isinstance(item, dict)]
+        for item in enum_items:
+            value = item.get("value")
+            if isinstance(value, int) and not isinstance(value, bool) and abs(value) > (2**53 - 1):
+                item["value"] = str(value)
+        metadata["enumItems"] = enum_items
+    if isinstance(metadata.get("dimensions"), list):
+        dimensions = [dict(dimension) for dimension in metadata["dimensions"] if isinstance(dimension, dict)]
+        for dimension in dimensions:
+            value = dimension.get("start")
+            if isinstance(value, int) and not isinstance(value, bool) and value > (2**53 - 1):
+                dimension["start"] = str(value)
+        metadata["dimensions"] = dimensions
+
     encoded = json.dumps(metadata, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     if len(encoded.encode("utf-8")) > _MAX_FMI_VARIABLE_METADATA_BYTES:
         raise ValueError("FMI variable metadata exceeds the AAS extension size limit")
     return {
         "name": _FMI_VARIABLE_METADATA_EXTENSION,
+        "valueType": "xs:string",
+        "value": encoded,
+    }
+
+
+def _fmi_model_description_extension(metadata: dict) -> Optional[dict]:
+    """Keep model-level FMI metadata that IDTA 02005 has no standard field for."""
+    fields = (
+        "fmiVersion", "modelName", "description", "author", "version", "copyright", "license",
+        "generationTool", "generationDateAndTime", "variableNamingConvention", "defaultStartTime", "defaultStopTime",
+        "defaultStepSize", "defaultTolerance", "timeUnit", "numberOfContinuousStates", "numberOfEventIndicators",
+        "supportsCoSimulation", "supportsModelExchange", "capabilities", "modelExchangeCapabilities",
+        "modelStructure", "unitDefinitions", "typeDefinitions",
+    )
+    model_description = {
+        field: metadata[field]
+        for field in fields
+        if field in metadata and metadata[field] is not None and metadata[field] != ""
+    }
+    # JSON numbers above JavaScript's exact integer range would be rounded by
+    # AAS clients. Keep 64-bit FMI integer bounds as decimal strings so the
+    # source value remains recoverable across the AAS/Marketplace boundary.
+    integer_type_names = {"Integer", "Enumeration", "Int8", "UInt8", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64"}
+    wide_integer_fields = {"maxSize", "resolution", "intervalCounter", "shiftCounter"}
+    raw_type_definitions = model_description.get("typeDefinitions")
+    if isinstance(raw_type_definitions, list):
+        model_description["typeDefinitions"] = [
+            dict(declared_type) for declared_type in raw_type_definitions if isinstance(declared_type, dict)
+        ]
+    for declared_type in model_description.get("typeDefinitions", []) or []:
+        if not isinstance(declared_type, dict):
+            continue
+        integer_fields = wide_integer_fields
+        if declared_type.get("type") in integer_type_names:
+            integer_fields = wide_integer_fields | {"min", "max"}
+        if isinstance(declared_type.get("items"), list):
+            declared_type["items"] = [
+                dict(item) for item in declared_type["items"] if isinstance(item, dict)
+            ]
+        for field in integer_fields:
+            value = declared_type.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and abs(value) > (2**53 - 1):
+                declared_type[field] = str(value)
+        if isinstance(declared_type.get("items"), list):
+            for item in declared_type["items"]:
+                if not isinstance(item, dict):
+                    continue
+                value = item.get("value")
+                if isinstance(value, int) and not isinstance(value, bool) and abs(value) > (2**53 - 1):
+                    item["value"] = str(value)
+    if not model_description:
+        return None
+
+    encoded = json.dumps(model_description, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > _MAX_FMI_MODEL_DESCRIPTION_METADATA_BYTES and "modelStructure" in model_description:
+        # Keep large dependency graphs available from the reservation-bound
+        # FMU metadata route without making an AAS sync fail on extension size.
+        model_description.pop("modelStructure", None)
+        encoded = json.dumps(model_description, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    if len(encoded.encode("utf-8")) > _MAX_FMI_MODEL_DESCRIPTION_METADATA_BYTES:
+        raise ValueError("FMI model-description metadata exceeds the AAS extension size limit")
+    return {
+        "name": _FMI_MODEL_DESCRIPTION_EXTENSION,
         "valueType": "xs:string",
         "value": encoded,
     }
@@ -291,6 +402,7 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
         variable_elements = []
         for var in connector_variables:
             variable_name = str(var.get("name") or "Variable")
+            variable_causality = var.get("causality", "local")
             variable_value = [
                 _standard_property(
                     "VariableName", "xs:string", variable_name, _SIMULATION_SEMANTICS["variable_name"]
@@ -300,7 +412,7 @@ def build_simulation_ports(variables: list[dict]) -> list[dict]:
                     _SIMULATION_SEMANTICS["variable_type"],
                 ),
                 _standard_property(
-                    "VariableCausality", "xs:string", _fmi_causality_to_idta(causality),
+                    "VariableCausality", "xs:string", _fmi_causality_to_idta(variable_causality),
                     _SIMULATION_SEMANTICS["variable_causality"],
                 ),
             ]
@@ -375,6 +487,7 @@ def build_simulation_access_control_submodel(
     ).encode("utf-8")
     digest = fmi_interface_digest(metadata)
     generated_digest = hashlib.sha256(encoded_rules).hexdigest()
+    authorized_interfaces = default_authorized_execution_interfaces(metadata)
     return {
         "id": _submodel_id_for_access_control(lab_id),
         "idShort": "SimulationAccessControl",
@@ -388,6 +501,12 @@ def build_simulation_access_control_submodel(
             _standard_property(
                 "GeneratedPolicyDigest", "xs:string", generated_digest,
                 _SEMANTIC_ID_ACCESS_GENERATED_DIGEST,
+            ),
+            _standard_property(
+                "AuthorizedExecutionInterfaces",
+                "xs:string",
+                json.dumps(authorized_interfaces, separators=(",", ":")),
+                _SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES,
             ),
             {
                 "idShort": "AllAccessPermissionRules",
@@ -589,6 +708,8 @@ def build_simulation_submodel(
         "idShort": "SimulationModels",
         "semanticId": _semantic_id(_SEMANTIC_ID_SIMULATION_MODELS),
         "modelType": "Submodel",
+        **({"extensions": [model_description_extension]}
+           if (model_description_extension := _fmi_model_description_extension(metadata)) else {}),
         "submodelElements": [
             {
                 "idShort": "SimulationModel",
@@ -610,7 +731,26 @@ def build_execution_capabilities_submodel(
     metadata = metadata or {}
     supports_cosimulation = bool(metadata.get("supportsCoSimulation"))
     supports_model_exchange = bool(metadata.get("supportsModelExchange"))
-    can_run_batch = supports_cosimulation or supports_model_exchange
+    supports_fmi_ls_dae = metadata.get("supportsFmiLsDae") is True
+    supports_execution = metadata.get("supportsExecution")
+    if not isinstance(supports_execution, bool):
+        supports_execution = supports_cosimulation or supports_model_exchange or supports_fmi_ls_dae
+    fmi_capabilities = metadata.get("capabilities")
+    fmi_capabilities = fmi_capabilities if isinstance(fmi_capabilities, dict) else {}
+    supports_fmu_state = (
+        supports_execution
+        and (
+            fmi_capabilities.get("canGetAndSetFMUstate") is True
+            or fmi_capabilities.get("canGetAndSetFMUState") is True
+        )
+        and (
+            fmi_capabilities.get("canSerializeFMUstate") is True
+            or fmi_capabilities.get("canSerializeFMUState") is True
+        )
+    )
+    # Model Exchange sources use the same reservation-authorized API; the
+    # Executor owns numerical integration remotely.
+    can_run_batch = supports_execution
 
     capability_names: list[tuple[str, str]] = []
     if can_run_batch:
@@ -619,20 +759,34 @@ def build_execution_capabilities_submodel(
             ("CancelSimulation", "Cancel a reservation-authorized batch FMU simulation."),
         ])
 
-    if supports_cosimulation:
+    if supports_execution:
+        execution_interface = metadata.get("executionInterface")
+        if execution_interface not in {"CoSimulation", "ModelExchange"}:
+            execution_interface = "CoSimulation" if supports_cosimulation else "ModelExchange"
+        session_kind = "FMI Co-Simulation" if execution_interface == "CoSimulation" else "FMI Model Exchange"
         capability_names.extend([
-            ("CreateRealtimeSession", "Create an authenticated FMI Co-Simulation session."),
-            ("Initialize", "Initialize a co-simulation session."),
-            ("Start", "Start a co-simulation session."),
-            ("Pause", "Pause a co-simulation session."),
-            ("Resume", "Resume a co-simulation session."),
-            ("Reset", "Reset a co-simulation session."),
-            ("Step", "Advance a co-simulation session by one communication step."),
-            ("RunUntil", "Advance a co-simulation session to a target time."),
-            ("SetInputs", "Set FMI input values in a co-simulation session."),
-            ("GetOutputs", "Read FMI output values from a co-simulation session."),
-            ("TerminateSession", "Terminate a co-simulation session."),
+            ("CreateRealtimeSession", f"Create an authenticated {session_kind} session."),
+            ("Initialize", f"Initialize a {session_kind} session."),
+            ("Start", f"Start a {session_kind} session."),
+            ("Pause", f"Pause a {session_kind} session."),
+            ("Resume", f"Resume a {session_kind} session."),
+            ("Reset", f"Reset a {session_kind} session."),
+            ("Step", f"Advance a {session_kind} session by one step."),
+            ("RunUntil", f"Advance a {session_kind} session to a target time."),
+            ("SetInputs", f"Set FMI input values in a {session_kind} session."),
+            ("GetOutputs", f"Read FMI output values from a {session_kind} session."),
+            ("TerminateSession", f"Terminate a {session_kind} session."),
         ])
+        if supports_fmi_ls_dae:
+            capability_names.append((
+                "FmiLsDae",
+                "FMI 3 Model Exchange with the supported FMI-LS-DAE profile, integrated by the provider runtime.",
+            ))
+        if supports_fmu_state:
+            capability_names.extend([
+                ("CaptureFMUState", "Capture a serialized FMI model state."),
+                ("RestoreFMUState", "Restore a serialized FMI model state."),
+            ])
 
     containers = []
     for name, description in capability_names:
@@ -648,7 +802,6 @@ def build_execution_capabilities_submodel(
             }],
         })
 
-    fmi_capabilities = metadata.get("capabilities") or {}
     if fmi_capabilities:
         property_containers = []
         for name, value in fmi_capabilities.items():
@@ -683,7 +836,7 @@ def build_execution_capabilities_submodel(
                     "idShort": "FMISimulation",
                     "semanticId": _semantic_id("https://admin-shell.io/idta/CapabilityDescription/Capability/1/0"),
                     "modelType": "Capability",
-                    "description": [{"language": "en", "text": "FMI capabilities reported by the simulation model."}],
+                    "description": [{"language": "en", "text": "FMI source capabilities reported by the FMU; execution availability depends on the DecentraLabs runtime."}],
                 },
                 {
                     "idShort": "PropertySet_FMICapabilities",
@@ -843,8 +996,32 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
         (url, "License terms" if url == license_value else f"Documentation {index + 1}", "application/octet-stream")
         for index, url in enumerate(dict.fromkeys(urls))
     ]
+    digital_twin_assets = (extra_info or {}).get("digitalTwinAssets")
+    if not isinstance(digital_twin_assets, list):
+        digital_twin_assets = []
+    for asset in digital_twin_assets:
+        if not isinstance(asset, dict):
+            continue
+        asset_url = str(asset.get("url") or "").strip()
+        content_type = str(asset.get("contentType") or "").split(";", 1)[0].strip().lower()
+        if not asset_url or content_type not in {"text/html", "model/gltf-binary"}:
+            continue
+        app_asset = content_type == "text/html"
+        if (app_asset and not re.fullmatch(
+            rf"/digital-twin-apps/{re.escape(str(lab_id))}/[a-f0-9]{{64}}/index\.html",
+            asset_url,
+        )) or (not app_asset and not re.fullmatch(
+            rf"/digital-twin-scenes/{re.escape(str(lab_id))}/[a-f0-9]{{64}}\.glb",
+            asset_url,
+        )):
+            continue
+        document_specs.append((
+            asset_url,
+            "Three.js digital twin application" if app_asset else "Digital twin GLB scene",
+            content_type,
+        ))
     asset_url = str((extra_info or {}).get("digitalTwinAssetUrl") or "").strip()
-    if asset_url:
+    if asset_url and all(spec[0] != asset_url for spec in document_specs):
         app_asset = urlsplit(asset_url).path.startswith("/digital-twin-apps/")
         document_specs.append((
             asset_url,
@@ -932,6 +1109,267 @@ def build_handover_documentation_submodel(lab_id: str, extra_info: Optional[dict
             "typeValueListElement": "SubmodelElementCollection",
             "value": documents,
         }],
+    }
+
+
+def build_fmi_ls_related_resources_submodel(
+    lab_id: str,
+    related_resources: Optional[dict],
+) -> Optional[dict]:
+    """Project embedded FMI-LS-REF resource descriptors into a versioned AAS submodel."""
+    if not isinstance(related_resources, dict):
+        return None
+    manifest_name = str(related_resources.get("manifestName") or "").strip()
+    if manifest_name != "org.fmi-standard.fmi-ls-ref":
+        return None
+
+    def property_element(id_short: str, name: str, value: object, value_type: str = "xs:string") -> dict:
+        return _standard_property(
+            id_short,
+            value_type,
+            value,
+            f"{_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES}:{name}",
+        )
+
+    resource_elements: list[dict] = []
+    used_id_shorts: set[str] = set()
+    raw_resources = related_resources.get("resources")
+    if isinstance(raw_resources, list):
+        for resource in raw_resources[:128]:
+            if not isinstance(resource, dict):
+                continue
+            source = str(resource.get("source") or "").strip()
+            parsed_source = urlsplit(source)
+            if (
+                not source
+                or len(source) > 2048
+                or "\\" in source
+                or "\x00" in source
+                or source.startswith("/")
+                or parsed_source.scheme
+                or parsed_source.netloc
+                or parsed_source.query
+                or parsed_source.fragment
+            ):
+                continue
+
+            role = str(resource.get("role") or "").strip()[:128]
+            media_type = str(resource.get("type") or "").strip()[:256]
+            description = str(resource.get("description") or "").strip()[:2048]
+            digest = hashlib.sha256(f"{role}\0{media_type}\0{source}".encode("utf-8")).hexdigest()[:24]
+            id_short = f"RelatedResource_{digest}"
+            suffix = 2
+            while id_short in used_id_shorts:
+                id_short = f"RelatedResource_{digest}_{suffix}"
+                suffix += 1
+            used_id_shorts.add(id_short)
+
+            labels = []
+            raw_labels = resource.get("labels")
+            if isinstance(raw_labels, list):
+                for label_index, label in enumerate(raw_labels[:32]):
+                    if not isinstance(label, dict):
+                        continue
+                    label_name = str(label.get("name") or "").strip()[:256]
+                    if not label_name:
+                        continue
+                    label_description = str(label.get("description") or "").strip()[:1024]
+                    labels.append({
+                        "idShort": f"Label_{label_index + 1}",
+                        "modelType": "SubmodelElementCollection",
+                        "value": [
+                            property_element("Name", "LabelName", label_name),
+                            *([property_element("Description", "LabelDescription", label_description)] if label_description else []),
+                        ],
+                    })
+
+            fields = [
+                property_element("Role", "Role", role),
+                property_element("MediaType", "MediaType", media_type),
+                property_element("Source", "Source", source),
+                property_element(
+                    "AvailableInFmu",
+                    "AvailableInFmu",
+                    str(resource.get("availableInFmu") is True).lower(),
+                    "xs:boolean",
+                ),
+            ]
+            if description:
+                fields.append(property_element("Description", "Description", description))
+            if labels:
+                fields.append({
+                    "idShort": "Labels",
+                    "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES}:Labels"),
+                    "modelType": "SubmodelElementList",
+                    "typeValueListElement": "SubmodelElementCollection",
+                    "value": labels,
+                })
+            resource_elements.append({
+                "idShort": id_short,
+                "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES}:RelatedResource"),
+                "modelType": "SubmodelElementCollection",
+                "value": fields,
+            })
+
+    submodel_elements = [
+        property_element("ManifestName", "ManifestName", manifest_name),
+    ]
+    manifest_version = str(related_resources.get("manifestVersion") or "").strip()[:64]
+    if manifest_version:
+        submodel_elements.append(property_element("ManifestVersion", "ManifestVersion", manifest_version))
+    submodel_elements.append({
+        "idShort": "Resources",
+        "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES}:Resources"),
+        "modelType": "SubmodelElementList",
+        "typeValueListElement": "SubmodelElementCollection",
+        "value": resource_elements,
+    })
+    return {
+        "id": _submodel_id_for_fmi_ls_related_resources(lab_id),
+        "idShort": "FmiLsRelatedResources",
+        "semanticId": _semantic_id(_SEMANTIC_ID_FMI_LS_RELATED_RESOURCES),
+        "modelType": "Submodel",
+        "submodelElements": submodel_elements,
+    }
+
+
+def _readable_fmi_variable_names(metadata: dict) -> set[str]:
+    try:
+        policy = build_effective_policy(metadata or {})
+    except (TypeError, ValueError):
+        return set()
+    return {
+        name
+        for name, permission in policy.get("variables", {}).items()
+        if isinstance(name, str) and isinstance(permission, dict) and permission.get("read") is True
+    }
+
+
+def build_fmi_ls_struct_submodel(
+    lab_id: str,
+    fmi_ls_struct: Optional[dict],
+    *,
+    readable_variable_names: Optional[set[str]] = None,
+) -> Optional[dict]:
+    """Project STRUCT map declarations to AAS without copying map values."""
+    normalized_struct = normalize_fmi_ls_struct(fmi_ls_struct)
+    if normalized_struct is None:
+        return None
+    manifest_version = normalized_struct["manifestVersion"]
+    raw_maps = normalized_struct["maps"]
+    if not raw_maps:
+        return None
+
+    def property_element(id_short: str, name: str, value: object) -> dict:
+        return _standard_property(
+            id_short,
+            "xs:string",
+            value,
+            f"{_SEMANTIC_ID_FMI_LS_STRUCT}:{name}",
+        )
+
+    maps = []
+    seen_map_names: set[str] = set()
+    total_members = 0
+    for map_index, raw_map in enumerate(raw_maps[:128]):
+        if not isinstance(raw_map, dict):
+            continue
+        name = str(raw_map.get("name") or "").strip()[:256]
+        terminal_kind = str(raw_map.get("terminalKind") or "").strip()[:256]
+        matching_rule = str(raw_map.get("matchingRule") or "").strip()[:256]
+        raw_members = raw_map.get("members")
+        if (
+            not name
+            or name in seen_map_names
+            or terminal_kind not in {
+                "org.fmi-standard.fmi-ls-struct.map.rectilinearGrid",
+                "org.fmi-standard.fmi-ls-struct.map.irregular",
+            }
+            or matching_rule != "org.fmi-standard.fmi-ls-struct.map"
+            or not isinstance(raw_members, list)
+        ):
+            continue
+
+        if readable_variable_names is not None and any(
+            not isinstance(member, dict) or member.get("variableName") not in readable_variable_names
+            for member in raw_members
+        ):
+            continue
+
+        members = []
+        member_names: set[str] = set()
+        member_variables: set[str] = set()
+        for member_index, raw_member in enumerate(raw_members[:512]):
+            if not isinstance(raw_member, dict):
+                continue
+            variable_name = str(raw_member.get("variableName") or "").strip()[:512]
+            member_name = str(raw_member.get("memberName") or "").strip()[:256]
+            variable_kind = str(raw_member.get("variableKind") or "").strip()[:256]
+            ordering = raw_member.get("orderingConstraint")
+            if (
+                not variable_name or not member_name or not variable_kind
+                or member_name in member_names or variable_name in member_variables
+                or (ordering is not None and ordering not in {
+                    "unordered", "increasing", "decreasing", "strictlyIncreasing", "strictlyDecreasing",
+                })
+            ):
+                continue
+            fields = [
+                property_element("VariableName", "VariableName", variable_name),
+                property_element("MemberName", "MemberName", member_name),
+                property_element("VariableKind", "VariableKind", variable_kind),
+            ]
+            if ordering is not None and variable_kind == "org.fmi-standard.fmi-ls-struct.map.domain" and terminal_kind.endswith("rectilinearGrid"):
+                fields.append(property_element("OrderingConstraint", "OrderingConstraint", ordering))
+            members.append({
+                "idShort": f"Member_{member_index + 1}",
+                "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_STRUCT}:Member"),
+                "modelType": "SubmodelElementCollection",
+                "value": fields,
+            })
+            member_names.add(member_name)
+            member_variables.add(variable_name)
+        if not members or total_members + len(members) > 4096:
+            continue
+        maps.append({
+            "idShort": f"Map_{map_index + 1}",
+            "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_STRUCT}:Map"),
+            "modelType": "SubmodelElementCollection",
+            "value": [
+                property_element("Name", "MapName", name),
+                property_element("TerminalKind", "TerminalKind", terminal_kind),
+                property_element("MatchingRule", "MatchingRule", matching_rule),
+                {
+                    "idShort": "Members",
+                    "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_STRUCT}:Members"),
+                    "modelType": "SubmodelElementList",
+                    "typeValueListElement": "SubmodelElementCollection",
+                    "value": members,
+                },
+            ],
+        })
+        seen_map_names.add(name)
+        total_members += len(members)
+
+    if not maps:
+        return None
+
+    return {
+        "id": _submodel_id_for_fmi_ls_struct(lab_id),
+        "idShort": "FmiLsStruct",
+        "semanticId": _semantic_id(_SEMANTIC_ID_FMI_LS_STRUCT),
+        "modelType": "Submodel",
+        "submodelElements": [
+            property_element("ManifestName", "ManifestName", "org.fmi-standard.fmi-ls-struct"),
+            property_element("ManifestVersion", "ManifestVersion", manifest_version),
+            {
+                "idShort": "Maps",
+                "semanticId": _semantic_id(f"{_SEMANTIC_ID_FMI_LS_STRUCT}:Maps"),
+                "modelType": "SubmodelElementList",
+                "typeValueListElement": "SubmodelElementCollection",
+                "value": maps,
+            },
+        ],
     }
 
 def _non_negative_int(value: object) -> str:
@@ -1039,6 +1477,7 @@ def build_aas_shell(
     metadata: dict,
     extra_info: Optional[dict] = None,
     extra_submodel_ids: Sequence[str] = (),
+    fmi_ls_resources: Optional[dict] = None,
 ) -> dict:
     """Build the AAS shell JSON for BaSyx V2.
 
@@ -1052,14 +1491,20 @@ def build_aas_shell(
         _submodel_id_for_technical(lab_id),
     ]
     metadata = metadata or {}
-    supports_execution = bool(
-        metadata.get("supportsCoSimulation")
-        or metadata.get("supportsModelExchange")
-        or metadata.get("capabilities")
-    )
+    supports_execution = metadata.get("supportsExecution")
+    if not isinstance(supports_execution, bool):
+        supports_execution = bool(
+            metadata.get("supportsCoSimulation")
+            or metadata.get("supportsModelExchange")
+            or metadata.get("supportsFmiLsDae")
+        )
     if supports_execution:
         all_sm_ids.append(_submodel_id_for_execution(lab_id))
-    if metadata.get("supportsCoSimulation") or metadata.get("supportsModelExchange"):
+    if (
+        metadata.get("supportsCoSimulation")
+        or metadata.get("supportsModelExchange")
+        or metadata.get("supportsFmiLsDae")
+    ):
         all_sm_ids.append(_submodel_id_for_interfaces(lab_id))
     if isinstance(metadata.get("modelVariables"), list):
         all_sm_ids.append(_submodel_id_for_access_control(lab_id))
@@ -1069,8 +1514,17 @@ def build_aas_shell(
         _documentation_urls(extra_info)
         or str((extra_info or {}).get("license") or "").strip().startswith(("http://", "https://"))
         or str((extra_info or {}).get("digitalTwinAssetUrl") or "").strip()
+        or bool((extra_info or {}).get("digitalTwinAssets"))
     ):
         all_sm_ids.append(_submodel_id_for_handover(lab_id))
+    if build_fmi_ls_related_resources_submodel(lab_id, fmi_ls_resources) is not None:
+        all_sm_ids.append(_submodel_id_for_fmi_ls_related_resources(lab_id))
+    if build_fmi_ls_struct_submodel(
+        lab_id,
+        metadata.get("fmiLsStruct"),
+        readable_variable_names=_readable_fmi_variable_names(metadata),
+    ) is not None:
+        all_sm_ids.append(_submodel_id_for_fmi_ls_struct(lab_id))
     all_sm_ids.extend(extra_submodel_ids)
 
     shell = {

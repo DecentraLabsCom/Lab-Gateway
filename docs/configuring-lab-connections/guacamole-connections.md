@@ -48,6 +48,57 @@ flowchart LR
 - Keep the target host and its management interfaces private. The connection
   target does not need a public IP address.
 
+### Windows Lab Station firewall scopes
+
+The Lab Station setup wizard requires separate source scopes for RDP and
+WinRM. Configure the RDP scope for the address or CIDR that the station sees
+for Guacamole/`guacd` connections. Configure WinRM HTTPS for the Gateway Ops
+Worker source. The browser user's public IP is not the RDP source. Account for
+any Docker routing or NAT between the Gateway and the station. The station
+allows RDP on TCP `3389`, WinRM over HTTPS on TCP `5986`, and blocks WinRM HTTP
+on TCP `5985`.
+
+### Guacamole file transfer
+
+For Windows stations that need browser-to-lab file transfer, enable **Drive**
+on the RDP connection and set a descriptive drive name, such as `LAB`.
+Configure **Drive path** as a directory in the filesystem available to
+`guacd`; it is not a path on the Windows station. Guacamole requires this
+directory to be readable and writable by the `guacd` process. Leave upload and
+download enabled when both transfer directions are part of the workflow. See
+the [Guacamole RDP connection parameters](https://guacamole.apache.org/doc/gug/configuring-guacamole.html).
+With the dedicated Lab Station `server` profile, test an upload and a download
+through the RemoteApp workflow. That profile hides local drive letters and
+restricts Explorer-style drive navigation; verify that the Guacamole virtual
+share remains usable in the application dialogs.
+
+The current Gateway Compose service does not mount persistent transfer storage
+into `guacd` (it only defines a temporary `/tmp`). Mount a durable transfer
+directory into `guacd` before relying on stored uploads across container
+recreation, then use its in-container path for **Drive path**.
+
+The `drive-name` is a visible label; set it to `LAB` for clarity or leave it
+blank to use Guacamole's default name. Guacamole also supports parameter
+tokens in connection values. In this Gateway's reservation flow, the
+temporary Guacamole username is `dlabs-res-<sessionId>`, so setting
+**Drive path** to `/tmp/${GUAC_USERNAME}` resolves to a distinct directory for
+each reservation while keeping one shared RDP connection. `GUAC_USERNAME` is
+the Guacamole login name, not the Windows RDP username `LABUSER`.
+
+Set **Create drive path** to `true` so Guacamole creates each per-user
+directory; its parent (`/tmp` here) must already exist. The tokenized path is a
+supported configuration, but the current Gateway provisioner does not set
+these connection parameters itself. Configure them on the Guacamole
+connection. See the [Guacamole session policy](../guacamole-session-policy.md)
+for reservation identity and cleanup behavior.
+
+In the current Compose file, `/tmp` in `guacd` is a `128M` `tmpfs`. All
+reservations share that capacity, and its contents are temporary. Use this
+location only when that size and lifetime fit the transfer workflow. For
+larger or durable files, mount a dedicated storage directory into `guacd` and
+use a path under that mount; define how expired reservation directories are
+pruned.
+
 ## Create the connection
 
 1. Open `https://<gateway>/guacamole/` and sign in with the Guacamole
@@ -88,16 +139,27 @@ prepares the Windows host and cleans the session, while Guacamole launches
 | --- | --- |
 | Program | The Lab Station launcher, for example `AppControl.exe`, or its full path. |
 | Working directory | The folder that contains the Lab Station executable. |
-| Parameters | Lab Station window-class and application-path arguments, followed by any lab-application-specific arguments. |
+| Parameters, one application | The existing `AppControl.exe` form: window class, executable path, and optional application arguments. |
+| Parameters, workspace | `@workspace=<id>`, where `<id>` names an administrator-managed manifest on the station. |
+
+The single-application form is unchanged. A workspace manifest defines two to
+five applications in tabs and is stored at
+`%ProgramData%\DecentraLabs\Lab Station\RemoteApp\workspaces\<id>.json`.
+Run `LabStation.exe remoteapp` or the setup wizard as an administrator to
+create and protect the manifest directory before adding workspace files.
+`LABUSER` receives read-only access. See the Lab Station
+[AppControl guide](https://github.com/DecentraLabsCom/Lab-Station/blob/main/remote-app/README.md)
+for the manifest fields and limitations.
 
 Do not rely on Lab Station Windows Run entries to launch AppControl. A plain
 desktop RDP connection is suitable for station diagnostics or maintenance; an
 end-user laboratory connection must provide the Remote App parameters so the
 application starts inside the Guacamole session.
 
-Use the [Lab Station documentation](https://github.com/DecentraLabsCom/Lab-Station/blob/main/README.md)
-to determine the exact window class and supported launch parameters. Test this
-configuration with the dedicated lab account, not an administrator account.
+Use the [Lab Station documentation](https://github.com/DecentraLabsCom/Lab-Station/blob/main/remote-app/README.md)
+to determine the exact window class or workspace ID and supported launch
+parameters. Test this configuration with the dedicated lab account, not an
+administrator account.
 
 ## Validate and publish
 

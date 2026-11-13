@@ -12,6 +12,7 @@ from typing import Any, NotRequired, TypedDict, cast
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from catalog_router import filter_authorized_experiments, filter_authorized_parameter_sets
 from fmu_backend import BaseFmuBackend
 
 
@@ -88,6 +89,8 @@ def create_preview_router(
     *,
     ensure_aas_policy: Any = None,
     get_access_policy: Any = None,
+    get_authorized_parameter_sets: Any = None,
+    get_authorized_experiments: Any = None,
     stream_simulation: Any = None,
 ):
     router = APIRouter()
@@ -108,6 +111,28 @@ def create_preview_router(
             raise HTTPException(503, "Local AAS access policy is unavailable")
         return claims, policy
 
+    async def access_payload(claims: PreviewClaims, policy: dict[str, Any]) -> dict[str, Any]:
+        if get_access_policy is None:
+            raise HTTPException(503, "Local FMU access metadata is unavailable")
+        result = await get_access_policy(claims, policy)
+        if not isinstance(result, dict):
+            raise HTTPException(503, "Local FMU access metadata is unavailable")
+        raw_presets = (
+            await get_authorized_parameter_sets(claims=claims)
+            if get_authorized_parameter_sets is not None
+            else []
+        )
+        raw_experiments = (
+            await get_authorized_experiments(claims=claims)
+            if get_authorized_experiments is not None
+            else {"resourceSets": [], "truncated": False}
+        )
+        return {
+            **result,
+            "fmiLsParameterPresets": filter_authorized_parameter_sets(raw_presets, policy),
+            "fmiLsExperiments": filter_authorized_experiments(raw_experiments, policy),
+        }
+
     @router.post("/internal/dev/fmu/connection")
     async def connection(body: PreviewRequest, x_local_preview_token: str = Header(default="")):
         require_internal_token(x_local_preview_token)
@@ -119,12 +144,7 @@ def create_preview_router(
     async def access(body: PreviewRequest, x_local_preview_token: str = Header(default="")):
         require_internal_token(x_local_preview_token)
         claims, policy = await prepare_preview(body.accessKey)
-        if get_access_policy is None:
-            raise HTTPException(503, "Local FMU access metadata is unavailable")
-        result = await get_access_policy(claims, policy)
-        if not isinstance(result, dict):
-            raise HTTPException(503, "Local FMU access metadata is unavailable")
-        return result
+        return await access_payload(claims, policy)
 
     @router.get("/internal/dev/fmu/access")
     async def access_from_gateway_headers(
@@ -133,27 +153,31 @@ def create_preview_router(
     ):
         require_internal_token(x_local_preview_token)
         claims, policy = await prepare_preview(x_fmu_access_key)
-        if get_access_policy is None:
-            raise HTTPException(503, "Local FMU access metadata is unavailable")
-        result = await get_access_policy(claims, policy)
-        if not isinstance(result, dict):
-            raise HTTPException(503, "Local FMU access metadata is unavailable")
-        return result
+        return await access_payload(claims, policy)
 
     @router.post("/internal/dev/fmu/simulations/stream")
     async def stream(
         request: Request,
         x_local_preview_token: str = Header(default=""),
         x_fmu_access_key: str = Header(default=""),
+        authorization: str = Header(default=""),
     ):
         require_internal_token(x_local_preview_token)
-        claims, policy = await prepare_preview(x_fmu_access_key)
         if stream_simulation is None:
             raise HTTPException(503, "Local FMU simulation is unavailable")
         try:
             payload = await request.json()
         except Exception as exc:
             raise HTTPException(400, "Simulation request must be valid JSON") from exc
+        if authorization.startswith("Bearer preview_"):
+            lab_id = payload.get("labId") if isinstance(payload, dict) else None
+            reservation_key = payload.get("reservationKey") if isinstance(payload, dict) else None
+            if not isinstance(lab_id, str) or not isinstance(reservation_key, str):
+                raise HTTPException(400, "A local preview ticket requires its lab and reservation identity")
+            ticket_claims = tickets.redeem(authorization[7:].strip(), lab_id, reservation_key)
+            claims, policy = await prepare_preview(ticket_claims["accessKey"])
+        else:
+            claims, policy = await prepare_preview(x_fmu_access_key)
         return await stream_simulation(request, payload, claims, policy)
 
     return router

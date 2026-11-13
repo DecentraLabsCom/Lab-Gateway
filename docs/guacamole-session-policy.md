@@ -64,6 +64,43 @@ Reservation users are temporary users provisioned as `dlabs-res-...`.
 - Active desktop connections are terminated when the JWT/reservation expires.
 - Refreshing `/guacamole/` works while the JTI cookie/JWT remains valid; after expiration, OpenResty rejects the session.
 
+The temporary `dlabs-res-...` principal is a Guacamole identity. It receives
+permission to use the selected existing connection; it does not create a
+reservation-specific Windows account. For a Lab Station connection, the RDP
+credentials (including `LABUSER`) and RemoteApp parameters come from that
+connection.
+
+RemoteApp parameters and the selected workspace are connection-scoped. The
+current reservation provisioner grants each temporary Guacamole user access to
+the selected existing connection; it does not create a reservation-specific
+RemoteApp configuration or Windows workspace. Therefore, reservations using
+the same connection launch the same `AppControl.exe` parameters and workspace
+manifest. To assign different applications or a different workspace to each
+reservation, the Gateway would need to select or provision a separate
+Guacamole connection for each workspace.
+
+Guacamole's `drive-path` is a connection parameter, and Guacamole supports
+per-user tokens in connection parameter values. With **Drive path** set to
+`/tmp/${GUAC_USERNAME}`, Guacamole resolves a separate path for each
+reservation user because the provisioner names those users
+`dlabs-res-<sessionId>`. Set **Create drive path** to `true` to create the
+directory on first use. This allows per-reservation transfer directories on a
+shared RDP connection; a separate temporary connection is not required.
+
+The current provisioner creates the temporary Guacamole user and grants
+`READ` on the selected connection. It does not set the connection's drive
+parameters or delete the resulting transfer directory when the temporary user
+is removed. Configure the tokenized path on the Guacamole connection and
+define cleanup for expired directories. With the current Gateway Compose
+configuration, these directories are under the `128M` temporary `/tmp` mount
+in `guacd`; all reservations share that capacity, and container recreation
+clears the files.
+
+This only describes Guacamole's redirected transfer drive. All these RDP
+sessions still use the Windows account configured on the shared connection,
+so the Windows profile and any local folders writable by that account are not
+isolated by the temporary Guacamole usernames.
+
 ## Demo Sessions and Reservation Overlap
 
 Demo access is disabled unless `DEMO_LAB_ID` and `DEMO_CONNECTION_ID` are

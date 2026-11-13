@@ -94,6 +94,7 @@
             provision.provisionHostMac.value = draft.mac || '';
             provision.provisionHostBroadcast.value = draft.broadcast || '';
             if (provision.provisionHostPlatform) provision.provisionHostPlatform.value = draft.platform || 'windows';
+            if (provision.provisionContractMajor) provision.provisionContractMajor.value = String(draft.contract?.major || 3);
             if (provision.provisionManagementPort) provision.provisionManagementPort.value = draft.management?.port || draft.management_port || (draft.platform === 'linux' ? 22 : 5986);
             if (provision.provisionProfile) provision.provisionProfile.value = draft.profile || 'dedicated';
             if (provision.provisionStationCommand) provision.provisionStationCommand.value = draft.station?.command || '/usr/bin/labstationctl';
@@ -105,6 +106,7 @@
         function updateProvisionFields() {
             const isLinux = fields.provisionHostPlatform?.value === 'linux';
             if (fields.provisionLabstationPath?.closest('.field')) fields.provisionLabstationPath.closest('.field').hidden = isLinux;
+            if (fields.provisionContractMajor?.closest('.field')) fields.provisionContractMajor.closest('.field').hidden = isLinux;
             ['provisionManagementPort', 'provisionProfile', 'provisionStationCommand'].forEach(key => {
                 const input = fields[key];
                 if (input?.closest('.field')) input.closest('.field').hidden = !isLinux;
@@ -141,6 +143,9 @@
                 stationCommand: provision.provisionStationCommand?.value.trim() || '/usr/bin/labstationctl',
                 labstationPath: provision.provisionLabstationPath?.value.trim() || '',
             };
+            if (payload.platform === 'windows' && provision.provisionContractMajor) {
+                payload.contractMajor = Number(provision.provisionContractMajor.value || 3);
+            }
             if (payload.platform === 'windows' && !payload.labstationPath) {
                 showToast('Lab Station path is required', 'error');
                 return;
@@ -269,6 +274,111 @@
             credentials.credentialsModal.classList.add('show');
         }
 
+        function quotePosixArgument(value) {
+            return "'" + String(value).replace(/'/g, "'\\''") + "'";
+        }
+
+        function buildSshSetupCommands(profile, port, publicKey) {
+            const quotedProfile = quotePosixArgument(profile);
+            const quotedPublicKey = quotePosixArgument(publicKey);
+            return {
+                portable: 'sudo sh ./install.sh --profile ' + quotedProfile
+                    + ' --management-public-key ' + quotedPublicKey,
+                existing: 'sudo labstationctl setup --profile ' + quotedProfile
+                    + ' --ssh-port ' + port + ' --management-public-key ' + quotedPublicKey,
+            };
+        }
+
+        function buildSshCredentialPrompt(host, username, commands) {
+            return [
+                'Install this public key for ' + username + ' on ' + host + '. The public key is prefilled below.',
+                'Portable bundle (first installation): run from the extracted bundle directory:',
+                commands.portable,
+                'The installer detects the SSH port automatically; do not add --ssh-port.',
+                'Existing installation (for example, installed from a .deb/.rpm package):',
+                commands.existing,
+                'The private key remains encrypted in Lab Gateway.',
+            ].join('\n\n');
+        }
+
+        function showSshCredentialInstructions(host, credential, meta) {
+            const username = credential.username || 'labstation-ops';
+            const publicKey = String(credential.publicKey || '').trim();
+            const profile = meta.profile || 'dedicated';
+            const port = Number(meta.managementPort) || 22;
+            const commands = buildSshSetupCommands(profile, port, publicKey);
+            const dialog = fields.sshCredentialSetupDialog;
+            const hostLabel = fields.sshCredentialSetupHost;
+            const userLabel = fields.sshCredentialSetupUser;
+            const publicKeyCode = fields.sshCredentialPublicKey;
+            const portableCommandCode = fields.sshCredentialPortableCommand;
+            const existingCommandCode = fields.sshCredentialExistingCommand;
+
+            if (!dialog || typeof dialog.showModal !== 'function'
+                || !hostLabel || !userLabel || !publicKeyCode
+                || !portableCommandCode || !existingCommandCode) {
+                if (typeof promptImpl === 'function') {
+                    promptImpl(buildSshCredentialPrompt(host, username, commands), publicKey);
+                }
+                return;
+            }
+
+            hostLabel.textContent = host;
+            userLabel.textContent = username;
+            publicKeyCode.textContent = publicKey;
+            portableCommandCode.textContent = commands.portable;
+            existingCommandCode.textContent = commands.existing;
+            if (dialog.open) dialog.close();
+            dialog.showModal();
+        }
+
+        async function copyTextToClipboard(value) {
+            const clipboard = root.navigator?.clipboard;
+            if (clipboard && typeof clipboard.writeText === 'function') {
+                try {
+                    await clipboard.writeText(value);
+                    return;
+                } catch (_error) {
+                    // Fall back to the selection-based copy path below.
+                }
+            }
+
+            const textarea = documentImpl.createElement('textarea');
+            textarea.value = value;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-10000px';
+            documentImpl.body.appendChild(textarea);
+            textarea.select();
+            let copied = false;
+            try {
+                copied = Boolean(documentImpl.execCommand?.('copy'));
+            } finally {
+                textarea.remove();
+            }
+            if (!copied) throw new Error('Clipboard access is unavailable');
+        }
+
+        function bindCredentialCopyButton(button, valueElement, label) {
+            if (!button || !valueElement) return;
+            const originalButtonLabel = button.textContent;
+            button.addEventListener('click', async () => {
+                const value = valueElement.textContent || '';
+                if (!value) return;
+                try {
+                    await copyTextToClipboard(value);
+                    button.textContent = 'Copied';
+                    showToast(label + ' copied to clipboard', 'success');
+                    if (typeof root.setTimeout === 'function') {
+                        root.setTimeout(() => { button.textContent = originalButtonLabel; }, 1400);
+                    }
+                } catch (err) {
+                    logger.warn('SSH setup text could not be copied', err);
+                    showToast('Copy failed. Select the visible text and copy it manually.', 'error');
+                }
+            });
+        }
+
         async function manageSshCredential(host, credentialRef) {
             try {
                 let response = await fetchImpl(`/ops/api/station/credentials/${encodeURIComponent(credentialRef)}`);
@@ -282,11 +392,25 @@
                     credential = await response.json().catch(() => ({}));
                 }
                 if (!response.ok) throw new Error(credential.error || `HTTP ${response.status}`);
-                if (credential.publicKey && typeof promptImpl === 'function') {
+                if (credential.publicKey && fields.sshCredentialSetupDialog) {
+                    showSshCredentialInstructions(host, credential, hostMetadata[host] || {});
+                } else if (credential.publicKey && typeof promptImpl === 'function') {
                     const meta = hostMetadata[host] || {};
                     const profile = meta.profile || 'dedicated';
                     const port = Number(meta.managementPort) || 22;
-                    promptImpl(`Install this public key for ${credential.username || 'labstation-ops'} on ${host}. Run: sudo labstationctl setup --profile ${profile} --ssh-port ${port} --management-public-key '<key>'. The private key remains encrypted in Gateway.`, credential.publicKey);
+                    promptImpl(
+                        `Install this public key for ${credential.username || 'labstation-ops'} on ${host}. The key is prefilled below; copy it into the command for your installation type.
+
+Portable bundle (first installation): from the extracted bundle directory, run:
+sudo sh ./install.sh --profile ${profile} --management-public-key '<key>'
+The installer installs the payload and invokes labstationctl setup, which detects the SSH port automatically. Do not add --ssh-port.
+
+Existing installation (for example, installed from a .deb/.rpm package):
+sudo labstationctl setup --profile ${profile} --ssh-port ${port} --management-public-key '<key>'
+
+The private key remains encrypted in Gateway.`,
+                        credential.publicKey,
+                    );
                 }
                 showToast(`SSH management key ready for ${host}`, 'success');
                 await loadHostInventory({ skipAuthPrompt: true });
@@ -296,22 +420,73 @@
             }
         }
 
+        bindCredentialCopyButton(
+            fields.copySshCredentialPublicKey,
+            fields.sshCredentialPublicKey,
+            'Public key',
+        );
+        bindCredentialCopyButton(
+            fields.copySshCredentialPortableCommand,
+            fields.sshCredentialPortableCommand,
+            'Portable install command',
+        );
+        bindCredentialCopyButton(
+            fields.copySshCredentialExistingCommand,
+            fields.sshCredentialExistingCommand,
+            'Setup command',
+        );
+
+        function requestSshTrustConfirmation(host, preview) {
+            const message = [
+                'On the target Linux lab station\'s local console, run this command to display its SSH host-key fingerprint (not on Gateway):',
+                'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256',
+                'Compare the SHA256:... value printed by the command with the fingerprint below. Continue only if every character matches exactly.',
+                `Host: ${host}`,
+                `Key algorithm: ${preview.algorithm}`,
+                `SHA-256 fingerprint: ${preview.fingerprint}`,
+                'Trust this SSH host key and verify the Station Contract v3 identity?',
+            ].join('\n\n');
+            const dialog = fields.sshTrustConfirmDialog;
+            const hostLabel = fields.sshTrustConfirmHost;
+            const algorithmLabel = fields.sshTrustConfirmAlgorithm;
+            const fingerprintLabel = fields.sshTrustConfirmFingerprint;
+
+            if (!dialog || typeof dialog.showModal !== 'function'
+                || !hostLabel || !algorithmLabel || !fingerprintLabel) {
+                return Promise.resolve(Boolean(confirmImpl(message)));
+            }
+            if (dialog.open) return Promise.resolve(false);
+
+            hostLabel.textContent = host;
+            algorithmLabel.textContent = preview.algorithm;
+            fingerprintLabel.textContent = preview.fingerprint;
+            dialog.returnValue = '';
+
+            return new Promise((resolve, reject) => {
+                const onClose = () => resolve(dialog.returnValue === 'trust');
+                dialog.addEventListener('close', onClose, { once: true });
+                try {
+                    dialog.showModal();
+                } catch (err) {
+                    dialog.removeEventListener('close', onClose);
+                    reject(err);
+                }
+            });
+        }
+
         async function manageSshTrust(host) {
             try {
                 const previewResponse = await fetchImpl(`/ops/api/station/hosts/${encodeURIComponent(host)}/trust/preview`, { method: 'POST' });
                 const preview = await previewResponse.json().catch(() => ({}));
                 if (!previewResponse.ok) throw new Error(preview.error || `HTTP ${previewResponse.status}`);
-                const confirmation = promptImpl(
-                    `Verify this SSH host fingerprint out of band, then enter it exactly to trust ${host}:\n${preview.algorithm}\n${preview.fingerprint}`,
-                    '',
-                );
-                if (confirmation !== preview.fingerprint) {
+                const confirmed = await requestSshTrustConfirmation(host, preview);
+                if (!confirmed) {
                     showToast(`SSH host-key confirmation cancelled for ${host}`, 'warning');
                     return;
                 }
                 const response = await fetchImpl(`/ops/api/station/hosts/${encodeURIComponent(host)}/trust/confirm`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fingerprint: confirmation }),
+                    body: JSON.stringify({ fingerprint: preview.fingerprint }),
                 });
                 const body = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);

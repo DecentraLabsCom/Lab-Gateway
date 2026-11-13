@@ -11,6 +11,7 @@ from fastapi import HTTPException
 import pytest
 
 import fmu_aas_generator as aas
+from aas_model_builders import build_simulation_ports
 import auth
 
 
@@ -76,7 +77,7 @@ def test_fmu_digest_finds_nested_file_and_ignores_unsafe_or_missing_names(tmp_pa
 
 
 def test_simulation_ports_render_all_optional_metadata():
-    ports = aas.build_simulation_ports(
+    ports = build_simulation_ports(
         [
             {
                 "name": "force",

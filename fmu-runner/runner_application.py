@@ -35,6 +35,8 @@ from fmu_path_resolver import (
     _is_within_base,
     resolve_fmu_path as _resolve_fmu_path_impl,
 )
+from fmi_ls_ref import read_related_resources as _read_fmi_ls_related_resources
+from fmi_ls_struct import read_fmi_ls_struct
 from backend_factory import build_fmu_backend as _build_fmu_backend_impl
 from execution_adapters import (
     reject_unsupported_remote_operation as _reject_unsupported_remote_operation_adapter,
@@ -47,6 +49,7 @@ from local_fmu_catalog import (
 )
 from metadata import (
     _display_unit_inverse_map_from_fmu,
+    _merge_raw_fmi_type_metadata,
     _model_metadata_from_model_description,
     _normalize_xml_value,
     _parse_fmi_major_version,
@@ -78,7 +81,6 @@ from session_ticket_service import (
     redeem_session_ticket as _redeem_session_ticket_service,
 )
 from session_ticket_transport import (
-    build_session_ticket_headers as _build_session_ticket_headers_transport,
     post_session_ticket_request as _post_session_ticket_request_transport,
 )
 from session_ticket_values import normalize_ticket_id as _normalize_ticket_id_value
@@ -89,6 +91,7 @@ from session_observation_service import (
     confirm_session_started as _confirm_session_started_service,
     confirm_session_started_with_retries as _confirm_session_started_with_retries,
     record_browser_session_started as _record_browser_session_started_service,
+    record_redeemed_session_started as _record_redeemed_session_started_service,
 )
 from session_observer_auth import (
     SessionObserverConfigurationError,
@@ -96,6 +99,7 @@ from session_observer_auth import (
 )
 from runner_runtime import create_fmu_runner_runtime
 from simulation_request import SimulationRequest
+from fmu_state_capabilities import normalize_fmu_state_capabilities
 from simulation_access_policy import filter_fmi_values, filter_model_description
 from config import (
     _default_access_audit_url as _default_access_audit_url_value,
@@ -120,7 +124,7 @@ from aas_access_policy_resolver import AasAccessPolicyResolver
 from proxy_router import create_proxy_router
 from local_preview import PreviewTickets, create_preview_router
 from local_preview_aasx import LocalPreviewAasxRegistry
-from digital_twin_assets_router import create_digital_twin_assets_router
+from digital_twin_assets_router import create_digital_twin_assets_router, store_local_preview_assets
 
 FMU_DATA_PATH = CONFIG.fmu_data_path
 _DIGITAL_TWIN_ASSETS_PATH = CONFIG.digital_twin_assets_path
@@ -248,6 +252,14 @@ async def _catalog_get_authorized_model_metadata(
     )
 
 
+async def _catalog_get_authorized_parameter_sets(*, claims: dict):
+    return await _runner_runtime.backend.get_authorized_parameter_sets(claims=claims)
+
+
+async def _catalog_get_authorized_experiments(*, claims: dict):
+    return await _runner_runtime.backend.get_authorized_experiments(claims=claims)
+
+
 async def _simulation_access_model_metadata(claims: dict) -> dict:
     """Read trusted FMI metadata once when the Executor session is created."""
     filename = str(claims.get("accessKey") or claims.get("fmuFileName") or "").strip()
@@ -266,11 +278,16 @@ async def _simulation_effective_access_policy_for_metadata(claims: dict, metadat
         if not isinstance(metadata, dict) or not isinstance(metadata.get("modelVariables"), list):
             raise ValueError("authorized FMI metadata is invalid")
         policy = await _get_aas_access_policy_resolver().resolve(claims, metadata)
+        effective_policy = dict(policy)
         public_metadata = _public_model_metadata(metadata)
-        visible_description = filter_model_description(policy, public_metadata)
-        policy["modelDescription"] = visible_description
-        policy["modelVariables"] = visible_description.get("modelVariables", [])
-        return policy
+        visible_description = filter_model_description(effective_policy, public_metadata)
+        effective_policy["modelDescription"] = visible_description
+        effective_policy["modelVariables"] = visible_description.get("modelVariables", [])
+        if "fmiLsStruct" in visible_description:
+            effective_policy["fmiLsStruct"] = visible_description["fmiLsStruct"]
+        else:
+            effective_policy.pop("fmiLsStruct", None)
+        return effective_policy
     except HTTPException:
         raise
     except Exception as exc:
@@ -333,11 +350,30 @@ async def _aas_fmu_model_metadata(access_key: str):
     )
 
 
+async def _aas_fmu_related_resources(access_key: str) -> dict[str, Any]:
+    return await _runner_runtime.backend.get_authorized_related_resources(
+        claims={"accessKey": access_key},
+    )
+
+
 async def _aas_sync_access_policy_status(lab_id: str, access_key: str) -> dict:
     metadata = await _aas_fmu_model_metadata(access_key)
     return await _get_aas_access_policy_resolver().inspect(
         {"labId": str(lab_id), "accessKey": access_key},
         metadata,
+    )
+
+
+async def _aas_sync_update_execution_interfaces(
+    lab_id: str,
+    access_key: str,
+    interfaces: Any,
+) -> list[str]:
+    metadata = await _aas_fmu_model_metadata(access_key)
+    return await _get_aas_access_policy_resolver().update_authorized_execution_interfaces(
+        {"labId": str(lab_id), "accessKey": access_key},
+        metadata,
+        interfaces,
     )
 
 
@@ -395,9 +431,12 @@ _catalog_router = create_catalog_router(
     verify_jwt=verify_jwt,
     enforce_fmu_claim=_catalog_enforce_fmu_claim,
     get_authorized_model_metadata=_catalog_get_authorized_model_metadata,
+    get_authorized_parameter_sets=_catalog_get_authorized_parameter_sets,
+    get_authorized_experiments=_catalog_get_authorized_experiments,
     public_model_metadata=_catalog_public_model_metadata,
     list_authorized_fmu=_catalog_list_authorized_fmu,
     get_effective_policy=_simulation_effective_access_policy,
+    get_effective_policy_for_metadata=_simulation_effective_access_policy_for_metadata,
 )
 _aas_link_router = create_aas_link_router(
     get_link_path=_aas_link_path_for_router,
@@ -415,12 +454,14 @@ _aas_sync_router = create_aas_sync_router(
     read_model_description=_aas_sync_read_model_description,
     metadata_builder=_aas_sync_metadata_builder,
     get_model_metadata=_aas_fmu_model_metadata,
+    get_fmi_ls_related_resources=_aas_fmu_related_resources,
     sync_fmu_to_basyx=_aas_sync_to_basyx,
     get_runtime_status=_aas_sync_runtime_status,
     logger=logger,
     record_aasx=_record_aasx_association,
     invalidate_access_policy=lambda lab_id=None: _invalidate_aas_access_policy(lab_id),
     get_access_policy_status=_aas_sync_access_policy_status,
+    update_authorized_execution_interfaces=_aas_sync_update_execution_interfaces,
 )
 _aasx_router = create_aasx_router(
     association_service=AasAssociationService(
@@ -562,7 +603,7 @@ def _load_local_model_metadata(
     *,
     include_internal_variables: bool = True,
 ) -> dict:
-    return _catalog_load_local_model_metadata(
+    metadata = _catalog_load_local_model_metadata(
         fmu_filename,
         resolve_fmu_path=_resolve_fmu_path,
         model_description_reader=read_model_description,
@@ -571,6 +612,19 @@ def _load_local_model_metadata(
         display_unit_inverse_reader=_display_unit_inverse_map_from_fmu,
         include_internal_variables=include_internal_variables,
     )
+    metadata = _merge_raw_fmi_type_metadata(metadata, _resolve_fmu_path(fmu_filename))
+    fmi_ls_struct = read_fmi_ls_struct(
+        _resolve_fmu_path(fmu_filename),
+        fmi_version=str(metadata.get("fmiVersion") or ""),
+        variable_names=[
+            variable["name"]
+            for variable in metadata.get("modelVariables", [])
+            if isinstance(variable, dict) and isinstance(variable.get("name"), str)
+        ],
+    )
+    if fmi_ls_struct is not None:
+        metadata["fmiLsStruct"] = fmi_ls_struct
+    return metadata
 
 
 def _list_local_fmus_payload(claimed_file: str) -> dict:
@@ -580,6 +634,10 @@ def _list_local_fmus_payload(claimed_file: str) -> dict:
         resolve_fmu_path=_resolve_fmu_path,
         is_within_base=_is_within_base,
     )
+
+
+def _load_local_fmi_ls_related_resources(fmu_filename: str) -> dict[str, Any]:
+    return _read_fmi_ls_related_resources(_resolve_fmu_path(fmu_filename))
 
 
 def _build_fmu_backend():
@@ -594,6 +652,7 @@ def _build_fmu_backend():
         health_loader=_local_metadata_backend_health_payload,
         model_metadata_loader=_load_local_model_metadata,
         list_loader=_list_local_fmus_payload,
+        related_resources_loader=_load_local_fmi_ls_related_resources,
         logger=logger,
         station_backend_factory=StationFmuBackend,
         local_metadata_backend_factory=LocalFmuMetadataBackend,
@@ -614,6 +673,8 @@ def _simulation_request_payload(req: SimulationRequest, sim_id: Optional[str] = 
         options=req.options,
         input_schedule=req.inputSchedule,
         sim_id=sim_id,
+        checkpoint=req.checkpoint,
+        capture_fmu_state=req.captureFmuState,
     )
 
 
@@ -636,7 +697,7 @@ async def _stream_station_simulation(
     is_local_preview: bool = False,
 ):
     station_backend = _get_station_backend()
-    authorization = _extract_authorization_header(request)
+    authorization = _extract_authorization_header(request) or ""
     station_backend.build_authorized_context(
         claims=claims,
         requested_lab_id=req.labId,
@@ -646,11 +707,31 @@ async def _stream_station_simulation(
     # Only the local-preview route may skip production session observations.
     # A claim value alone is never sufficient to select this exception.
     if not is_local_preview:
-        await _record_browser_session_started(request, claims, sim_id)
+        if authorization.startswith("Bearer st_"):
+            await _record_redeemed_session_started_service(
+                authorization[7:].strip(),
+                claims,
+                sim_id,
+                observation_lock=_runner_runtime.observation_lock,
+                observed_credentials=_runner_runtime.observed_credentials,
+                retry_confirmation=_confirm_session_started_with_retries,
+                confirm_session=_confirm_fmu_session_started,
+                max_attempts=FMU_SESSION_OBSERVATION_MAX_ATTEMPTS,
+                sleep=asyncio.sleep,
+            )
+        else:
+            await _record_browser_session_started(request, claims, sim_id)
+    # The ticket is redeemed and the reservation claims are already embedded
+    # in Gateway's trusted Station context. Never forward browser capabilities
+    # to the private Station service.
+    station_authorization = (
+        None if is_local_preview or authorization.startswith(("Bearer st_", "Bearer preview_"))
+        else authorization
+    )
     client, response = await station_backend.open_authorized_simulation_stream(
         claims=claims,
         request_payload=_simulation_request_payload(req, sim_id),
-        authorization=authorization,
+        authorization=station_authorization,
     )
     media_type = response.headers.get("content-type") or "application/x-ndjson"
     normalized_media_type = media_type.split(";", 1)[0].strip().lower()
@@ -685,7 +766,11 @@ async def _stream_station_simulation(
             await response.aclose()
             await client.aclose()
 
-    return StreamingResponse(_forward_stream(), media_type=media_type)
+    return StreamingResponse(
+        _forward_stream(),
+        media_type=media_type,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _collect_runtime_files(*, fmi_version: str, model_identifier: str) -> list[tuple[Path, str]]:
@@ -801,13 +886,6 @@ async def _record_browser_session_started(request: Request, claims: dict, sim_id
         confirm_session=_confirm_fmu_session_started,
         max_attempts=FMU_SESSION_OBSERVATION_MAX_ATTEMPTS,
         sleep=asyncio.sleep,
-    )
-
-
-def _build_session_ticket_headers(*, authorization: Optional[str] = None) -> dict[str, str]:
-    return _build_session_ticket_headers_transport(
-        authorization=authorization,
-        internal_token=AUTH_SESSION_TICKET_INTERNAL_TOKEN,
     )
 
 
@@ -969,6 +1047,20 @@ def _get_local_preview_aasx_registry() -> LocalPreviewAasxRegistry:
                 include_internal_variables=True,
             )
 
+        async def get_preview_effective_policy(claims: dict, metadata: dict) -> dict:
+            return await _simulation_effective_access_policy_for_metadata(claims, metadata)
+
+        def get_local_preview_digital_twin_assets(lab_id: str, access_key: str):
+            if FMU_BACKEND_MODE != "local":
+                return []
+            return store_local_preview_assets(
+                root=_DIGITAL_TWIN_ASSETS_PATH,
+                lab_id=lab_id,
+                access_key=access_key,
+                fmu_data_root=Path(FMU_DATA_PATH),
+                resolve_local_fmu_path=_resolve_fmu_path,
+            )
+
         _LOCAL_PREVIEW_AASX_REGISTRY = LocalPreviewAasxRegistry(
             get_model_metadata=get_preview_model_metadata,
             sync_fmu_to_basyx=_aas_sync_to_basyx,
@@ -978,7 +1070,10 @@ def _get_local_preview_aasx_registry() -> LocalPreviewAasxRegistry:
             get_link_path=_aas_link_path,
             build_aas_shell=fmu_aas_generator.build_aas_shell,
             get_effective_policy=_simulation_effective_access_policy,
+            get_effective_policy_for_metadata=get_preview_effective_policy,
             invalidate_access_policy=_invalidate_aas_access_policy,
+            get_digital_twin_assets=get_local_preview_digital_twin_assets,
+            get_fmi_ls_related_resources=_aas_fmu_related_resources,
         )
     return _LOCAL_PREVIEW_AASX_REGISTRY
 
@@ -1004,7 +1099,10 @@ async def _local_preview_access_payload(
     if not isinstance(model_description, dict):
         model_description = {}
     model_variables = model_description.get("modelVariables", policy.get("modelVariables"))
-    return {
+    import fmu_aas_generator
+
+    visual_assets = await fmu_aas_generator.get_handover_visual_assets(str(claims.get("labId") or ""))
+    response = {
         **model_description,
         "policySource": policy.get("policySource", "unavailable"),
         "policyVersion": policy.get("policyVersion", ""),
@@ -1012,7 +1110,12 @@ async def _local_preview_access_payload(
         "accessKey": claims.get("accessKey"),
         "variables": visible_permissions,
         "modelVariables": model_variables if isinstance(model_variables, list) else [],
+        "visualAssets": visual_assets,
     }
+    state_capabilities = normalize_fmu_state_capabilities(model_description)
+    if state_capabilities is not None:
+        response["fmuState"] = state_capabilities
+    return response
 
 
 async def _local_preview_stream_simulation(
@@ -1147,6 +1250,9 @@ _proxy_router = create_proxy_router(
     derive_gateway_ws_url=_proxy_derive_gateway_ws_url,
     get_authorized_model_metadata=_proxy_get_authorized_model_metadata,
     get_effective_policy=_simulation_effective_access_policy,
+    get_effective_policy_for_metadata=_simulation_effective_access_policy_for_metadata,
+    get_authorized_parameter_sets=_catalog_get_authorized_parameter_sets,
+    get_authorized_experiments=_catalog_get_authorized_experiments,
     build_proxy_model_description_xml=_proxy_build_model_description_xml,
     parse_fmi_major_version=_proxy_parse_fmi_major_version,
     proxy_model_identifier=_proxy_model_identifier_for_route,
@@ -1200,6 +1306,7 @@ _stream_router = create_stream_router(
     enforce_fmu_claim=_enforce_fmu_claim,
     stream_station_simulation=_stream_station_simulation,
     get_effective_policy=_simulation_effective_access_policy,
+    redeem_session_ticket=_redeem_session_ticket,
 )
 
 _lifespan = create_lifespan(
@@ -1235,5 +1342,7 @@ if _preview_tickets is not None:
         FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN,
         ensure_aas_policy=_ensure_local_preview_aas_policy,
         get_access_policy=_local_preview_access_payload,
+        get_authorized_parameter_sets=_catalog_get_authorized_parameter_sets,
+        get_authorized_experiments=_catalog_get_authorized_experiments,
         stream_simulation=_local_preview_stream_simulation,
     ))

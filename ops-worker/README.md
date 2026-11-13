@@ -3,8 +3,9 @@
 This service handles remote lab host operations for the gateway:
 
 - Wake-on-LAN and reachability checks.
-- Remote Station command execution: Windows v2 over WinRM and Linux v3 over
-  the Station dispatcher on pinned SSH.
+- Remote Station command execution: Windows Station Contract v3 by default
+  over WinRM (with v2 compatibility) and Linux v3 over the Station dispatcher
+  on pinned SSH.
 - Heartbeat polling and persistence in MySQL.
 - Optional reservation automation (start/end orchestration).
 - Provider-local power policies through the `power/` driver layer.
@@ -235,9 +236,9 @@ off or unavailable Station from an internal worker failure.
     persist laboratory IDs in the host catalog.
 - `POST /api/hosts/discover`
   - Body: `{ connectionId }`
-  - Probes a Guacamole connection candidate for DNS, Windows v2 WinRM, Linux SSH, and optional Lab Station HTTP health.
+  - Probes a Guacamole connection candidate for DNS, Windows WinRM, Linux SSH, and optional Lab Station HTTP health.
 - `POST /api/hosts/provision`
-  - Body: `{ connectionId, platform?, managementPort?, profile?, stationCommand?, name?, address?, mac?, broadcast?, credentialRef?, labstationPath? }`. Windows v2 paths derive from the installation root; Linux v3 uses logical heartbeat/event artifacts and a Station command. Legacy `labs` fields are ignored.
+  - Body: `{ connectionId, platform?, contractMajor?, managementPort?, profile?, stationCommand?, name?, address?, mac?, broadcast?, credentialRef?, labstationPath? }`. New Windows hosts default to Station Contract major 3 over WinRM; select major 2 for legacy Stations. Windows paths derive from the installation root; Linux v3 uses logical heartbeat/event artifacts and a Station command. Legacy `labs` fields are ignored.
   - Re-runs discovery and provisions Windows candidates from Lab Station HTTP health or reachable WinRM, and Linux candidates from an SSH reachability hint. Linux hosts remain trust-pending until SSH credentials, pinned host-key trust, and Station identity are verified.
   - Writes a dynamic host entry keyed by `credentialRef` (normally the host address). WinRM and SSH credentials are saved separately from the host catalog.
 - `PATCH /api/hosts/{hostName}`
@@ -320,7 +321,7 @@ Wake Ops uses the Gateway `TZ` timezone by default. A per-host schedule may
 still store an explicit timezone from Lab Manager when a deployment needs one.
 Its current host reachability check probes the WinRM port and does not use the
 Linux v3 SSH identity probe; the weekly power-state cycle therefore applies to
-Windows v2 hosts. Keep the per-host schedule disabled for Linux v3: with a
+Windows WinRM hosts. Keep the per-host schedule disabled for Linux v3: with a
 stale heartbeat, the cycle can misclassify a powered-on Station and send WoL
 followed by a shutdown command.
 
@@ -366,7 +367,7 @@ Gateway's existing backend trust credential and sends the canonical
 Discovery knobs:
 
 - `OPS_DISCOVERY_TIMEOUT_SECONDS` (default `1.5`)
-- Windows v2 discovery probes WinRM HTTPS on port `5986`; Linux v3 discovery
+- Windows discovery probes WinRM HTTPS on port `5986`; Linux v3 discovery
   treats an open SSH port as a provisioning hint only.
 - `OPS_DISCOVERY_LABSTATION_PORTS` (default `8765,8088`)
 - `OPS_DISCOVERY_LABSTATION_PATHS` (default `/labstation/health,/health`)

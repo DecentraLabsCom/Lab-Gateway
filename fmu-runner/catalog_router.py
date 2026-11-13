@@ -1,8 +1,147 @@
+import math
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from fmu_state_capabilities import normalize_fmu_state_capabilities
 from simulation_access_policy import filter_model_description
+
+
+_ACCESS_MODEL_CAPABILITIES = {
+    "needsExecutionTool", "canBeInstantiatedOnlyOncePerProcess", "canNotUseMemoryManagementFunctions",
+    "canGetAndSetFMUstate", "canSerializeFMUstate", "canHandleVariableCommunicationStepSize",
+    "canInterpolateInputs", "canRunAsynchronuously", "hasEventMode", "providesIntermediateUpdate",
+    "canReturnEarlyAfterIntermediateUpdate", "providesEvaluateDiscreteStates",
+    "providesDirectionalDerivative", "providesAdjointDerivatives", "providesPerElementDependencies",
+    "needsCompletedIntegratorStep",
+}
+_MODEL_EXCHANGE_CAPABILITIES = {
+    "needsExecutionTool", "canBeInstantiatedOnlyOncePerProcess", "canNotUseMemoryManagementFunctions",
+    "canGetAndSetFMUstate", "canSerializeFMUstate", "providesDirectionalDerivative",
+    "providesAdjointDerivatives", "completedIntegratorStepNotNeeded", "needsCompletedIntegratorStep",
+}
+
+
+def _visible_model_structure(raw_structure: Any, variables: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Expose dependency edges only when both ends are readable or writable."""
+    if not isinstance(raw_structure, Mapping):
+        return {}
+    allowed_names = {item.get("name") for item in variables if isinstance(item.get("name"), str)}
+    allowed_references = {
+        str(item.get("valueReference"))
+        for item in variables
+        if item.get("valueReference") is not None
+    }
+    name_by_reference = {
+        str(item.get("valueReference")): item.get("name")
+        for item in variables
+        if isinstance(item.get("name"), str) and item.get("valueReference") is not None
+    }
+    result: dict[str, list[dict[str, Any]]] = {}
+    for section in ("outputs", "derivatives", "clockedStates", "initialUnknowns", "eventIndicators"):
+        entries = raw_structure.get(section)
+        if not isinstance(entries, list):
+            continue
+        visible_entries: list[dict[str, Any]] = []
+        for entry in entries[:100_000]:
+            if not isinstance(entry, Mapping):
+                continue
+            name = entry.get("name") if isinstance(entry.get("name"), str) else None
+            reference = entry.get("valueReference")
+            if name not in allowed_names and (reference is None or str(reference) not in allowed_references):
+                continue
+            if name not in allowed_names:
+                name = name_by_reference.get(str(reference))
+            visible: dict[str, Any] = {}
+            if name:
+                visible["name"] = name[:512]
+            for field in ("stateName",):
+                value = entry.get(field)
+                if isinstance(value, str) and value in allowed_names:
+                    visible[field] = value[:512]
+            if "stateName" not in visible:
+                state_name = name_by_reference.get(str(entry.get("stateValueReference")))
+                if isinstance(state_name, str):
+                    visible["stateName"] = state_name[:512]
+            raw_dependencies = entry.get("dependencies")
+            raw_names = entry.get("dependencyNames")
+            raw_kinds = entry.get("dependenciesKind")
+            if isinstance(raw_dependencies, list):
+                selected_dependencies: list[tuple[str, str | None]] = []
+                for index, dependency in enumerate(raw_dependencies):
+                    dependency_name = raw_names[index] if isinstance(raw_names, list) and index < len(raw_names) else None
+                    if dependency_name not in allowed_names:
+                        dependency_name = name_by_reference.get(str(dependency))
+                    if isinstance(dependency_name, str) and dependency_name in allowed_names:
+                        dependency_kind = raw_kinds[index] if isinstance(raw_kinds, list) and index < len(raw_kinds) else None
+                        selected_dependencies.append((dependency_name[:512], dependency_kind[:64] if isinstance(dependency_kind, str) else None))
+                selected_dependencies = selected_dependencies[:4096]
+                selected_names = [name for name, _kind in selected_dependencies]
+                selected_kinds = [kind for _name, kind in selected_dependencies]
+                if selected_names:
+                    visible["dependencyNames"] = selected_names
+                if selected_kinds and all(kind is not None for kind in selected_kinds):
+                    visible["dependenciesKind"] = selected_kinds
+            visible_entries.append(visible)
+        if visible_entries:
+            result[section] = visible_entries
+    return result
+
+
+def _authorized_model_description(policy: Mapping[str, Any], variables: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Project run defaults and model relationships without identity metadata."""
+    raw = policy.get("modelDescription")
+    if not isinstance(raw, Mapping):
+        return None
+    result: dict[str, Any] = {}
+    for field in ("defaultStartTime", "defaultStopTime", "defaultStepSize", "defaultTolerance"):
+        value = raw.get(field)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)):
+            result[field] = float(value)
+    for field in ("supportsCoSimulation", "supportsModelExchange"):
+        value = raw.get(field)
+        if isinstance(value, bool):
+            result[field] = value
+    independent = next((item for item in variables if item.get("causality") == "independent"), None)
+    time_unit = raw.get("timeUnit") or (independent.get("unit") if independent else None)
+    if isinstance(time_unit, str) and time_unit.strip() and len(time_unit) <= 128:
+        result["timeUnit"] = time_unit.strip()
+    for field in ("numberOfContinuousStates", "numberOfEventIndicators"):
+        value = raw.get(field)
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10_000_000:
+            result[field] = value
+
+    raw_capabilities = raw.get("capabilities")
+    if isinstance(raw_capabilities, Mapping):
+        capabilities: dict[str, bool | int | float] = {}
+        for field, value in raw_capabilities.items():
+            if field in _ACCESS_MODEL_CAPABILITIES and isinstance(value, bool):
+                capabilities[field] = value
+        for field in ("maxOutputDerivativeOrder", "recommendedIntermediateInputSmoothness"):
+            value = raw_capabilities.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 64:
+                capabilities[field] = value
+        fixed_step = raw_capabilities.get("fixedInternalStepSize")
+        if isinstance(fixed_step, (int, float)) and not isinstance(fixed_step, bool) and math.isfinite(float(fixed_step)) and fixed_step > 0:
+            capabilities["fixedInternalStepSize"] = float(fixed_step)
+        if capabilities:
+            result["capabilities"] = capabilities
+
+    raw_model_exchange_capabilities = raw.get("modelExchangeCapabilities")
+    if isinstance(raw_model_exchange_capabilities, Mapping):
+        model_exchange_capabilities = {
+            field: value
+            for field, value in raw_model_exchange_capabilities.items()
+            if field in _MODEL_EXCHANGE_CAPABILITIES and isinstance(value, bool)
+        }
+        if model_exchange_capabilities:
+            result["modelExchangeCapabilities"] = model_exchange_capabilities
+
+    structure = _visible_model_structure(raw.get("modelStructure"), variables)
+    if structure:
+        result["modelStructure"] = structure
+    return result or None
 
 
 def create_catalog_router(
@@ -10,9 +149,12 @@ def create_catalog_router(
     verify_jwt: Any,
     enforce_fmu_claim: Any,
     get_authorized_model_metadata: Any,
+    get_authorized_parameter_sets: Any = None,
+    get_authorized_experiments: Any = None,
     public_model_metadata: Any,
     list_authorized_fmu: Any,
     get_effective_policy: Any = None,
+    get_effective_policy_for_metadata: Any = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -22,20 +164,28 @@ def create_catalog_router(
         claims: dict = Depends(verify_jwt),
     ):
         enforce_fmu_claim(claims, allow_provider_describe=True)
+        has_consumer_policy = all(
+            str(claims.get(name) or "").strip()
+            for name in ("labId", "reservationKey", "pucHash")
+        )
         metadata = await get_authorized_model_metadata(
             claims=claims,
             requested_fmu_filename=fmuFileName,
-            include_internal_variables=False,
+            # AAS interface-digest validation needs the complete FMI
+            # declaration. Project to public variables after policy resolution.
+            include_internal_variables=has_consumer_policy,
         )
         public = public_model_metadata(metadata)
         # Provider-describe tokens are issued during AAS synchronization and
         # do not represent a reservation-bound consumer session.
-        if (
-            get_effective_policy is None
-            or not all(str(claims.get(name) or "").strip() for name in ("labId", "reservationKey", "pucHash"))
-        ):
+        if not has_consumer_policy:
             return public
-        policy = await get_effective_policy(claims)
+        if get_effective_policy_for_metadata is not None:
+            policy = await get_effective_policy_for_metadata(claims, metadata)
+        elif get_effective_policy is not None:
+            policy = await get_effective_policy(claims)
+        else:
+            return public
         if not isinstance(policy, dict) or not isinstance(policy.get("variables"), dict):
             raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
         public = filter_model_description(policy, public)
@@ -59,9 +209,12 @@ def create_catalog_router(
         }
         visible_metadata = filter_model_description(
             policy,
-            {"modelVariables": policy.get("modelVariables", [])},
+            {
+                "modelVariables": policy.get("modelVariables", []),
+                "fmiLsStruct": policy.get("fmiLsStruct"),
+            },
         )
-        return {
+        response = {
             "policySource": policy.get("policySource", "unavailable"),
             "policyVersion": policy.get("policyVersion", ""),
             "variables": visible,
@@ -70,6 +223,43 @@ def create_catalog_router(
                 if isinstance(variable, dict)
             ],
         }
+        model_description = policy.get("modelDescription")
+        if isinstance(model_description, dict):
+            projected_description = _authorized_model_description(policy, response["modelVariables"])
+            if projected_description is not None:
+                response["modelDescription"] = projected_description
+            for field in ("fmiVersion", "simulationType"):
+                value = model_description.get(field)
+                if isinstance(value, str) and value.strip() and len(value) <= 32:
+                    response[field] = value.strip()
+            state_capabilities = normalize_fmu_state_capabilities(model_description)
+            if state_capabilities is not None:
+                response["fmuState"] = state_capabilities
+        if get_authorized_experiments is not None:
+            raw_experiments = await get_authorized_experiments(claims=claims)
+            response["fmiLsExperiments"] = filter_authorized_experiments(raw_experiments, policy)
+        if isinstance(visible_metadata.get("fmiLsStruct"), dict):
+            response["fmiLsStruct"] = visible_metadata["fmiLsStruct"]
+        return response
+
+    @router.get("/api/v1/simulations/parameter-sets")
+    async def fmi_ls_parameter_sets(claims: dict = Depends(verify_jwt)):
+        """Return complete FMI-LS-REF parameter presets allowed by this reservation."""
+        enforce_fmu_claim(claims)
+        if get_authorized_parameter_sets is None or get_effective_policy is None:
+            return {"fmiLsParameterPresets": []}
+
+        raw_presets = await get_authorized_parameter_sets(claims=claims)
+        policy = await get_effective_policy(claims)
+        if (
+            not isinstance(policy, dict)
+            or not isinstance(policy.get("variables"), dict)
+            or not isinstance(policy.get("modelVariables"), list)
+            or not isinstance(raw_presets, list)
+        ):
+            raise HTTPException(status_code=503, detail="FMU parameter access policy is unavailable")
+
+        return {"fmiLsParameterPresets": filter_authorized_parameter_sets(raw_presets, policy)}
 
     @router.get("/api/v1/fmu/list")
     async def list_fmus(claims: dict = Depends(verify_jwt)):
@@ -77,3 +267,294 @@ def create_catalog_router(
         return await list_authorized_fmu(claims=claims)
 
     return router
+
+
+def _is_safe_parameter_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, str):
+        return len(value) <= 65536
+    if isinstance(value, int):
+        return -(2**53 - 1) <= value <= 2**53 - 1
+    if isinstance(value, float):
+        return value == value and abs(value) != float("inf")
+    if isinstance(value, list):
+        return len(value) <= 4096 and all(
+            not isinstance(item, (dict, list)) and _is_safe_parameter_value(item)
+            for item in value
+        )
+    return False
+
+
+def filter_authorized_parameter_sets(raw_presets: Any, policy: Any) -> list[dict[str, Any]]:
+    """Keep only complete initialization presets permitted by a variable policy."""
+    if (
+        not isinstance(policy, dict)
+        or not isinstance(policy.get("variables"), dict)
+        or not isinstance(policy.get("modelVariables"), list)
+        or not isinstance(raw_presets, list)
+    ):
+        return []
+
+    variables = {
+        variable.get("name"): variable
+        for variable in policy["modelVariables"]
+        if isinstance(variable, dict) and isinstance(variable.get("name"), str)
+    }
+    safe_presets = []
+    for preset in raw_presets[:24]:
+        if not isinstance(preset, dict):
+            continue
+        preset_id = preset.get("id")
+        name = preset.get("name")
+        values = preset.get("parameters")
+        parameter_units = preset.get("parameterUnits", {})
+        if (
+            not isinstance(preset_id, str)
+            or len(preset_id) > 64
+            or not isinstance(name, str)
+            or not name.strip()
+            or len(name) > 180
+            or not isinstance(values, dict)
+            or not isinstance(parameter_units, dict)
+            or not values
+            or len(values) > 2048
+        ):
+            continue
+
+        filtered_values: dict[str, Any] = {}
+        complete = True
+        for variable_name, value in values.items():
+            permission = policy["variables"].get(variable_name)
+            variable = variables.get(variable_name)
+            write_at = permission.get("writeAt") if isinstance(permission, dict) else None
+            if (
+                not isinstance(variable_name, str)
+                or len(variable_name) > 512
+                or not isinstance(write_at, list)
+                or "initialization" not in write_at
+                or variable is None
+                or not (
+                    str(variable.get("causality") or "").lower() == "input"
+                    or (
+                        str(variable.get("causality") or "").lower() == "parameter"
+                        and str(variable.get("variability") or "").lower() != "constant"
+                    )
+                )
+            ):
+                complete = False
+                break
+
+            source_unit = parameter_units.get(variable_name)
+            if source_unit is not None and (
+                not isinstance(source_unit, str)
+                or source_unit != variable.get("unit")
+            ):
+                complete = False
+                break
+
+            if str(variable.get("type") or "").lower() == "enumeration":
+                enum_items = variable.get("enumItems")
+                if not isinstance(enum_items, list):
+                    complete = False
+                    break
+                enum_values = {
+                    item.get("name"): item.get("value")
+                    for item in enum_items
+                    if isinstance(item, dict)
+                    and isinstance(item.get("name"), str)
+                    and isinstance(item.get("value"), (int, float))
+                    and not isinstance(item.get("value"), bool)
+                }
+                raw_enum_values = value if isinstance(value, list) else [value]
+                if any(item not in enum_values for item in raw_enum_values):
+                    complete = False
+                    break
+                value = [enum_values[item] for item in raw_enum_values] if isinstance(value, list) else enum_values[value]
+
+            if not _is_safe_parameter_value(value):
+                complete = False
+                break
+            filtered_values[variable_name] = value
+
+        # Keeping the set intact avoids silently changing a provider's
+        # intended configuration when some of its variables are hidden.
+        if not complete or not filtered_values:
+            continue
+        description = preset.get("description")
+        safe_presets.append({
+            "id": preset_id,
+            "name": name.strip(),
+            "description": description[:1024] if isinstance(description, str) else "",
+            "parameters": filtered_values,
+        })
+    return safe_presets
+
+
+def filter_authorized_experiments(raw_discovery: Any, policy: Any) -> list[dict[str, Any]]:
+    """Keep usable REF experiments whose initialization and runtime writes are authorized."""
+    if (
+        not isinstance(raw_discovery, dict)
+        or not isinstance(raw_discovery.get("resourceSets"), list)
+        or not isinstance(policy, dict)
+        or not isinstance(policy.get("variables"), dict)
+        or not isinstance(policy.get("modelVariables"), list)
+    ):
+        return []
+
+    safe_experiments: list[dict[str, Any]] = []
+    model_variables = {
+        variable.get("name"): variable
+        for variable in policy["modelVariables"]
+        if isinstance(variable, dict) and isinstance(variable.get("name"), str)
+    }
+    runtime_names = {
+        name for name, permission in policy["variables"].items()
+        if isinstance(permission, dict)
+        and isinstance(permission.get("writeAt"), list)
+        and "runtime" in permission["writeAt"]
+        and isinstance(model_variables.get(name), dict)
+        and (
+            str(model_variables[name].get("causality") or "").lower() == "input"
+            or (
+                str(model_variables[name].get("causality") or "").lower() == "parameter"
+                and str(model_variables[name].get("variability") or "").lower() == "tunable"
+            )
+        )
+    }
+    for set_index, resource_set in enumerate(raw_discovery["resourceSets"][:8]):
+        if not isinstance(resource_set, dict) or not isinstance(resource_set.get("experiments"), list):
+            continue
+        set_description = resource_set.get("description")
+        for experiment_index, experiment in enumerate(resource_set["experiments"][:16]):
+            if (
+                not isinstance(experiment, dict)
+                or experiment.get("status") != "ready"
+                or experiment.get("eligibleForSmokeProbe") is False
+            ):
+                continue
+            name = experiment.get("name")
+            parameters = experiment.get("parameters")
+            parameter_units = experiment.get("parameterUnits", {})
+            options = experiment.get("options", {})
+            raw_schedule = experiment.get("inputSchedule", [])
+            if (
+                not isinstance(name, str)
+                or not name.strip()
+                or len(name) > 180
+                or not isinstance(parameters, dict)
+                or len(parameters) > 2048
+                or not isinstance(parameter_units, dict)
+                or not isinstance(options, dict)
+                or not isinstance(raw_schedule, list)
+                or len(raw_schedule) > 128
+            ):
+                continue
+
+            safe_options: dict[str, float] = {}
+            valid_options = True
+            for option_name, value in options.items():
+                if (
+                    option_name not in {"startTime", "stopTime", "stepSize", "tolerance"}
+                    or isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or (option_name in {"stepSize", "tolerance"} and value <= 0)
+                ):
+                    valid_options = False
+                    break
+                safe_options[option_name] = float(value)
+            if not valid_options:
+                continue
+            if (
+                "startTime" in safe_options
+                and "stopTime" in safe_options
+                and safe_options["stopTime"] <= safe_options["startTime"]
+            ):
+                continue
+
+            if parameters:
+                safe_parameter_sets = filter_authorized_parameter_sets(
+                    [{
+                        "id": "experiment-parameters",
+                        "name": name,
+                        "description": "",
+                        "parameters": parameters,
+                        "parameterUnits": parameter_units,
+                    }],
+                    policy,
+                )
+                if not safe_parameter_sets:
+                    continue
+                safe_parameters = safe_parameter_sets[0]["parameters"]
+            else:
+                if parameter_units:
+                    continue
+                safe_parameters = {}
+
+            safe_schedule: list[dict[str, Any]] = []
+            if raw_schedule:
+                start = safe_options.get("startTime")
+                stop = safe_options.get("stopTime")
+                step = safe_options.get("stepSize")
+                if (
+                    start is None or stop is None or step is None
+                    or not math.isfinite(start) or not math.isfinite(stop) or not math.isfinite(step)
+                    or step <= 0 or stop <= start
+                ):
+                    continue
+                schedule_valid = True
+                previous_time = start
+                seen_values: set[tuple[float, str]] = set()
+                for event in raw_schedule:
+                    if not isinstance(event, dict) or set(event) != {"time", "values"}:
+                        schedule_valid = False
+                        break
+                    event_time = event["time"]
+                    values = event["values"]
+                    if (
+                        isinstance(event_time, bool) or not isinstance(event_time, (int, float))
+                        or not math.isfinite(event_time) or event_time < start or event_time >= stop
+                        or event_time < previous_time or not isinstance(values, dict) or not values
+                    ):
+                        schedule_valid = False
+                        break
+                    step_index = round((event_time - start) / step)
+                    tolerance = max(1e-9, abs(step) * 1e-7)
+                    if abs(start + step_index * step - event_time) > tolerance:
+                        schedule_valid = False
+                        break
+                    safe_values: dict[str, float] = {}
+                    for variable_name, value in values.items():
+                        identity = (float(event_time), variable_name)
+                        if (
+                            not isinstance(variable_name, str) or not variable_name
+                            or len(variable_name) > 512 or variable_name not in runtime_names
+                            or isinstance(value, bool) or not isinstance(value, (int, float))
+                            or not math.isfinite(value) or identity in seen_values
+                        ):
+                            schedule_valid = False
+                            break
+                        safe_values[variable_name] = float(value)
+                        seen_values.add(identity)
+                    if not schedule_valid:
+                        break
+                    safe_schedule.append({"time": float(event_time), "values": safe_values})
+                    previous_time = float(event_time)
+                if not schedule_valid:
+                    continue
+
+            if not safe_parameters and not safe_options and not safe_schedule:
+                continue
+            description = experiment.get("description")
+            if not isinstance(description, str) or not description.strip():
+                description = set_description if isinstance(set_description, str) else ""
+            safe_experiments.append({
+                "id": f"experiment-{set_index}-{experiment_index}",
+                "name": name.strip(),
+                "description": description[:2048],
+                "parameters": safe_parameters,
+                "options": safe_options,
+                **({"inputSchedule": safe_schedule} if safe_schedule else {}),
+            })
+    return safe_experiments

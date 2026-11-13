@@ -13,16 +13,51 @@
     }) {
         let fmuDescription = '';
         let fmuDescriptionAccessKey = '';
+        let fmuVisualizationMetadata = null;
         let gatewayUploadedAssetUrl = '';
         let gatewayUploadedAssetAccessKey = '';
+        let gatewayUploadedAssetType = '';
         let acknowledgedAssetValidationKey = '';
         let lastAssetValidation = null;
+        let currentAccessPolicyStatus = null;
+
+        function updateExecutionInterfaceEditor(status = currentAccessPolicyStatus) {
+            const editor = fields.executionInterfaceEditor;
+            const saveButton = fields.saveExecutionInterfacesButton;
+            const available = Array.isArray(status?.availableExecutionInterfaces)
+                ? status.availableExecutionInterfaces
+                : [];
+            const authorized = Array.isArray(status?.authorizedExecutionInterfaces)
+                ? status.authorizedExecutionInterfaces
+                : [];
+            if (editor) editor.hidden = available.length < 2;
+            if (fields.authorizeCoSimulation) {
+                fields.authorizeCoSimulation.checked = authorized.includes('CoSimulation');
+                fields.authorizeCoSimulation.disabled = status?.executionInterfacePolicyEditable !== true;
+            }
+            if (fields.authorizeModelExchange) {
+                fields.authorizeModelExchange.checked = authorized.includes('ModelExchange');
+                fields.authorizeModelExchange.disabled = status?.executionInterfacePolicyEditable !== true;
+            }
+            const selected = [
+                ...(fields.authorizeCoSimulation?.checked ? ['CoSimulation'] : []),
+                ...(fields.authorizeModelExchange?.checked ? ['ModelExchange'] : []),
+            ];
+            const unchanged = selected.length === authorized.length
+                && selected.every((name) => authorized.includes(name));
+            if (saveButton) {
+                saveButton.disabled = status?.executionInterfacePolicyEditable !== true
+                    || selected.length === 0
+                    || unchanged;
+            }
+        }
 
         function renderAccessPolicyStatus(status) {
             const panel = fields.accessPolicyStatus;
             const regenerateButton = fields.regenerateAccessPolicyButton;
             if (!panel) return;
             const state = String(status?.state || 'unavailable');
+            currentAccessPolicyStatus = status;
             const labels = {
                 generated: 'Generated defaults are active.',
                 customized: 'Provider-defined access rules are active.',
@@ -41,10 +76,14 @@
             if (status && Number.isFinite(Number(status.readableVariableCount))) {
                 panel.textContent += ` Readable variables: ${Number(status.readableVariableCount)}; writable variables: ${Number(status.writableVariableCount || 0)}.`;
             }
+            if (Array.isArray(status?.authorizedExecutionInterfaces) && status.authorizedExecutionInterfaces.length) {
+                panel.textContent += ` Native proxy interfaces: ${status.authorizedExecutionInterfaces.join(', ')}.`;
+            }
             if (regenerateButton) {
                 regenerateButton.hidden = status?.regenerationAvailable !== true;
                 regenerateButton.disabled = false;
             }
+            updateExecutionInterfaceEditor(status);
         }
 
         async function loadAccessPolicyStatus(laboratory = selectedLaboratory()) {
@@ -53,9 +92,12 @@
                 fields.accessPolicyStatus.textContent = 'Select an FMU to check its variable access rules.';
                 delete fields.accessPolicyStatus.dataset.state;
                 if (fields.regenerateAccessPolicyButton) fields.regenerateAccessPolicyButton.hidden = true;
+                currentAccessPolicyStatus = null;
+                updateExecutionInterfaceEditor(null);
                 return null;
             }
             fields.accessPolicyStatus.textContent = 'Checking FMU access rules…';
+            updateExecutionInterfaceEditor(null);
             const query = new urlSearchParamsCtor({ labId: laboratory.labId });
             try {
                 const response = await fetchImpl(
@@ -104,6 +146,44 @@
             }
         }
 
+        async function saveExecutionInterfaces() {
+            const laboratory = selectedLaboratory();
+            if (laboratory.resourceType !== 1 || !laboratory.accessKey || !laboratory.labId) {
+                showToast('Select an FMU laboratory first', 'error');
+                return;
+            }
+            const authorizedExecutionInterfaces = [
+                ...(fields.authorizeCoSimulation?.checked ? ['CoSimulation'] : []),
+                ...(fields.authorizeModelExchange?.checked ? ['ModelExchange'] : []),
+            ];
+            if (!authorizedExecutionInterfaces.length) {
+                showToast('Authorize at least one FMI interface', 'error');
+                return;
+            }
+            const button = fields.saveExecutionInterfacesButton;
+            if (button) button.disabled = true;
+            try {
+                const response = await fetchImpl(
+                    `/aas-admin/fmu/${encodeURIComponentImpl(laboratory.accessKey)}/access-policy`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            labId: laboratory.labId,
+                            authorizedExecutionInterfaces,
+                        }),
+                    },
+                );
+                const body = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
+                showToast('Authorized FMI interfaces saved to AAS', 'success');
+                await loadAccessPolicyStatus(laboratory);
+            } catch (error) {
+                showToast(`FMI interface access could not be saved: ${error.message}`, 'error');
+                updateExecutionInterfaceEditor();
+            }
+        }
+
         function isGatewaySceneAssetPath(path) {
             return /^\/digital-twin-scenes\/\d+\/[a-f0-9]{64}\.glb$/i.test(String(path || ''));
         }
@@ -114,6 +194,39 @@
 
         function isGatewayAssetPath(path, assetType) {
             return assetType === 'glb' ? isGatewaySceneAssetPath(path) : isGatewayApplicationAssetPath(path);
+        }
+
+        function inferAssetTypeFromFile(file) {
+            const name = String(file?.name || '').toLowerCase();
+            if (name.endsWith('.glb')) return 'glb';
+            if (name.endsWith('.zip')) return 'threejs-app';
+            return '';
+        }
+
+        function inferAssetTypeFromUrl(value) {
+            const url = String(value || '').trim();
+            if (isGatewaySceneAssetPath(url) || /\.glb(?:[?#].*)?$/i.test(url)) return 'glb';
+            if (isGatewayApplicationAssetPath(url) || /\.(?:webapp\.)?zip(?:[?#].*)?$/i.test(url)) return 'threejs-app';
+            return '';
+        }
+
+        function updateAssetFileAccept(assetType) {
+            if (!fields.assetFileInput) return;
+            fields.assetFileInput.accept = assetType === 'glb'
+                ? '.glb,model/gltf-binary'
+                : assetType === 'threejs-app'
+                    ? '.zip,application/zip'
+                    : assetType === 'auto'
+                        ? '.glb,.zip,model/gltf-binary,application/zip'
+                        : '';
+        }
+
+        function updateAssetOptionsVisibility() {
+            const assetType = String(fields.assetType?.value || '');
+            if (fields.autoAssetHint) fields.autoAssetHint.hidden = assetType !== 'auto';
+            if (fields.manualAssetOptions) {
+                fields.manualAssetOptions.hidden = !['glb', 'threejs-app'].includes(assetType);
+            }
         }
 
         function assetValidationKey(labId, accessKey, assetType, assetFile, assetUrl) {
@@ -132,6 +245,60 @@
             panel.replaceChildren?.();
             panel.textContent = '';
             delete panel.dataset.status;
+        }
+
+        function renderFmuBindingAssistant(file = fields.assetFileInput?.files?.[0]) {
+            const panel = fields.bindingAssistant;
+            if (!panel) return;
+            if (!file || !/\.glb$/i.test(String(file.name || ''))
+                || !['', 'auto', 'glb'].includes(String(fields.assetType?.value || ''))) {
+                panel.hidden = true;
+                panel.replaceChildren?.();
+                return;
+            }
+            panel.hidden = false;
+            const metadata = fmuVisualizationMetadata;
+            if (!metadata) {
+                panel.textContent = 'Select an FMU laboratory to load its declared FMI variables and units for GLB binding suggestions.';
+                return;
+            }
+            const editor = root.LabManagerFmiGlbBindings;
+            if (!editor || typeof editor.createEditor !== 'function') {
+                panel.textContent = 'The GLB binding editor is unavailable. Reload Lab Manager to continue.';
+                return;
+            }
+            editor.createEditor({
+                panel,
+                file,
+                metadata,
+                documentImpl,
+                onApply: installAssetFile,
+            });
+        }
+
+        function installAssetFile(file) {
+            const transfer = new root.DataTransfer();
+            transfer.items.add(file);
+            fields.assetFileInput.files = transfer.files;
+            if (fields.assetFileName) fields.assetFileName.textContent = file.name;
+            gatewayUploadedAssetUrl = '';
+            gatewayUploadedAssetAccessKey = '';
+            gatewayUploadedAssetType = '';
+            clearAssetValidation();
+            renderFmuBindingAssistant(file);
+        }
+
+        async function loadImportedGlbForBindingEditor(asset) {
+            if (asset.assetType !== 'glb' || !fields.assetFileInput) return;
+            try {
+                const response = await fetchImpl(asset.path, { cache: 'no-store' });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const blob = await response.blob();
+                if (blob.size > 52428800) throw new Error('The GLB exceeds the 50 MiB upload limit.');
+                installAssetFile(new root.File([blob], 'Companion.glb', { type: 'model/gltf-binary' }));
+            } catch (error) {
+                logger.info('Imported GLB remains linked but could not be opened in the binding editor', error);
+            }
         }
 
         function renderAssetValidation(report) {
@@ -210,6 +377,8 @@
         function clearAllFmuHints() {
             fmuDescription = '';
             fmuDescriptionAccessKey = '';
+            fmuVisualizationMetadata = null;
+            renderFmuBindingAssistant();
         }
 
         function selectedLaboratory() {
@@ -246,12 +415,18 @@
                 }
                 fmuDescription = String(hints.description || '').trim();
                 fmuDescriptionAccessKey = accessKey;
+                fmuVisualizationMetadata = hints.visualizationMetadata && typeof hints.visualizationMetadata === 'object'
+                    ? hints.visualizationMetadata
+                    : null;
+                renderFmuBindingAssistant();
                 return hints;
             } catch (_error) {
                 // FMU hints are best-effort and must not block the sync form.
                 if ((fields.keyInput?.value || '').trim() === selectedValue) {
                     fmuDescription = '';
                     fmuDescriptionAccessKey = '';
+                    fmuVisualizationMetadata = null;
+                    renderFmuBindingAssistant();
                 }
                 return {};
             }
@@ -277,6 +452,7 @@
         function updateAssetVisibility() {
             if (!fields.assetField) return;
             const laboratory = selectedLaboratory();
+            const wasHidden = fields.assetField.hidden;
             fields.assetField.hidden = laboratory.resourceType !== 1;
             if (laboratory.resourceType !== 1) {
                 if (fields.assetType) fields.assetType.value = '';
@@ -285,8 +461,15 @@
                 if (fields.assetFileName) fields.assetFileName.textContent = 'No file chosen';
                 gatewayUploadedAssetUrl = '';
                 gatewayUploadedAssetAccessKey = '';
+                gatewayUploadedAssetType = '';
+                updateAssetOptionsVisibility();
                 return;
             }
+            if (wasHidden && fields.assetType && !fields.assetType.value) {
+                fields.assetType.value = 'auto';
+                updateAssetFileAccept('auto');
+            }
+            updateAssetOptionsVisibility();
             if (!fields.assetUrl) return;
 
             const currentUrl = String(fields.assetUrl.value || '').trim();
@@ -298,11 +481,12 @@
                 fields.assetUrl.value = '';
                 gatewayUploadedAssetUrl = '';
                 gatewayUploadedAssetAccessKey = '';
+                gatewayUploadedAssetType = '';
             }
         }
 
         async function importCompanionAsset(labId, accessKey, assetType) {
-            if (!['glb', 'threejs-app'].includes(assetType)) {
+            if (!['auto', 'glb', 'threejs-app'].includes(assetType)) {
                 throw new Error('Choose GLB or Three.js application before importing a companion asset');
             }
             const response = await fetchImpl(
@@ -315,20 +499,24 @@
             );
             const body = await response.json().catch(() => ({}));
             if (!response.ok) {
-                throw new Error(body.detail || `Companion asset import failed (HTTP ${response.status})`);
+                const error = new Error(body.detail || `Companion asset import failed (HTTP ${response.status})`);
+                error.status = response.status;
+                throw error;
             }
-            if (!isGatewayAssetPath(body.path, assetType)) {
+            const resolvedAssetType = assetType === 'auto' ? String(body.assetType || '').trim() : assetType;
+            if (!['glb', 'threejs-app'].includes(resolvedAssetType) || !isGatewayAssetPath(body.path, resolvedAssetType)) {
                 throw new Error('Gateway returned an invalid digital twin asset path');
             }
             if (fields.assetUrl) fields.assetUrl.value = body.path;
             gatewayUploadedAssetUrl = body.path;
             gatewayUploadedAssetAccessKey = accessKey;
+            gatewayUploadedAssetType = resolvedAssetType;
             lastAssetValidation = {
-                key: assetValidationKey(labId, accessKey, assetType, null, body.path),
+                key: assetValidationKey(labId, accessKey, resolvedAssetType, null, body.path),
                 report: body.validation,
             };
             renderAssetValidation(body.validation);
-            return body;
+            return { ...body, assetType: resolvedAssetType };
         }
 
         function appendMetadataToForm(form, metadata) {
@@ -351,18 +539,31 @@
                 showToast('Select an FMU laboratory', 'error');
                 return;
             }
-            const assetType = isFmu
+            const selectedAssetType = isFmu
                 ? String(extraInfo.digitalTwinAssetType || fields.assetType?.value || '').trim()
                 : '';
+            let assetType = selectedAssetType;
+            if (assetType === 'auto') {
+                assetType = assetFile
+                    ? inferAssetTypeFromFile(assetFile)
+                    : gatewayUploadedAssetUrl === String(extraInfo.digitalTwinAssetUrl || '').trim()
+                        ? gatewayUploadedAssetType
+                        : inferAssetTypeFromUrl(extraInfo.digitalTwinAssetUrl);
+            }
+            const hasVisualAsset = Boolean(
+                assetFile
+                || extraInfo.digitalTwinAssetUrl
+                || (selectedAssetType && selectedAssetType !== 'auto'),
+            );
             if (aasxFile && assetFile) {
                 showToast('Choose either an AASX package or a visual asset for generated FMU metadata', 'error');
                 return;
             }
-            if (aasxFile && (assetType || extraInfo.digitalTwinAssetUrl)) {
+            if (aasxFile && hasVisualAsset) {
                 showToast('An uploaded AASX package must contain its own visual asset reference', 'error');
                 return;
             }
-            if ((assetFile || assetType || extraInfo.digitalTwinAssetUrl) && !isFmu) {
+            if (hasVisualAsset && !isFmu) {
                 showToast('A visual companion asset can only be attached to an FMU laboratory', 'error');
                 return;
             }
@@ -412,18 +613,24 @@
                     if (fields.assetUrl) fields.assetUrl.value = syncInfo.digitalTwinAssetUrl;
                     gatewayUploadedAssetUrl = syncInfo.digitalTwinAssetUrl;
                     gatewayUploadedAssetAccessKey = accessKey;
+                    gatewayUploadedAssetType = assetType;
                 }
                 if (
                     isFmu
                     && !assetFile
                     && !aasxFile
-                    && assetType
+                    && selectedAssetType
                     && !syncInfo.digitalTwinAssetUrl
                 ) {
-                    const importedAsset = await importCompanionAsset(labId, accessKey, assetType);
-                    syncInfo.digitalTwinAssetUrl = importedAsset.path;
-                    const validationKey = assetValidationKey(labId, accessKey, assetType, null, importedAsset.path);
-                    if (!reviewAssetValidation(importedAsset.validation, validationKey)) return;
+                    try {
+                        const importedAsset = await importCompanionAsset(labId, accessKey, selectedAssetType);
+                        syncInfo.digitalTwinAssetUrl = importedAsset.path;
+                        const validationKey = assetValidationKey(labId, accessKey, importedAsset.assetType, null, importedAsset.path);
+                        if (!reviewAssetValidation(importedAsset.validation, validationKey)) return;
+                    } catch (error) {
+                        if (selectedAssetType !== 'auto' || error.status !== 404) throw error;
+                        showToast('No REF visual asset or same-name companion was found. Sync can continue without one; choose GLB scene or Three.js application to add one manually.', 'info');
+                    }
                 } else if (!assetFile && assetType && !aasxFile && syncInfo.digitalTwinAssetUrl) {
                     const validationKey = assetValidationKey(labId, accessKey, assetType, null, syncInfo.digitalTwinAssetUrl);
                     const knownValidation = lastAssetValidation?.key === validationKey
@@ -522,6 +729,7 @@
                     clearAllFmuHints();
                     clearAssetValidation();
                     updateAssetVisibility();
+                    renderFmuBindingAssistant();
                 });
                 fields.keyInput.addEventListener('change', () => {
                     const laboratory = selectedLaboratory();
@@ -541,11 +749,8 @@
                 });
             }
             if (fields.assetType) {
-                if (fields.assetFileInput) {
-                    fields.assetFileInput.accept = fields.assetType.value === 'glb'
-                        ? '.glb,model/gltf-binary'
-                        : fields.assetType.value === 'threejs-app' ? '.zip,application/zip' : '';
-                }
+                updateAssetFileAccept(fields.assetType.value);
+                updateAssetOptionsVisibility();
                 fields.assetType.addEventListener('change', () => {
                     clearAssetValidation();
                     if (fields.assetUrl) fields.assetUrl.value = '';
@@ -553,11 +758,10 @@
                     if (fields.assetFileName) fields.assetFileName.textContent = 'No file chosen';
                     gatewayUploadedAssetUrl = '';
                     gatewayUploadedAssetAccessKey = '';
-                    if (fields.assetFileInput) {
-                        fields.assetFileInput.accept = fields.assetType.value === 'glb'
-                            ? '.glb,model/gltf-binary'
-                            : fields.assetType.value === 'threejs-app' ? '.zip,application/zip' : '';
-                    }
+                    gatewayUploadedAssetType = '';
+                    updateAssetFileAccept(fields.assetType.value);
+                    updateAssetOptionsVisibility();
+                    renderFmuBindingAssistant();
                 });
             }
             if (fields.assetFileInput) {
@@ -565,6 +769,7 @@
                     clearAssetValidation();
                     const file = fields.assetFileInput.files && fields.assetFileInput.files[0];
                     if (fields.assetFileName) fields.assetFileName.textContent = file ? file.name : 'No file chosen';
+                    renderFmuBindingAssistant(file);
                 });
             }
             if (fields.assetUrl) {
@@ -585,16 +790,21 @@
                     fields.importAssetButton.disabled = true;
                     try {
                         const asset = await importCompanionAsset(laboratory.labId, laboratory.accessKey, assetType);
-                        const validationKey = assetValidationKey(laboratory.labId, laboratory.accessKey, assetType, null, asset.path);
+                        await loadImportedGlbForBindingEditor(asset);
+                        const validationKey = assetValidationKey(laboratory.labId, laboratory.accessKey, asset.assetType, null, asset.path);
                         if (needsAssetValidationAcknowledgement(asset.validation)) {
                             acknowledgedAssetValidationKey = validationKey;
                             showToast('Review the validation findings before synchronizing the AAS.', 'info');
                         } else {
-                            showToast(`Companion asset imported from ${asset.source || 'FMU backend'}`, 'success');
+                            showToast(`Companion asset imported (${asset.assetSource || asset.source || 'FMU backend'})`, 'success');
                         }
                     } catch (error) {
                         logger.error(error);
-                        showToast(`Companion asset import failed: ${error.message}`, 'error');
+                        if (assetType === 'auto' && error.status === 404) {
+                            showToast('No REF visual asset or same-name companion was found. Upload a .webapp.zip or .glb if you want to add one.', 'info');
+                        } else {
+                            showToast(`Companion asset import failed: ${error.message}`, 'error');
+                        }
                     } finally {
                         fields.importAssetButton.disabled = false;
                     }
@@ -622,6 +832,11 @@
             fields.regenerateAccessPolicyButton?.addEventListener('click', () => {
                 void regenerateAccessPolicy();
             });
+            fields.authorizeCoSimulation?.addEventListener('change', () => updateExecutionInterfaceEditor());
+            fields.authorizeModelExchange?.addEventListener('change', () => updateExecutionInterfaceEditor());
+            fields.saveExecutionInterfacesButton?.addEventListener('click', () => {
+                void saveExecutionInterfaces();
+            });
             updateAssetVisibility();
         }
 
@@ -631,6 +846,7 @@
             initialize,
             loadAccessPolicyStatus,
             regenerateAccessPolicy,
+            saveExecutionInterfaces,
             renderAccessPolicyStatus,
             syncAasResource,
         });

@@ -7,16 +7,9 @@ services:
       - ./openresty/conf.d/gateway_dev_fmu_sessions.conf:/etc/openresty/conf.d/gateway_dev_fmu_sessions.conf:ro
       - ./openresty/conf.d/gateway_fmu.conf:/etc/openresty/conf.d/gateway_fmu.conf:ro
       - ./openresty/conf.d/gateway_dev_smart_warehouse.conf:/etc/openresty/conf.d/gateway_dev_smart_warehouse.conf:ro
-      - ./openresty/conf.d/gateway_dev_boptest_building.conf:/etc/openresty/conf.d/gateway_dev_boptest_building.conf:ro
-      - ./openresty/conf.d/gateway_dev_qfmu.conf:/etc/openresty/conf.d/gateway_dev_qfmu.conf:ro
-      - ./openresty/conf.d/gateway_dev_dc_motor.conf:/etc/openresty/conf.d/gateway_dev_dc_motor.conf:ro
-      - ./openresty/conf.d/gateway_dev_water_tank.conf:/etc/openresty/conf.d/gateway_dev_water_tank.conf:ro
-      - ./openresty/conf.d/gateway_dev_lateral_motion.conf:/etc/openresty/conf.d/gateway_dev_lateral_motion.conf:ro
-      - ./openresty/conf.d/gateway_dev_inverted_pendulum.conf:/etc/openresty/conf.d/gateway_dev_inverted_pendulum.conf:ro
 
-  # qFMU, DC motor, water tank and inverted-pendulum runs share this generic
-  # Executor/session runtime. Their per-demo OpenResty routes only serve app
-  # assets; the other local demos may have additional preview routes.
+  # Local FMU previews share this generic Executor/session runtime. Other
+  # local demos may have additional preview routes.
   fmu-executor-local:
     image: decentralabs/fmu-executor:local-smart-warehouse
     build:
@@ -30,11 +23,11 @@ services:
       # Run local native demo FMUs in isolated workers, keeping writable runtime
       # files under the per-run temporary workspace.
       - FMU_EXECUTION_MODE=process
-      # Complex Air's EnergyPlus initialization needs more address space than
-      # the standard small-FMU worker budget; this override is local-only.
+      # Use one worker memory budget across the local-demo FMUs. The larger
+      # budget covers BOPTEST's EnergyPlus initialization as well.
       - FMU_WORKER_MEMORY_MIB=3072
-      # The demo's 15 zones use two setpoint inputs and two activation flags each.
-      - FMU_MAX_SIMULATION_PARAMETERS=64
+      # Local demonstrations may expose FMUs with more than 128 editable parameters.
+      - FMU_MAX_SIMULATION_PARAMETERS=256
       # Local demos may use denser fixed-step models than published labs.
       # Keep the limit finite: 600,000 steps covers sixty seconds at 0.1 ms.
       - FMU_MAX_SIMULATION_STEPS=600000
@@ -52,9 +45,8 @@ services:
       # This one local-only FMU launches Spawn. The executor grants child-process
       # execution only to this access key and the exact configured binary.
       - FMU_SPAWN_ACCESS_KEYS=local-demos/boptest-building/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu
-      # BOPTEST's bundled OpenBLAS runtime cannot start its worker pool under
-      # the Executor memory limit. Apply single-threaded native math only here.
-      - FMU_NATIVE_THREAD_LIMIT_ACCESS_KEYS=local-demos/boptest-building/linux64/BOPTEST-MultizoneOfficeComplexAir.fmu
+      # Apply the same native BLAS/OpenMP thread cap to every local demo FMU.
+      - FMU_NATIVE_THREAD_LIMIT=${FMU_NATIVE_THREAD_LIMIT:-2}
       - FMU_SPAWN_EXECUTABLE=/var/lib/fmu-executor/state/local-runtime/Spawn-light-0.4.3-7048a72798-Linux/bin/spawn-0.4.3-7048a72798
     entrypoint: ["/bin/sh", "/run/local-boptest-entrypoint.sh"]
     command: ["python", "-m", "app"]

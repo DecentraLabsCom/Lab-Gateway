@@ -2,8 +2,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from simulation_access_policy import build_effective_policy
+from stream_router import create_stream_router
 
 
 with patch("auth.verify_jwt", return_value={"sub": "test-user", "labId": "1", "accessKey": "test.fmu", "resourceType": "fmu"}):
@@ -168,20 +170,35 @@ def test_stream_station_mode_forwards_request(monkeypatch):
     station_backend = _StationBackendStub()
     monkeypatch.setattr(application._runner_runtime, "backend", _StationMode())
     monkeypatch.setattr(application, "_get_station_backend", lambda: station_backend)
+    verify_jwt = AsyncMock(return_value={
+        "sub": "test-user",
+        "labId": "1",
+        "accessKey": "test.fmu",
+        "resourceType": "fmu",
+        "reservationKey": "0xreservation",
+        "pucHash": "puc-test-user",
+    })
+    stream_app = FastAPI()
+    stream_app.include_router(create_stream_router(
+        verify_jwt=verify_jwt,
+        enforce_fmu_claim=lambda _claims: None,
+        stream_station_simulation=application._stream_station_simulation,
+    ))
 
-    response = client.post(
+    response = TestClient(stream_app).post(
         "/api/v1/simulations/stream",
         json={
             "labId": "1",
-            "reservationKey": "res-1",
+            "reservationKey": "0xreservation",
             "parameters": {"u": 1.0},
             "options": {"stopTime": 2.0},
         },
         headers={"Authorization": "Bearer station-token"},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.text == '{"type":"started"}\n{"type":"completed"}\n'
+    verify_jwt.assert_awaited_once()
     assert station_backend.stream_call["authorization"] == "Bearer station-token"
     assert station_backend.stream_call["request_payload"]["labId"] == "1"
 

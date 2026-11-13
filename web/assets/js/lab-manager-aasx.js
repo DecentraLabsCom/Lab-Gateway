@@ -116,16 +116,18 @@
                                         <div>${shellCount} shell${shellCount === 1 ? '' : 's'}</div>
                                         <div class="muted-text">${submodelCount} submodel${submodelCount === 1 ? '' : 's'}</div>
                                     </td>
-                                    <td class="lab-actions">
-                                        <button class="mini-btn" type="button" data-aasx-view="${escape(labId)}">
-                                            <i class="fas fa-eye" aria-hidden="true"></i> View
-                                        </button>
-                                        <a class="mini-btn" href="${escape(downloadUrl)}" download>
-                                            <i class="fas fa-download" aria-hidden="true"></i> Download
-                                        </a>
-                                        <button class="mini-btn danger" type="button" data-aasx-delete="${escape(labId)}">
-                                            <i class="fas ${source === 'linked' ? 'fa-unlink' : 'fa-trash'}" aria-hidden="true"></i> ${deleteLabel}
-                                        </button>
+                                    <td>
+                                        <div class="lab-actions">
+                                            <button class="mini-btn" type="button" data-aasx-view="${escape(labId)}">
+                                                <i class="fas fa-eye" aria-hidden="true"></i> View
+                                            </button>
+                                            <a class="mini-btn" href="${escape(downloadUrl)}" download>
+                                                <i class="fas fa-download" aria-hidden="true"></i> Download
+                                            </a>
+                                            <button class="mini-btn danger" type="button" data-aasx-delete="${escape(labId)}">
+                                                <i class="fas ${source === 'linked' ? 'fa-unlink' : 'fa-trash'}" aria-hidden="true"></i> ${deleteLabel}
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             `;

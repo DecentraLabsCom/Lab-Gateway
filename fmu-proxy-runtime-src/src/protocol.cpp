@@ -11,11 +11,16 @@ const std::vector<std::string_view> kClientMessages = {
     kSessionPing,
     kModelDescribe,
     kSimInitialize,
+    kSimExitInitializationMode,
+    kSimTerminateFmu,
     kSimSetInputs,
+    kSimReconfigure,
     kSimStep,
     kSimAdvance,
     kSimGetOutputs,
     kSimReset,
+    kSimCaptureFmuState,
+    kSimRestoreFmuState,
     kSessionTerminate,
 };
 
@@ -27,6 +32,8 @@ const std::vector<std::string_view> kServerMessages = {
     kSimOutputs,
     kSimSamples,
     kSimInputsUpdated,
+    kSimReconfigured,
+    kSimFmuState,
     kSessionClosed,
     kError,
 };

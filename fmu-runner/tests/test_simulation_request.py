@@ -30,8 +30,8 @@ def test_simulation_request_accepts_models_with_more_than_32_fmi_parameters():
 
 
 def test_simulation_request_rejects_excessive_parameter_maps():
-    with pytest.raises(ValidationError, match="at most 128 parameters"):
-        SimulationRequest(parameters={f"parameter_{index}": index for index in range(129)})
+    with pytest.raises(ValidationError, match="at most 256 parameters"):
+        SimulationRequest(parameters={f"parameter_{index}": index for index in range(257)})
 
 
 def test_simulation_request_obeys_configured_gateway_parameter_limit(monkeypatch):

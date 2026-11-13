@@ -1,18 +1,21 @@
 """Sync canonical FMU examples into Gateway's ignored development data directory.
 
-The six reference FMUs and Smart Warehouse are synced by default. Local
-BOPTEST, qFMU, water-tank, DC-motor, inverted-pendulum and lateral-motion demos
-require explicit flags. This script never adds demo files to Gateway images or
-release packages.
+The seven reference FMUs and Smart Warehouse are synced by default. Local
+BOPTEST, qFMU, water-tank, DC-motor, inverted-pendulum, lateral-motion and
+FMI-LS-DAE demos require explicit flags. This script never adds demo files to
+Gateway images or release packages.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import math
 import posixpath
 import re
 import shutil
+import struct
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
@@ -27,6 +30,7 @@ REFERENCE_FMU_NAMES = {
     "BinaryClockTest.fmu",
     "BouncingBall.fmu",
     "Feedthrough.fmu",
+    "SimpleDAE.fmu",
     "Stair.fmu",
     "StateSpace.fmu",
     "VanDerPol.fmu",
@@ -43,20 +47,20 @@ BOPTEST_COMPLEX_APP_NAME = "BOPTEST-MultizoneOfficeComplexAir.webapp.zip"
 BOPTEST_COMPLEX_LICENSE_NAME = "BOPTEST-ComplexAir.LICENSE.txt"
 BOPTEST_COMPLEX_ZONES = ("Cor", "Sou", "Eas", "Nor", "Wes")
 QFMU_LICENSE_NAME = "LICENSE-qFMU.txt"
-QFMU_MODELS = {
-    "qFMU_FirstOrder.fmu": ({"u1"}, {"y1"}),
-    "qFMU_SecondOrder.fmu": ({"u1"}, {"y1"}),
-    "qFMU_SISO.fmu": ({"u1"}, {"y1"}),
-    "qFMU_MIMO.fmu": ({"u1", "u2"}, {"y1", "y2"}),
+QFMU_FMU_NAME = "qFMU_LinearSystems.fmu"
+QFMU_OUTPUTS = {
+    "y1", "y2", "u1_applied", "u2_applied",
+    "state1_sample", "state2_sample", "state3_sample",
+    "pole1_real", "pole1_imaginary", "pole2_real", "pole2_imaginary",
+    "pole3_real", "pole3_imaginary", "dc_gain_y1_u1", "dc_gain_y1_u2",
+    "dc_gain_y2_u1", "dc_gain_y2_u2", "controllability_rank",
+    "observability_rank", "stability_code",
 }
-QFMU_WEBAPP_REQUIRED_FILES = {
-    "index.html",
-    "app.js",
-    "styles.css",
-    "app-config.json",
-    "models.json",
-    "qfmuModelUtils.js",
-    "components/QfmuResponseChart.js",
+QFMU_LEGACY_ASSETS = {
+    "qFMU_FirstOrder.fmu", "qFMU_SecondOrder.fmu", "qFMU_SISO.fmu", "qFMU_MIMO.fmu",
+    "qFMU_FirstOrder.webapp.zip", "qFMU_SecondOrder.webapp.zip",
+    "qFMU_SISO.webapp.zip", "qFMU_MIMO.webapp.zip", "qFMU_LinearSystems.webapp.zip",
+    "qFMU-webapp-inventory.json", "qFMU-webapp-SHA256SUMS.txt",
 }
 FMU_SESSION_APP_MARKERS = (
     "decentralabs:digital-twin-connect",
@@ -72,6 +76,7 @@ LATERAL_MOTION_APP_NAME = "LateralMotionControl.webapp.zip"
 WATER_TANK_FMU_NAME = "singlewatertank-20sim.fmu"
 WATER_TANK_APP_NAME = "singlewatertank-20sim.webapp.zip"
 DC_MOTOR_REQUIRED_PARAMETERS = {
+    "sine.offset",
     "speedController.k",
     "speedController.Ti",
     "damper.d",
@@ -82,7 +87,19 @@ DC_MOTOR_REQUIRED_PARAMETERS = {
     "data.Ja.value",
     "data.Jm.value",
 }
-DC_MOTOR_REQUIRED_OUTPUTS = {"out_control_err", "out_load_speed", "out_motor_speed"}
+DC_MOTOR_REQUIRED_OUTPUT_UNITS = {
+    "out_control_err": "rad/s",
+    "out_load_speed": "rad/s",
+    "out_motor_speed": "rad/s",
+    "out_motor_position": "rad",
+    "out_gear_position": "rad",
+    "out_load_position": "rad",
+    "out_shaft_twist": "rad",
+    "out_reference": "rad/s",
+    "out_motor_torque": "N.m",
+    "out_load_torque": "N.m",
+    "out_shaft_torque_on_load": "N.m",
+}
 EXTERNAL_ANCHOR_HREF_PATTERN = re.compile(
     r'(<a\b[^>]*?\bhref\s*=\s*)(["\'])https?://[^"\']*\2',
     re.IGNORECASE,
@@ -115,6 +132,191 @@ def validate_linux_x64_fmu(path: Path) -> set[str]:
     if not linux_x64_entries:
         raise ValueError(f"FMU has no Linux x86_64 binary: {path}")
     return names
+
+
+def validate_local_glb_output_bindings(
+    scene_path: Path,
+    fmu_path: Path,
+    *,
+    require_bindings: bool = True,
+    required_bindings: set[tuple[str, str]] | None = None,
+    required_input_bindings: set[tuple[str, str]] | None = None,
+) -> None:
+    """Check companion GLB bindings against the FMU interface they visualize."""
+    try:
+        scene_bytes = scene_path.read_bytes()
+        if len(scene_bytes) < 20 or scene_bytes[:4] != b"glTF":
+            raise ValueError("invalid GLB header")
+        version, declared_length = struct.unpack_from("<II", scene_bytes, 4)
+        chunk_length, chunk_type = struct.unpack_from("<I4s", scene_bytes, 12)
+        if version != 2 or declared_length != len(scene_bytes) or chunk_type != b"JSON":
+            raise ValueError("invalid GLB version, length, or JSON chunk")
+        document = json.loads(scene_bytes[20 : 20 + chunk_length].decode("utf-8").rstrip("\x00 "))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, struct.error, ValueError) as error:
+        raise ValueError(f"Invalid companion GLB {scene_path}: {error}") from error
+    if not isinstance(document, dict) or not isinstance(document.get("nodes"), list):
+        raise ValueError(f"Invalid companion GLB {scene_path}: the node list is missing")
+
+    try:
+        with zipfile.ZipFile(fmu_path) as archive:
+            model_description = ET.fromstring(archive.read("modelDescription.xml"))
+    except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError) as error:
+        raise ValueError(f"Unable to inspect FMU variables in {fmu_path}: {error}") from error
+
+    model_variables = model_description.find("ModelVariables")
+    if model_variables is None:
+        raise ValueError(f"FMU has no ModelVariables interface: {fmu_path}")
+    variables = {
+        variable.get("name"): variable
+        for variable in model_variables
+        if isinstance(variable.get("name"), str)
+    }
+    targets = {
+        "position.x", "position.y", "position.z",
+        "translation.x", "translation.y", "translation.z",
+        "rotation.x", "rotation.y", "rotation.z",
+        "scale.x", "scale.y", "scale.z", "visible", "material.color",
+    }
+    draggable_input_targets = {
+        "position.x", "position.y", "position.z",
+        "translation.x", "translation.y", "translation.z",
+        "rotation.x", "rotation.y", "rotation.z",
+    }
+    bindings_found = 0
+    binding_pairs: set[tuple[str, str]] = set()
+    input_binding_pairs: set[tuple[str, str]] = set()
+    for node_index, node in enumerate(document.get("nodes", [])):
+        extras = node.get("extras") if isinstance(node, dict) else None
+        if not isinstance(extras, dict) or "fmiBindings" not in extras:
+            continue
+        bindings = extras["fmiBindings"]
+        if not isinstance(bindings, list):
+            raise ValueError(f"{scene_path}: node {node_index} fmiBindings must be an array")
+        for binding_index, binding in enumerate(bindings):
+            bindings_found += 1
+            if not isinstance(binding, dict):
+                raise ValueError(f"{scene_path}: node {node_index} binding {binding_index} must be an object")
+            name = binding.get("variable")
+            if not isinstance(name, str):
+                raise ValueError(f"{scene_path}: node {node_index} binding {binding_index} must name an FMU variable")
+            variable = variables.get(name)
+            if variable is None:
+                raise ValueError(f"{scene_path}: binding references unknown FMU variable {name!r}")
+            causality = (variable.get("causality") or "local").lower()
+            target = binding.get("target")
+            if causality == "input":
+                if not isinstance(target, str) or target not in draggable_input_targets:
+                    raise ValueError(
+                        f"{scene_path}: input {name!r} must bind to one draggable translation or rotation axis"
+                    )
+                variable_type = variable.tag.rsplit("}", 1)[-1]
+                numeric_types = {
+                    "Real", "Integer", "Float32", "Float64", "Int8", "UInt8",
+                    "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64",
+                }
+                if variable_type not in numeric_types and not any(
+                    child.tag.rsplit("}", 1)[-1] in numeric_types for child in variable
+                ):
+                    raise ValueError(f"{scene_path}: draggable input {name!r} must be numeric")
+                scale = binding.get("scale", 1)
+                if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale == 0:
+                    raise ValueError(f"{scene_path}: draggable input {name!r} must have a finite, non-zero scale")
+                input_binding_pairs.add((name, target))
+                continue
+            if causality != "output":
+                raise ValueError(
+                    f"{scene_path}: {name!r} must be an FMU input or output"
+                )
+            if not isinstance(target, str) or target not in targets:
+                raise ValueError(f"{scene_path}: {name!r} has an unsupported target {target!r}")
+            binding_pairs.add((name, target))
+            for field in ("scale", "offset", "visibleWhenGreaterThanOrEqual"):
+                if field in binding and (
+                    isinstance(binding[field], bool)
+                    or not isinstance(binding[field], (int, float))
+                    or not math.isfinite(binding[field])
+                ):
+                    raise ValueError(f"{scene_path}: {name!r} has an invalid {field}")
+
+    if bindings_found == 0 and require_bindings:
+        raise ValueError(f"The local GLB has no FMI output bindings: {scene_path}")
+    missing_bindings = (required_bindings or set()) - binding_pairs
+    if missing_bindings:
+        missing = ", ".join(f"{name} -> {target}" for name, target in sorted(missing_bindings))
+        raise ValueError(f"{scene_path}: required FMI output bindings are missing: {missing}")
+    missing_input_bindings = (required_input_bindings or set()) - input_binding_pairs
+    if missing_input_bindings:
+        missing = ", ".join(f"{name} -> {target}" for name, target in sorted(missing_input_bindings))
+        raise ValueError(f"{scene_path}: required FMI input bindings are missing: {missing}")
+
+
+def validate_fmi_ls_dae_fmu(
+    path: Path,
+    *,
+    required_variables: dict[str, tuple[str, str | None]] | None = None,
+    required_outputs: set[str] | None = None,
+    require_model_exchange_only: bool = True,
+) -> None:
+    """Check a Linux FMI 3 Model Exchange FMU and its FMI-LS-DAE manifest."""
+    names = validate_linux_x64_fmu(path)
+    manifest_path = "extra/org.fmi-standard.fmi-ls-dae/fmi-ls-manifest.xml"
+    if manifest_path not in names:
+        raise ValueError(f"The FMI-LS-DAE manifest is missing from {path.name}.")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            description = ET.fromstring(archive.read("modelDescription.xml"))
+            manifest = ET.fromstring(archive.read(manifest_path))
+    except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError) as error:
+        raise ValueError(f"Invalid FMI-LS-DAE FMU {path}: {error}") from error
+
+    if description.attrib.get("fmiVersion") != "3.0" or description.find("{*}ModelExchange") is None:
+        raise ValueError(f"{path.name} must expose FMI 3.0 Model Exchange.")
+    if require_model_exchange_only and description.find("{*}CoSimulation") is not None:
+        raise ValueError(
+            f"{path.name} declares Co-Simulation as well as Model Exchange, so the Executor would not select its DAE path."
+        )
+    if manifest.tag.rsplit("}", 1)[-1] != "fmiDAEManifest":
+        raise ValueError(f"{path.name} contains an unexpected FMI-LS-DAE manifest root.")
+    variables_node = description.find("{*}ModelVariables")
+    if variables_node is None:
+        raise ValueError(f"{path.name} has no FMI model variables.")
+    variables = {
+        variable.attrib["name"]: variable
+        for variable in variables_node
+        if variable.attrib.get("name")
+    }
+    for name, (causality, unit) in (required_variables or {}).items():
+        variable = variables.get(name)
+        if variable is None:
+            raise ValueError(f"{path.name} is missing FMI variable {name!r}.")
+        if variable.attrib.get("causality", "local") != causality:
+            raise ValueError(f"{path.name} variable {name!r} must have causality {causality!r}.")
+        scalar = variable if variable.tag.rsplit("}", 1)[-1] in {"Float32", "Float64"} else next(
+            (child for child in variable if child.tag.rsplit("}", 1)[-1] in {"Float32", "Float64"}),
+            None,
+        )
+        if scalar is None:
+            raise ValueError(f"{path.name} variable {name!r} must be a floating-point scalar.")
+        actual_unit = scalar.attrib.get("unit")
+        if unit is not None and actual_unit != unit:
+            raise ValueError(f"{path.name} variable {name!r} must use unit {unit!r}.")
+
+    if required_outputs:
+        expected_references = {
+            variable.attrib.get("valueReference")
+            for name, variable in variables.items()
+            if name in required_outputs
+        }
+        if None in expected_references or len(expected_references) != len(required_outputs):
+            raise ValueError(f"{path.name} is missing one or more required output variables.")
+        structure = manifest.find("{*}ModelStructure")
+        outputs = {
+            item.attrib.get("valueReference")
+            for item in (list(structure) if structure is not None else [])
+            if item.tag.rsplit("}", 1)[-1] == "Output"
+        }
+        if not expected_references <= outputs:
+            raise ValueError(f"{path.name} FMI-LS-DAE manifest does not list all required outputs.")
 
 
 def copy_verified(origin: Path, destination: Path) -> None:
@@ -216,6 +418,25 @@ def validate_webapp_bundle(path: Path) -> set[str]:
     return files
 
 
+def validate_fmu_state_checkpoint_sdk(archive: zipfile.ZipFile, app_name: str) -> None:
+    """Check the advertised checkpoint capability and its SDK client use."""
+    try:
+        sdk_index = archive.read("sdk/index.js")
+        sdk_client = archive.read("sdk/client.js")
+    except KeyError as error:
+        raise ValueError(f"The {app_name} app bundle is missing its checkpoint SDK modules.") from error
+    if (
+        b"fmu-state-checkpoints" not in sdk_index
+        or b"FMU_STATE_CHECKPOINTS" not in sdk_client
+    ):
+        raise ValueError(f"The {app_name} app bundle is missing FMU state checkpoint support in its SDK.")
+
+
+def validate_smart_warehouse_checkpoint_sdk(archive: zipfile.ZipFile) -> None:
+    """Check the Smart Warehouse app's checkpoint SDK integration."""
+    validate_fmu_state_checkpoint_sdk(archive, "Smart Warehouse")
+
+
 def validate_fmu_session_app(path: Path) -> None:
     """Require companion apps to use the host grant and generic FMI session protocol."""
     try:
@@ -239,7 +460,7 @@ def validate_fmu_session_app(path: Path) -> None:
         )
 
 
-def validate_qfmu_fmu(path: Path, expected_inputs: set[str], expected_outputs: set[str]) -> None:
+def validate_qfmu_fmu(path: Path) -> None:
     names = validate_linux_x64_fmu(path)
     identifier = path.stem
     expected_binary = f"binaries/linux64/{identifier}.so"
@@ -254,8 +475,8 @@ def validate_qfmu_fmu(path: Path, expected_inputs: set[str], expected_outputs: s
 
     if description.attrib.get("fmiVersion") != "2.0":
         raise ValueError(f"qFMU must use FMI 2.0: {path}")
-    if description.attrib.get("generationTool") != "qfmu":
-        raise ValueError(f"The FMU was not generated by qFMU: {path}")
+    if not (description.attrib.get("generationTool") or "").startswith("qFMU 0.2.9"):
+        raise ValueError(f"The local qFMU must use the parameterized qFMU 0.2.9 generator: {path}")
     co_simulation = description.find("{*}CoSimulation")
     if co_simulation is None or description.find("{*}ModelExchange") is None:
         raise ValueError(f"qFMU must expose both FMI Co-Simulation and Model Exchange: {path}")
@@ -280,29 +501,46 @@ def validate_qfmu_fmu(path: Path, expected_inputs: set[str], expected_outputs: s
             inputs.add(name)
         else:
             outputs.add(name)
-    if inputs != expected_inputs or outputs != expected_outputs:
+    if inputs != {"u1", "u2"} or outputs != QFMU_OUTPUTS:
         raise ValueError(
             f"Unexpected qFMU variables in {path.name}: inputs={sorted(inputs)}, "
             f"outputs={sorted(outputs)}"
         )
-
-
-def validate_qfmu_webapp(path: Path) -> None:
-    validate_webapp_bundle(path)
-    validate_fmu_session_app(path)
     try:
         with zipfile.ZipFile(path) as archive:
-            names = set(archive.namelist())
-            missing = QFMU_WEBAPP_REQUIRED_FILES - names
-            if missing:
-                raise ValueError(f"qFMU app is missing files: {', '.join(sorted(missing))}")
-    except (OSError, UnicodeDecodeError, zipfile.BadZipFile) as error:
-        raise ValueError(f"Invalid qFMU companion app {path}: {error}") from error
+            archive_names = set(archive.namelist())
+            ref_root = "extra/org.fmi-standard.fmi-ls-ref/"
+            manifest_name = f"{ref_root}fmi-ls-manifest.xml"
+            if manifest_name not in archive_names:
+                raise ValueError(f"The parameterized qFMU is missing {manifest_name}.")
+            manifest = ET.fromstring(archive.read(manifest_name))
+            resource_names = {
+                item.attrib["source"] for item in manifest.findall("Related")
+                if item.get("source")
+            }
+            for experiment_name in tuple(resource_names):
+                if not experiment_name.endswith(".exp"):
+                    continue
+                experiment = ET.fromstring(archive.read(f"{ref_root}{experiment_name}"))
+                resource_names.update(
+                    item.attrib["source"] for item in experiment.findall(".//Parameters")
+                    if item.get("source")
+                )
+            missing_resources = {
+                f"{ref_root}{resource}" for resource in resource_names
+                if f"{ref_root}{resource}" not in archive_names
+            }
+            if missing_resources:
+                raise ValueError(f"qFMU FMI-LS resources are missing: {', '.join(sorted(missing_resources))}")
+            if any("webapp" in name.lower() for name in archive_names):
+                raise ValueError("The model-driven qFMU must not package a companion web app.")
+    except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError) as error:
+        raise ValueError(f"Invalid qFMU FMI-LS resources in {path}: {error}") from error
 
 
 def validate_dc_motor_fmu(path: Path) -> None:
     names = validate_linux_x64_fmu(path)
-    expected_binary = "binaries/linux64/DC_motor.so"
+    expected_binary = "binaries/linux64/DC_motor_with_positions.so"
     if expected_binary not in names:
         raise ValueError(f"The DC motor FMU is missing its Linux x86_64 binary {expected_binary}.")
     try:
@@ -311,11 +549,11 @@ def validate_dc_motor_fmu(path: Path) -> None:
     except (OSError, zipfile.BadZipFile, ET.ParseError) as error:
         raise ValueError(f"Invalid DC motor model description: {error}") from error
 
-    if description.attrib.get("fmiVersion") != "2.0":
-        raise ValueError("The DC motor FMU must use FMI 2.0.")
+    if description.attrib.get("fmiVersion") != "2.0" or description.attrib.get("modelName") != "DC_motor_with_positions":
+        raise ValueError("The local DC motor demo requires the reviewed FMI 2.0 DC_motor_with_positions wrapper.")
     co_simulation = description.find("{*}CoSimulation")
-    if co_simulation is None or co_simulation.attrib.get("modelIdentifier") != "DC_motor":
-        raise ValueError("The DC motor FMU must expose FMI Co-Simulation with modelIdentifier DC_motor.")
+    if co_simulation is None or co_simulation.attrib.get("modelIdentifier") != "DC_motor_with_positions":
+        raise ValueError("The reviewed DC motor FMU must expose Co-Simulation as DC_motor_with_positions.")
     variables = description.find("{*}ModelVariables")
     if variables is None:
         raise ValueError("The DC motor FMU has no model variables.")
@@ -334,11 +572,32 @@ def validate_dc_motor_fmu(path: Path) -> None:
             outputs.add(name)
         elif causality == "parameter" and variable.attrib.get("variability") != "constant":
             parameters.add(name)
-    if inputs != {"in_torque"}:
+    if inputs != {"in_torque", "in_load_angle_jump"}:
         raise ValueError(f"Unexpected DC motor FMU inputs: {sorted(inputs)}")
-    missing_outputs = DC_MOTOR_REQUIRED_OUTPUTS - outputs
+    jump_input = next((variable for variable in variables if variable.get("name") == "in_load_angle_jump"), None)
+    jump_input_real = jump_input.find("Real") if jump_input is not None else None
+    if (
+        jump_input is None
+        or jump_input.get("causality") != "input"
+        or jump_input.get("variability") != "discrete"
+        or jump_input_real is None
+        or jump_input_real.get("unit") != "rad"
+        or jump_input_real.get("start") != "0"
+        or jump_input_real.get("min") != "-0.4"
+        or jump_input_real.get("max") != "0.4"
+    ):
+        raise ValueError("The DC motor FMU must expose a discrete load-angle jump input in rad bounded to +/-0.4.")
+    missing_outputs = set(DC_MOTOR_REQUIRED_OUTPUT_UNITS) - outputs
     if missing_outputs:
         raise ValueError("The DC motor FMU is missing output signals: " + ", ".join(sorted(missing_outputs)))
+    for variable in variables:
+        variable_name = variable.attrib.get("name")
+        if variable_name is None or variable_name not in DC_MOTOR_REQUIRED_OUTPUT_UNITS:
+            continue
+        expected_unit = DC_MOTOR_REQUIRED_OUTPUT_UNITS[variable_name]
+        real = variable.find("{*}Real")
+        if variable.attrib.get("causality") != "output" or real is None or real.attrib.get("unit") != expected_unit:
+            raise ValueError(f"The DC motor output {variable_name} must be FMI Real with unit {expected_unit}.")
     missing_parameters = DC_MOTOR_REQUIRED_PARAMETERS - parameters
     if missing_parameters:
         raise ValueError("The DC motor FMU is missing tunable parameters: " + ", ".join(sorted(missing_parameters)))
@@ -359,6 +618,11 @@ def validate_inverted_pendulum_fmu(path: Path) -> None:
     co_simulation = description.find("{*}CoSimulation")
     if co_simulation is None or co_simulation.attrib.get("modelIdentifier") != "InvertedPendulum":
         raise ValueError("The inverted-pendulum FMU must expose FMI Co-Simulation as InvertedPendulum.")
+    if (
+        co_simulation.attrib.get("canGetAndSetFMUstate") != "true"
+        or co_simulation.attrib.get("canSerializeFMUstate") != "true"
+    ):
+        raise ValueError("The inverted-pendulum FMU must support get/set and serialization of FMU state.")
     variables = description.find("{*}ModelVariables")
     if variables is None:
         raise ValueError("The inverted-pendulum FMU has no model variables.")
@@ -386,6 +650,7 @@ def validate_dc_motor_app(path: Path) -> None:
             required = {
                 "index.html",
                 "app.js",
+                "model.js",
                 "scene.js",
                 "styles.css",
                 "vendor/three.module.js",
@@ -541,6 +806,7 @@ def sync(
     include_local_water_tank: bool = False,
     include_local_inverted_pendulum: bool = False,
     include_local_lateral_motion: bool = False,
+    include_local_fmi_ls_dae_demos: bool = False,
 ) -> None:
     target.mkdir(parents=True, exist_ok=True)
     boptest_target = target / "local-demos" / "boptest-building" / "linux64"
@@ -604,6 +870,10 @@ def sync(
         copy_verified(source, target / name)
 
     copy_verified(reference_root / "LICENSE.txt", target / "Reference-FMUs.LICENSE.txt")
+    dae_license = reference_root / "FMI-LS-DAE-LICENSE.txt"
+    if (reference_root / "SimpleDAE.fmu").is_file():
+        validate_fmi_ls_dae_fmu(reference_root / "SimpleDAE.fmu")
+        copy_verified(dae_license, target / "FMI-LS-DAE-LICENSE.txt")
 
     smart_warehouse_root = examples_root / "smart-warehouse-cell"
     warehouse_fmu = smart_warehouse_root / "SmartWarehouseCell-linux64.fmu"
@@ -611,12 +881,23 @@ def sync(
     warehouse_app = smart_warehouse_root / "SmartWarehouseCell.webapp.zip"
     warehouse_license = smart_warehouse_root / "LICENSE.txt"
     warehouse_entries = validate_linux_x64_fmu(warehouse_fmu)
+    with zipfile.ZipFile(warehouse_fmu) as archive:
+        warehouse_description = ET.fromstring(archive.read("modelDescription.xml"))
+    warehouse_co_simulation = warehouse_description.find("{*}CoSimulation")
+    if (
+        warehouse_co_simulation is None
+        or warehouse_co_simulation.attrib.get("modelIdentifier") != "SmartWarehouseCell"
+        or warehouse_co_simulation.attrib.get("canGetAndSetFMUstate") != "true"
+        or warehouse_co_simulation.attrib.get("canSerializeFMUstate") != "true"
+    ):
+        raise ValueError("The Smart Warehouse FMU must support get/set and serialization of FMU state.")
     if "resources/smart-warehouse-cell.glb" not in warehouse_entries:
         raise ValueError("The Smart Warehouse FMU is missing its embedded GLB scene.")
     with zipfile.ZipFile(warehouse_fmu) as archive:
         warehouse_embedded_scene = archive.read("resources/smart-warehouse-cell.glb")
     if warehouse_embedded_scene != warehouse_scene.read_bytes():
         raise ValueError("The Smart Warehouse FMU's embedded scene differs from its companion GLB.")
+    validate_local_glb_output_bindings(warehouse_scene, warehouse_fmu)
     validate_webapp_bundle(warehouse_app)
     with zipfile.ZipFile(warehouse_app) as archive:
         app_names = set(archive.namelist())
@@ -627,6 +908,7 @@ def sync(
         app_script = archive.read("app.js").decode("utf-8")
         if "createSmartWarehouseScene" not in app_script or "scene.js" not in app_script:
             raise ValueError("The Smart Warehouse app bundle does not load its procedural scene module.")
+        validate_smart_warehouse_checkpoint_sdk(archive)
         if "playbackControlPosition" not in app_script or "bottom-right" not in app_script:
             raise ValueError("The Smart Warehouse app must request the bottom-right playback control position.")
 
@@ -639,23 +921,31 @@ def sync(
         pendulum_root = examples_root / "local-demos" / "inverted-pendulum"
         pendulum_fmu = pendulum_root / INVERTED_PENDULUM_FMU_NAME
         pendulum_app = pendulum_root / INVERTED_PENDULUM_APP_NAME
+        pendulum_scene = pendulum_root / "InvertedPendulum.glb"
         validate_inverted_pendulum_fmu(pendulum_fmu)
+        validate_local_glb_output_bindings(pendulum_scene, pendulum_fmu)
         validate_local_fmu_session_app(pendulum_app, "inverted-pendulum")
+        with zipfile.ZipFile(pendulum_app) as archive:
+            validate_fmu_state_checkpoint_sdk(archive, "Inverted Pendulum")
         pendulum_target = target / "local-demos" / "inverted-pendulum" / "linux64"
         pendulum_target.mkdir(parents=True, exist_ok=True)
         copy_verified(pendulum_fmu, pendulum_target / INVERTED_PENDULUM_FMU_NAME)
         copy_verified(pendulum_app, pendulum_target / INVERTED_PENDULUM_APP_NAME)
+        copy_verified(pendulum_scene, pendulum_target / "InvertedPendulum.glb")
 
     if include_local_lateral_motion:
         lateral_root = examples_root / "local-demos" / "bosch-lateral-motion"
         lateral_fmu = lateral_root / LATERAL_MOTION_FMU_NAME
         lateral_app = lateral_root / LATERAL_MOTION_APP_NAME
+        lateral_scene = lateral_root / "LateralMotionControl.glb"
         validate_linux_x64_fmu(lateral_fmu)
+        validate_local_glb_output_bindings(lateral_scene, lateral_fmu)
         validate_local_fmu_session_app(lateral_app, "lateral-motion", {"crossover-suv.glb"})
         lateral_target = target / "local-demos" / "bosch-lateral-motion" / "linux64"
         lateral_target.mkdir(parents=True, exist_ok=True)
         copy_verified(lateral_fmu, lateral_target / LATERAL_MOTION_FMU_NAME)
         copy_verified(lateral_app, lateral_target / LATERAL_MOTION_APP_NAME)
+        copy_verified(lateral_scene, lateral_target / "LateralMotionControl.glb")
         license_path = lateral_root / "LICENSE.txt"
         if license_path.is_file():
             copy_verified(license_path, lateral_target / "LateralMotionControl.LICENSE.txt")
@@ -664,21 +954,26 @@ def sync(
         water_tank_root = examples_root / "local-demos" / "into-cps-water-tank" / "linux64"
         water_tank_fmu = water_tank_root / WATER_TANK_FMU_NAME
         water_tank_app = water_tank_root / WATER_TANK_APP_NAME
+        water_tank_scene = water_tank_root / "singlewatertank-20sim.glb"
         water_tank_entries = validate_linux_x64_fmu(water_tank_fmu)
         if "binaries/linux64/SingleWatertank.so" not in water_tank_entries:
             raise ValueError("The water-tank FMU is missing its Linux x86_64 model binary.")
         validate_water_tank_app(water_tank_app)
+        validate_local_glb_output_bindings(water_tank_scene, water_tank_fmu)
         water_tank_target = target / "local-demos" / "into-cps-water-tank" / "linux64"
         water_tank_target.mkdir(parents=True, exist_ok=True)
         copy_verified(water_tank_fmu, water_tank_target / WATER_TANK_FMU_NAME)
         copy_verified(water_tank_app, water_tank_target / WATER_TANK_APP_NAME)
+        copy_verified(water_tank_scene, water_tank_target / "singlewatertank-20sim.glb")
 
     if include_local_boptest:
         boptest_root = examples_root / "local-demos" / "boptest-building"
         complex_fmu = boptest_root / BOPTEST_COMPLEX_FMU_NAME
         complex_app = boptest_root / BOPTEST_COMPLEX_APP_NAME
+        complex_scene = boptest_root / "BOPTEST-MultizoneOfficeComplexAir.glb"
         complex_license = boptest_root / BOPTEST_COMPLEX_LICENSE_NAME
         validate_boptest_complex_air_fmu(complex_fmu)
+        validate_local_glb_output_bindings(complex_scene, complex_fmu)
         if not complex_license.is_file() or "International Building Performance Simulation Association" not in complex_license.read_text(encoding="utf-8"):
             raise ValueError("The local BOPTEST Complex Air FMU must include its upstream redistribution license.")
         validate_webapp_bundle(complex_app)
@@ -716,6 +1011,7 @@ def sync(
         boptest_target.mkdir(parents=True, exist_ok=True)
         copy_verified(complex_fmu, boptest_target / BOPTEST_COMPLEX_FMU_NAME)
         copy_verified(complex_app, boptest_target / BOPTEST_COMPLEX_APP_NAME)
+        copy_verified(complex_scene, boptest_target / "BOPTEST-MultizoneOfficeComplexAir.glb")
         copy_verified(complex_license, boptest_target / "BOPTEST-MultizoneOfficeComplexAir.LICENSE.txt")
 
     if include_local_qfmu:
@@ -727,23 +1023,33 @@ def sync(
 
         qfmu_target = target / "local-demos" / "qfmu" / "linux64"
         qfmu_target.mkdir(parents=True, exist_ok=True)
-        for filename, (expected_inputs, expected_outputs) in QFMU_MODELS.items():
-            source = qfmu_artifacts / filename
-            validate_qfmu_fmu(source, expected_inputs, expected_outputs)
-            copy_verified(source, qfmu_target / filename)
-            webapp_name = f"{Path(filename).stem}.webapp.zip"
-            webapp = qfmu_artifacts / "webapps" / webapp_name
-            validate_qfmu_webapp(webapp)
-            copy_verified(webapp, qfmu_target / webapp_name)
+        source = qfmu_artifacts / QFMU_FMU_NAME
+        validate_qfmu_fmu(source)
+        for stale_name in QFMU_LEGACY_ASSETS:
+            (qfmu_target / stale_name).unlink(missing_ok=True)
+        copy_verified(source, qfmu_target / QFMU_FMU_NAME)
         copy_verified(qfmu_license, qfmu_target / QFMU_LICENSE_NAME)
 
     if include_local_dc_motor:
         motor_root = examples_root / "local-demos" / "dc-motor"
         motor_fmu = motor_root / DC_MOTOR_FMU_NAME
         motor_app = motor_root / DC_MOTOR_APP_NAME
+        motor_scene = motor_root / "DC_motor.glb"
         fmugym_license = motor_root / "FMUGym-LICENSE"
         credibility_license = motor_root / "Credibility-LICENSE.md"
         validate_dc_motor_fmu(motor_fmu)
+        # Keep the companion GLB for the optional GLB route; the packaged
+        # Three.js app uses the FMU's public motor/gear/load positions.
+        validate_local_glb_output_bindings(
+            motor_scene,
+            motor_fmu,
+            required_bindings={
+                ("out_motor_position", "rotation.x"),
+                ("out_gear_position", "rotation.x"),
+                ("out_load_position", "rotation.x"),
+            },
+            required_input_bindings={("in_load_angle_jump", "rotation.x")},
+        )
         validate_dc_motor_app(motor_app)
         if not fmugym_license.is_file() or "MIT License" not in fmugym_license.read_text(encoding="utf-8"):
             raise ValueError("The DC motor FMU must include the upstream FMUGym MIT license.")
@@ -753,8 +1059,82 @@ def sync(
         motor_target.mkdir(parents=True, exist_ok=True)
         copy_verified(motor_fmu, motor_target / DC_MOTOR_FMU_NAME)
         copy_verified(motor_app, motor_target / DC_MOTOR_APP_NAME)
+        copy_verified(motor_scene, motor_target / "DC_motor.glb")
         copy_verified(fmugym_license, motor_target / "DC_motor.FMUGym-LICENSE.txt")
         copy_verified(credibility_license, motor_target / "DC_motor.Credibility-LICENSE.md")
+
+    if include_local_fmi_ls_dae_demos:
+        local_demos_root = examples_root / "local-demos"
+        spring_root = local_demos_root / "mass-spring-oscillator"
+        spring_fmu = spring_root / "MassSpringOscillator.fmu"
+        spring_app = spring_root / "MassSpringOscillator.webapp.zip"
+        spring_scene = spring_root / "MassSpringOscillator.glb"
+        spring_license = spring_root / "FMI-LS-DAE-LICENSE.txt"
+        validate_fmi_ls_dae_fmu(
+            spring_fmu,
+            required_variables={
+                "m": ("parameter", "kg"),
+                "k": ("parameter", "N/m"),
+                "x": ("output", "m"),
+                "v": ("output", "m/s"),
+                "E": ("output", "J"),
+            },
+            required_outputs={"x", "v", "E"},
+        )
+        validate_local_glb_output_bindings(
+            spring_scene,
+            spring_fmu,
+            required_bindings={
+                ("x", "position.x"),
+                ("x", "scale.x"),
+            },
+        )
+        validate_local_fmu_session_app(spring_app, "mass-spring-oscillator")
+        with zipfile.ZipFile(spring_fmu) as archive:
+            ref_path = "extra/org.fmi-standard.fmi-ls-ref/fmi-ls-manifest.xml"
+            if ref_path not in archive.namelist():
+                raise ValueError("The mass-spring FMU is missing its FMI-LS-REF manifest.")
+            ref_manifest = ET.fromstring(archive.read(ref_path))
+            related = {
+                item.attrib.get("source"): item.attrib.get("type")
+                for item in ref_manifest.findall("Related")
+            }
+            expected = {
+                "MassSpringOscillator.webapp.zip": "application/zip",
+                "MassSpringOscillator.glb": "model/gltf-binary",
+            }
+            if any(related.get(name) != media_type for name, media_type in expected.items()):
+                raise ValueError("The mass-spring FMI-LS-REF manifest must link its app and GLB scene.")
+            missing_resources = {
+                f"extra/org.fmi-standard.fmi-ls-ref/{name}"
+                for name in expected
+                if f"extra/org.fmi-standard.fmi-ls-ref/{name}" not in archive.namelist()
+            }
+            if missing_resources:
+                raise ValueError("The mass-spring FMI-LS-REF resources are missing: " + ", ".join(sorted(missing_resources)))
+        if not spring_license.is_file():
+            raise FileNotFoundError(f"The mass-spring demo license is missing: {spring_license}")
+
+        spring_target = target / "local-demos" / "mass-spring-oscillator" / "linux64"
+        spring_target.mkdir(parents=True, exist_ok=True)
+        for source, name in (
+            (spring_fmu, "MassSpringOscillator.fmu"),
+            (spring_app, "MassSpringOscillator.webapp.zip"),
+            (spring_scene, "MassSpringOscillator.glb"),
+            (spring_license, "FMI-LS-DAE-LICENSE.txt"),
+        ):
+            copy_verified(source, spring_target / name)
+
+        roberts_root = local_demos_root / "roberts"
+        roberts_fmu = roberts_root / "Roberts.fmu"
+        validate_fmi_ls_dae_fmu(roberts_fmu)
+        roberts_target = target / "local-demos" / "roberts" / "linux64"
+        roberts_target.mkdir(parents=True, exist_ok=True)
+        copy_verified(roberts_fmu, roberts_target / "Roberts.fmu")
+        for license_name in ("FMI-LS-DAE-LICENSE.txt", "Modelica-Reference-FMUs-LICENSE.txt"):
+            license_path = roberts_root / license_name
+            if license_path.is_file():
+                copy_verified(license_path, roberts_target / license_name)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -779,7 +1159,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--include-local-qfmu",
         action="store_true",
-        help="Also copy the four local-only qFMU linear-systems FMUs and companion apps",
+        help="Also copy the local-only parameterized qFMU linear-systems FMU",
     )
     parser.add_argument(
         "--include-local-dc-motor",
@@ -801,6 +1181,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also copy the local-only Bosch lateral-motion FMU and webapp bundle",
     )
+    parser.add_argument(
+        "--include-local-fmi-ls-dae-demos",
+        action="store_true",
+        help="Also copy the local FMI-LS-DAE Roberts and mass-spring demonstrations",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -813,6 +1198,7 @@ def main(argv: list[str] | None = None) -> int:
             include_local_water_tank=args.include_local_water_tank,
             include_local_inverted_pendulum=args.include_local_inverted_pendulum,
             include_local_lateral_motion=args.include_local_lateral_motion,
+            include_local_fmi_ls_dae_demos=args.include_local_fmi_ls_dae_demos,
         )
     except (FileNotFoundError, OSError, ValueError) as error:
         print(error, file=sys.stderr)

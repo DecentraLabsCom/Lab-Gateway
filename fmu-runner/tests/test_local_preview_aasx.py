@@ -2,6 +2,8 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+from fastapi import HTTPException
+
 from local_preview_aasx import LocalPreviewAasxRegistry
 
 
@@ -30,7 +32,7 @@ def test_registry_serializes_imports_records_and_links_one_aasx_per_fmu(tmp_path
          "accessControlSubmodelId": f"urn:decentralabs:lab:{claims['labId']}:sm:simulationAccessControl",
          "uploadedSubmodelIds": [f"urn:decentralabs:lab:{claims['labId']}:sm:simulationModels"]},
     ])
-    policy = {"policySource": "aas-generated", "variables": {"input": {"writeAt": ["initialization"]}}}
+    policy = {"policySource": "aas-generated", "variables": {}}
     resolve_policy = AsyncMock(return_value=policy)
     serialize = AsyncMock(return_value={"content": b"PK\x03\x04aasx"})
     record = MagicMock(side_effect=lambda **kwargs: package_record.update(kwargs))
@@ -66,7 +68,7 @@ def test_registry_refuses_a_missing_or_non_aas_policy(tmp_path):
     link_path = tmp_path / f"{claims['labId']}.aas-link.json"
     link_path.write_text("{}", encoding="utf-8")
     registry = LocalPreviewAasxRegistry(
-        get_model_metadata=AsyncMock(),
+        get_model_metadata=AsyncMock(return_value={"modelVariables": []}),
         sync_fmu_to_basyx=AsyncMock(),
         serialize_aasx_resources=AsyncMock(),
         record_aasx=MagicMock(),
@@ -83,3 +85,102 @@ def test_registry_refuses_a_missing_or_non_aas_policy(tmp_path):
         assert "AASX policy" in str(error)
     else:
         raise AssertionError("The registry must not silently accept the FMI fallback")
+
+
+def test_registry_rebuilds_stale_policy_for_its_canonical_preview_aas(tmp_path):
+    claims = _claims()
+    shell_id = f"urn:decentralabs:lab:{claims['labId']}"
+    link_path = tmp_path / f"{claims['labId']}.aas-link.json"
+    link_path.write_text(json.dumps({
+        "aasId": shell_id,
+        "labId": claims["labId"],
+        "submodelIds": [],
+        "digitalTwinAssetUrls": [],
+    }), encoding="utf-8")
+    policy = {"policySource": "aas-generated", "variables": {}}
+    resolve_policy = AsyncMock(side_effect=[HTTPException(503, "stale policy"), policy])
+    sync = AsyncMock(side_effect=[
+        {"synced": True, "aasId": shell_id,
+         "accessControlSubmodelId": f"{shell_id}:sm:simulationAccessControl"},
+        {"synced": True, "accessPolicyPreserved": True,
+         "accessControlSubmodelId": f"{shell_id}:sm:simulationAccessControl"},
+    ])
+    shell = {
+        "id": shell_id,
+        "submodels": [{"keys": [{"value": f"{shell_id}:sm:simulationModels"}]}],
+    }
+    registry = LocalPreviewAasxRegistry(
+        get_model_metadata=AsyncMock(return_value={"modelVariables": []}),
+        sync_fmu_to_basyx=sync,
+        serialize_aasx_resources=AsyncMock(return_value={"content": b"PK\x03\x04aasx"}),
+        record_aasx=MagicMock(),
+        get_aasx_package=lambda _lab_id: {"labId": claims["labId"]},
+        get_link_path=lambda _lab_id: link_path,
+        build_aas_shell=MagicMock(return_value=shell),
+        get_effective_policy=resolve_policy,
+        invalidate_access_policy=MagicMock(),
+    )
+
+    result = asyncio.run(registry.ensure(claims))
+
+    assert result == policy
+    assert sync.await_count == 2
+    assert sync.await_args_list[1].kwargs["required_aas_id"] == shell_id
+    assert resolve_policy.await_count == 2
+
+
+def test_registry_rebuilds_generated_policy_when_current_fmi_defaults_have_new_rights(tmp_path):
+    claims = _claims("BinaryClockTest.fmu")
+    shell_id = f"urn:decentralabs:lab:{claims['labId']}"
+    link_path = tmp_path / f"{claims['labId']}.aas-link.json"
+    link_path.write_text(json.dumps({
+        "aasId": shell_id,
+        "labId": claims["labId"],
+        "submodelIds": [],
+        "digitalTwinAssetUrls": [],
+    }), encoding="utf-8")
+    metadata = {
+        "fmiVersion": "3.0",
+        "simulationType": "CoSimulation",
+        "modelVariables": [{
+            "name": "sampleCount",
+            "type": "UInt64",
+            "causality": "structuralParameter",
+            "variability": "fixed",
+        }],
+    }
+    stale_policy = {
+        "policySource": "aas-generated",
+        "variables": {"sampleCount": {"read": True, "writeAt": []}},
+    }
+    refreshed_policy = {
+        "policySource": "aas-generated",
+        "variables": {"sampleCount": {"read": True, "writeAt": ["configuration"]}},
+    }
+    sync = AsyncMock(side_effect=[
+        {"synced": True, "aasId": shell_id,
+         "accessControlSubmodelId": f"{shell_id}:sm:simulationAccessControl"},
+        {"synced": True, "accessPolicyPreserved": True,
+         "accessControlSubmodelId": f"{shell_id}:sm:simulationAccessControl"},
+    ])
+    registry = LocalPreviewAasxRegistry(
+        get_model_metadata=AsyncMock(return_value=metadata),
+        sync_fmu_to_basyx=sync,
+        serialize_aasx_resources=AsyncMock(return_value={"content": b"PK\x03\x04aasx"}),
+        record_aasx=MagicMock(),
+        get_aasx_package=lambda _lab_id: {"labId": claims["labId"]},
+        get_link_path=lambda _lab_id: link_path,
+        build_aas_shell=MagicMock(return_value={
+            "id": shell_id,
+            "submodels": [{"keys": [{"value": f"{shell_id}:sm:simulationModels"}]}],
+        }),
+        get_effective_policy=AsyncMock(side_effect=[stale_policy, refreshed_policy]),
+        invalidate_access_policy=MagicMock(),
+    )
+
+    result = asyncio.run(registry.ensure(claims))
+
+    assert result == refreshed_policy
+    assert sync.await_count == 2
+    assert sync.await_args_list[0].kwargs["metadata"] == metadata
+    assert sync.await_args_list[1].kwargs["required_aas_id"] == shell_id

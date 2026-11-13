@@ -11,7 +11,7 @@ from typing import Any
 
 POLICY_VERSION = "fmi-variable-access-v1"
 
-_PHASES = ("initialization", "runtime")
+_PHASES = ("configuration", "initialization", "runtime", "reconfiguration")
 
 _PHASE_SET = frozenset(_PHASES)
 
@@ -36,15 +36,62 @@ def _supports_runtime_tunable_parameters(metadata: Mapping[str, Any]) -> bool:
         "",
         str(metadata.get("simulationType") or metadata.get("simulationKind") or "").lower(),
     )
-    # The Gateway's current executor path is FMI Co-Simulation. Both FMI 2.0
-    # and FMI 3.0 allow tunable parameters to change at communication points.
-    return fmi_major in {2, 3} and simulation_type == "cosimulation"
+    # The Executor applies Model Exchange writes in Event Mode and Co-Simulation
+    # writes at communication points. FMI 2 and FMI 3 both support these phases.
+    supports_execution = simulation_type in {"cosimulation", "modelexchange"} or any(
+        metadata.get(field) is True
+        for field in ("supportsCoSimulation", "supportsModelExchange")
+    )
+    return fmi_major in {2, 3} and supports_execution
+
+
+def _supports_configuration_mode(metadata: Mapping[str, Any]) -> bool:
+    try:
+        fmi_major = int(str(metadata.get("fmiVersion") or "").split(".", 1)[0])
+    except (TypeError, ValueError):
+        return False
+    simulation_type = re.sub(
+        r"[^a-z]",
+        "",
+        str(metadata.get("simulationType") or metadata.get("simulationKind") or "").lower(),
+    )
+    supports_execution = simulation_type in {"cosimulation", "modelexchange"} or any(
+        metadata.get(field) is True
+        for field in ("supportsCoSimulation", "supportsModelExchange")
+    )
+    return fmi_major == 3 and supports_execution
+
+
+def _supports_model_exchange(metadata: Mapping[str, Any]) -> bool:
+    if metadata.get("supportsModelExchange") is True:
+        return True
+    simulation_type = re.sub(
+        r"[^a-z]",
+        "",
+        str(metadata.get("simulationType") or metadata.get("simulationKind") or "").lower(),
+    )
+    return simulation_type == "modelexchange"
+
+
+def _supports_event_mode(metadata: Mapping[str, Any]) -> bool:
+    try:
+        fmi_major = int(str(metadata.get("fmiVersion") or "").split(".", 1)[0])
+    except (TypeError, ValueError):
+        return False
+    if fmi_major != 3:
+        return False
+    if _supports_model_exchange(metadata):
+        return True
+    capabilities = metadata.get("capabilities")
+    return isinstance(capabilities, Mapping) and capabilities.get("hasEventMode") is True
 
 
 def _default_permissions(
     variable: Mapping[str, Any],
     *,
+    metadata: Mapping[str, Any],
     supports_runtime_tunable_parameters: bool = False,
+    supports_configuration_mode: bool = False,
 ) -> dict[str, Any]:
     causality = str(variable.get("causality") or "local").strip()
     variability = str(variable.get("variability") or "continuous").strip()
@@ -55,23 +102,35 @@ def _default_permissions(
     # default, then let a provider's AAS policy restrict it when needed.
     read = causality != "local"
     write_at: list[str] = []
+    declared_type = str(variable.get("type") or variable.get("declaredType") or "")
 
     if variability not in _FMI_VARIABILITIES:
         return {"read": read, "writeAt": []}
 
     if causality == "input":
-        write_at.append("initialization")
-        # The Executor currently permits runtime writes to inputs. FMI constant
-        # inputs remain fixed after initialization, so scheduled/runtime writes
-        # are not granted for those variables.
-        if variability in {"continuous", "discrete", "tunable"}:
-            write_at.append("runtime")
+        if declared_type == "Clock":
+            if _supports_event_mode(metadata):
+                write_at.append("runtime")
+        else:
+            write_at.append("initialization")
+            # FMI constant inputs remain fixed after initialization, so scheduled/runtime writes
+            # are not granted for those variables.
+            if variability in {"continuous", "discrete", "tunable"}:
+                write_at.append("runtime")
     elif causality == "parameter" and variability in {"fixed", "tunable"}:
         write_at.append("initialization")
         if variability == "tunable" and supports_runtime_tunable_parameters:
-            # FMI 3 Co-Simulation accepts tunable parameters at communication
-            # points; the Executor applies them before the corresponding doStep.
+            # Tunable parameters may be changed at legal FMI runtime points:
+            # Event Mode for Model Exchange, communication points for Co-Simulation.
             write_at.append("runtime")
+    elif (
+        causality == "structuralParameter"
+        and variability in {"fixed", "tunable"}
+        and supports_configuration_mode
+    ):
+        write_at.append("configuration")
+        if variability == "tunable":
+            write_at.append("reconfiguration")
 
     return {"read": read, "writeAt": write_at}
 
@@ -129,6 +188,9 @@ def build_effective_policy(
 
     variables: dict[str, dict[str, Any]] = {}
     supports_runtime_tunable_parameters = _supports_runtime_tunable_parameters(metadata)
+    supports_configuration_mode = _supports_configuration_mode(metadata)
+    fmi_ls_dae = metadata.get("fmiLsDae")
+    algebraic_names = set(fmi_ls_dae.get("algebraicVariables", [])) if isinstance(fmi_ls_dae, Mapping) else set()
     for variable in raw_variables:
         if not isinstance(variable, Mapping):
             raise ValueError("FMU variable metadata is invalid")
@@ -139,8 +201,14 @@ def build_effective_policy(
             raise ValueError(f"duplicate FMI variable name {name!r}")
         variables[name] = _default_permissions(
             variable,
+            metadata=metadata,
             supports_runtime_tunable_parameters=supports_runtime_tunable_parameters,
+            supports_configuration_mode=supports_configuration_mode,
         )
+        if name in algebraic_names:
+            # The DAE solver owns algebraic unknowns. They must never become
+            # consumer-controlled values even if an FMU classifies one as input.
+            variables[name] = {"read": variables[name]["read"], "writeAt": []}
 
     if overrides is not None:
         if not isinstance(overrides, Mapping):

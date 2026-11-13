@@ -58,6 +58,8 @@ GUACAMOLE_MYSQL_USER=guacamole_app
 BLOCKCHAIN_MYSQL_USER=blockchain_app
 OPS_BACKEND_MYSQL_USER=ops_backend
 OPS_GUACAMOLE_MYSQL_USER=ops_guac
+# Replace this example with the Station destination network(s) for this Gateway.
+STATION_MANAGEMENT_CIDRS=10.192.38.0/24
 GUAC_ADMIN_USER=admin
 GUAC_ADMIN_PASS=strong_password
 ADMIN_ACCESS_TOKEN=random_token
@@ -75,6 +77,11 @@ FMU_JWT_AUDIENCE=https://lab.your-institution.edu/fmu
 HOST_UID=1000
 HOST_GID=1000
 ```
+
+Replace the example `STATION_MANAGEMENT_CIDRS` with the destination network(s)
+containing the Stations managed by this Gateway. These can differ per Gateway
+and from the Gateway's macvlan subnet; use comma-separated CIDRs for multiple
+Station networks.
 
 For environment ownership, Lite trust values, and profile-specific requirements,
 also read the [configuration reference](../reference/configuration.md).

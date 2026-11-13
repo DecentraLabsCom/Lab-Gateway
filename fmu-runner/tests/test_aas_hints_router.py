@@ -60,3 +60,23 @@ def test_hints_route_maps_model_description_errors_to_422():
     assert response.status_code == 422
     assert response.json() == {"detail": "Cannot read FMU model description"}
     logger.error.assert_called_once()
+
+
+def test_visualization_hints_include_only_output_dependencies_between_binding_variables():
+    from aas_hints_router import _scene_binding_metadata
+
+    metadata = _scene_binding_metadata({
+        "modelVariables": [
+            {"name": "u", "type": "Float64", "causality": "input"},
+            {"name": "y", "type": "Float64", "causality": "output"},
+            {"name": "hidden", "type": "Float64", "causality": "local"},
+        ],
+        "modelStructure": {"outputs": [
+            {"name": "y", "dependencyNames": ["u", "hidden"]},
+            {"name": "hidden", "dependencyNames": ["u"]},
+        ]},
+    })
+
+    assert metadata["modelStructure"] == {
+        "outputs": [{"name": "y", "dependencyNames": ["u"]}],
+    }

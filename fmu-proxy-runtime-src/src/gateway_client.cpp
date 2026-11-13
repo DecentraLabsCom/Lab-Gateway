@@ -1,111 +1,17 @@
 #include "decentralabs_proxy/gateway_client.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <thread>
-#include <type_traits>
 #include <utility>
 
 #include "decentralabs_proxy/protocol.hpp"
+#include "decentralabs_proxy/scalar_value_codec.hpp"
 
 namespace decentralabs::proxy {
 
 namespace {
-
-JsonValue ToJsonValuePrimitive(double value) { return JsonValue(value); }
-JsonValue ToJsonValuePrimitive(std::int64_t value) { return JsonValue(std::to_string(value)); }
-JsonValue ToJsonValuePrimitive(std::uint64_t value) { return JsonValue(std::to_string(value)); }
-JsonValue ToJsonValuePrimitive(bool value) { return JsonValue(value); }
-JsonValue ToJsonValuePrimitive(const std::string& value) { return JsonValue(value); }
-
-std::string Base64Encode(const BinaryValue& data) {
-    static constexpr char kAlphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string encoded;
-    encoded.reserve(((data.size() + 2) / 3) * 4);
-    std::size_t index = 0;
-    while (index + 3 <= data.size()) {
-        const std::uint32_t chunk =
-            (static_cast<std::uint32_t>(data[index]) << 16U) |
-            (static_cast<std::uint32_t>(data[index + 1]) << 8U) |
-            static_cast<std::uint32_t>(data[index + 2]);
-        encoded.push_back(kAlphabet[(chunk >> 18U) & 0x3FU]);
-        encoded.push_back(kAlphabet[(chunk >> 12U) & 0x3FU]);
-        encoded.push_back(kAlphabet[(chunk >> 6U) & 0x3FU]);
-        encoded.push_back(kAlphabet[chunk & 0x3FU]);
-        index += 3;
-    }
-    const std::size_t remaining = data.size() - index;
-    if (remaining == 1U) {
-        const std::uint32_t chunk = static_cast<std::uint32_t>(data[index]) << 16U;
-        encoded.push_back(kAlphabet[(chunk >> 18U) & 0x3FU]);
-        encoded.push_back(kAlphabet[(chunk >> 12U) & 0x3FU]);
-        encoded.push_back('=');
-        encoded.push_back('=');
-    } else if (remaining == 2U) {
-        const std::uint32_t chunk =
-            (static_cast<std::uint32_t>(data[index]) << 16U) |
-            (static_cast<std::uint32_t>(data[index + 1]) << 8U);
-        encoded.push_back(kAlphabet[(chunk >> 18U) & 0x3FU]);
-        encoded.push_back(kAlphabet[(chunk >> 12U) & 0x3FU]);
-        encoded.push_back(kAlphabet[(chunk >> 6U) & 0x3FU]);
-        encoded.push_back('=');
-    }
-    return encoded;
-}
-
-template <typename T>
-JsonValue ToJsonValueArray(const std::vector<T>& values) {
-    JsonArray items;
-    items.reserve(values.size());
-    for (const auto& item : values) {
-        items.emplace_back(ToJsonValuePrimitive(item));
-    }
-    return JsonValue(std::move(items));
-}
-
-/** Convert a runtime scalar/array value into the gateway JSON representation. */
-// ToJsonValue is reached through ToJsonObject from GatewayClient::Initialize
-// and GatewayClient::SetInputs; the analyzer does not follow that call chain.
-// codeql[cpp/unused-static-function]
-JsonValue ToJsonValue(const ScalarValue& value) {
-    return std::visit(
-        [](const auto& typed) -> JsonValue {
-            using ValueType = std::decay_t<decltype(typed)>;
-            if constexpr (std::is_same_v<ValueType, RealArray> ||
-                          std::is_same_v<ValueType, IntegerArray> ||
-                          std::is_same_v<ValueType, UnsignedIntegerArray> ||
-                          std::is_same_v<ValueType, StringArray>) {
-                return ToJsonValueArray(typed);
-            } else if constexpr (std::is_same_v<ValueType, BinaryValue>) {
-                return JsonValue(Base64Encode(typed));
-            } else if constexpr (std::is_same_v<ValueType, BinaryArray>) {
-                JsonArray items;
-                items.reserve(typed.size());
-                for (const auto& item : typed) {
-                    items.emplace_back(JsonValue(Base64Encode(item)));
-                }
-                return JsonValue(std::move(items));
-            } else if constexpr (std::is_same_v<ValueType, BooleanArray>) {
-                JsonArray items;
-                items.reserve(typed.size());
-                for (bool item : typed) {
-                    items.emplace_back(JsonValue(item));
-                }
-                return JsonValue(std::move(items));
-            } else {
-                return ToJsonValuePrimitive(typed);
-            }
-        },
-        value);
-}
-
-JsonObject ToJsonObject(const std::map<std::string, ScalarValue>& values) {
-    JsonObject json_values;
-    for (const auto& [name, value] : values) {
-        json_values.emplace(name, ToJsonValue(value));
-    }
-    return json_values;
-}
 
 double PositiveIntegerCapability(const JsonObject* object, const char* key, double maximum) {
     if (object == nullptr) {
@@ -149,6 +55,36 @@ OperationResult EnsureResponseType(const JsonObject& response, const std::string
     return OperationResult::Failure(
         "GATEWAY_PROTOCOL_ERROR",
         "Unexpected gateway response type: " + response_type);
+}
+
+OperationResult ParseNextEventMetadata(const JsonObject& object, OutputSnapshot* snapshot) {
+    if (snapshot == nullptr) {
+        return OperationResult::Failure("INVALID_ARGUMENT", "Missing output snapshot");
+    }
+    const JsonValue* defined_value = FindObjectValue(object, "nextEventTimeDefined");
+    if (defined_value == nullptr) {
+        snapshot->next_event_time_defined = false;
+        snapshot->next_event_time.reset();
+        return OperationResult::Success();
+    }
+    if (!defined_value->IsBool()) {
+        return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway returned an invalid next-event-time flag");
+    }
+    snapshot->next_event_time_defined = defined_value->AsBool();
+    snapshot->next_event_time.reset();
+    if (!snapshot->next_event_time_defined) {
+        return OperationResult::Success();
+    }
+    const JsonValue* time_value = FindObjectValue(object, "nextEventTime");
+    if (time_value == nullptr || !time_value->IsNumber()) {
+        return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway omitted a defined next event time");
+    }
+    const double time = time_value->AsNumber();
+    if (!std::isfinite(time) || time < snapshot->sim_time - std::max(1e-12, std::abs(snapshot->sim_time) * 1e-12)) {
+        return OperationResult::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway returned an invalid next event time");
+    }
+    snapshot->next_event_time = time;
+    return OperationResult::Success();
 }
 
 }  // namespace
@@ -316,17 +252,25 @@ OperationResult GatewayClient::WaitForRequestCapacity(
 OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
                                           const ExperimentConfig& experiment,
                                           const std::map<std::string, ScalarValue>& initial_inputs,
-                                          const bool early_return_allowed) {
+                                          const std::map<std::string, ScalarValue>& initial_parameters,
+                                          const bool early_return_allowed,
+                                          const bool model_exchange,
+                                          const bool defer_initialization_exit) {
     JsonObject options = {
         {"timeMode", JsonValue(std::string(ToString(config.time_mode)))},
         {"startTime", JsonValue(experiment.start_time)},
-        {"stopTime", JsonValue(experiment.stop_time)},
         {"stepSize", JsonValue(experiment.step_size)},
         {"earlyReturnAllowed", JsonValue(early_return_allowed)},
         {"playbackSpeed", JsonValue(config.playback_speed)},
     };
+    options.emplace("executionInterface", JsonValue(model_exchange ? "ModelExchange" : "CoSimulation"));
+    options.emplace("externalSolver", JsonValue(model_exchange));
+    options.emplace("deferInitializationExit", JsonValue(defer_initialization_exit));
+    if (experiment.stop_time.has_value()) {
+        options.emplace("stopTime", JsonValue(*experiment.stop_time));
+    }
     if (!initial_inputs.empty()) {
-        options.emplace("inputs", JsonValue(ToJsonObject(initial_inputs)));
+        options.emplace("inputs", JsonValue(scalar_value_codec::EncodeJsonObject(initial_inputs)));
     }
 
     JsonObject request = {
@@ -335,6 +279,9 @@ OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
         {"sessionId", JsonValue(session_id_)},
         {"options", JsonValue(std::move(options))},
     };
+    if (!initial_parameters.empty()) {
+        request.emplace("parameters", JsonValue(scalar_value_codec::EncodeJsonObject(initial_parameters)));
+    }
 
     const auto response = SendRequest(request);
     if (!response) {
@@ -343,7 +290,79 @@ OperationResult GatewayClient::Initialize(const RuntimeConfig& config,
     return EnsureResponseType(response.value, kSimState);
 }
 
-OperationResult GatewayClient::SetInputs(const std::map<std::string, ScalarValue>& values) {
+OperationResult GatewayClient::ExitInitializationMode() {
+    JsonObject request = {
+        {"type", JsonValue(std::string(kSimExitInitializationMode))},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+    };
+    const auto response = SendRequest(request);
+    if (!response) {
+        return response.status;
+    }
+    return EnsureResponseType(response.value, kSimState);
+}
+
+OperationResult GatewayClient::TerminateFmu() {
+    JsonObject request = {
+        {"type", JsonValue(std::string(kSimTerminateFmu))},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+    };
+    const auto response = SendRequest(request);
+    if (!response) {
+        return response.status;
+    }
+    return EnsureResponseType(response.value, kSimState);
+}
+
+ValueResult<JsonObject> GatewayClient::ModelExchangeCall(
+    const std::string& operation,
+    const JsonObject& arguments) {
+    JsonObject request = {
+        {"type", JsonValue("sim.modelExchangeCall")},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+        {"operation", JsonValue(operation)},
+        {"arguments", JsonValue(arguments)},
+    };
+    const auto response = SendRequest(request);
+    if (!response) {
+        return ValueResult<JsonObject>::Failure(response.status.code, response.status.message);
+    }
+    const auto type_status = EnsureResponseType(response.value, "sim.modelExchangeResult");
+    if (!type_status) {
+        return ValueResult<JsonObject>::Failure(type_status.code, type_status.message);
+    }
+    const JsonValue* result = FindObjectValue(response.value, "result");
+    const JsonObject* object = result == nullptr ? nullptr : result->AsObject();
+    if (object == nullptr) {
+        return ValueResult<JsonObject>::Failure(
+            "GATEWAY_PROTOCOL_ERROR",
+            "Gateway returned an invalid Model Exchange result");
+    }
+    return ValueResult<JsonObject>::Success(*object);
+}
+
+OperationResult GatewayClient::Reconfigure(const std::map<std::string, ScalarValue>& values) {
+    if (values.empty()) {
+        return OperationResult::Success();
+    }
+    JsonObject request = {
+        {"type", JsonValue(std::string(kSimReconfigure))},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+        {"values", JsonValue(scalar_value_codec::EncodeJsonObject(values))},
+    };
+    const auto response = SendRequest(request);
+    if (!response) {
+        return response.status;
+    }
+    return EnsureResponseType(response.value, kSimReconfigured);
+}
+
+OperationResult GatewayClient::SetInputs(const std::map<std::string, ScalarValue>& values,
+                                         bool* terminate_simulation) {
     if (values.empty()) {
         return OperationResult::Success();
     }
@@ -352,14 +371,18 @@ OperationResult GatewayClient::SetInputs(const std::map<std::string, ScalarValue
         {"type", JsonValue(std::string(kSimSetInputs))},
         {"requestId", JsonValue(NextRequestId())},
         {"sessionId", JsonValue(session_id_)},
-        {"values", JsonValue(ToJsonObject(values))},
+        {"values", JsonValue(scalar_value_codec::EncodeJsonObject(values))},
     };
 
     const auto response = SendRequest(request);
     if (!response) {
         return response.status;
     }
-    return EnsureResponseType(response.value, kSimInputsUpdated);
+    const auto status = EnsureResponseType(response.value, kSimInputsUpdated);
+    if (status && terminate_simulation != nullptr) {
+        *terminate_simulation = JsonBool(response.value, "terminateSimulation");
+    }
+    return status;
 }
 
 ValueResult<OutputSnapshot> GatewayClient::Step(const double delta_t) {
@@ -425,7 +448,7 @@ ValueResult<OutputSnapshot> GatewayClient::Advance(
             {"maxSamples", JsonValue(1)},
         };
         if (!input_values.empty()) {
-            request.emplace("inputValues", JsonValue(ToJsonObject(input_values)));
+            request.emplace("inputValues", JsonValue(scalar_value_codec::EncodeJsonObject(input_values)));
         }
 
         const auto response = SendRequest(request);
@@ -483,6 +506,10 @@ ValueResult<OutputSnapshot> GatewayClient::Advance(
         snapshot.event_handling_needed = JsonBool(sample, "eventHandlingNeeded");
         snapshot.terminate_simulation = JsonBool(sample, "terminateSimulation");
         snapshot.finished = JsonBool(sample, "finished", JsonBool(response.value, "finished"));
+        const auto event_metadata_status = ParseNextEventMetadata(sample, &snapshot);
+        if (!event_metadata_status) {
+            return ValueResult<OutputSnapshot>::Failure(event_metadata_status.code, event_metadata_status.message);
+        }
         const JsonValue* values = FindObjectValue(sample, "outputs");
         if (values == nullptr || values->AsObject() == nullptr) {
             return ValueResult<OutputSnapshot>::Failure(
@@ -531,6 +558,74 @@ ValueResult<OutputSnapshot> GatewayClient::GetOutputs(const std::vector<std::str
         if (const JsonObject* object = values->AsObject()) {
             snapshot.values = *object;
         }
+    }
+    const auto event_metadata_status = ParseNextEventMetadata(response.value, &snapshot);
+    if (!event_metadata_status) {
+        return ValueResult<OutputSnapshot>::Failure(event_metadata_status.code, event_metadata_status.message);
+    }
+    snapshot.terminate_simulation = JsonBool(response.value, "terminateSimulation");
+    snapshot.finished = JsonBool(response.value, "finished");
+    return ValueResult<OutputSnapshot>::Success(std::move(snapshot));
+}
+
+ValueResult<JsonObject> GatewayClient::CaptureFmuState() {
+    JsonObject request = {
+        {"type", JsonValue(std::string(kSimCaptureFmuState))},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+    };
+    const auto response = SendRequest(request);
+    if (!response) {
+        return ValueResult<JsonObject>::Failure(response.status.code, response.status.message);
+    }
+    const auto type_status = EnsureResponseType(response.value, kSimFmuState);
+    if (!type_status) {
+        return ValueResult<JsonObject>::Failure(type_status.code, type_status.message);
+    }
+    const JsonValue* checkpoint = FindObjectValue(response.value, "checkpoint");
+    const JsonObject* checkpoint_object = checkpoint == nullptr ? nullptr : checkpoint->AsObject();
+    if (checkpoint_object == nullptr) {
+        return ValueResult<JsonObject>::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway did not return an FMU state checkpoint");
+    }
+    return ValueResult<JsonObject>::Success({{"checkpoint", JsonValue(*checkpoint_object)}});
+}
+
+ValueResult<OutputSnapshot> GatewayClient::RestoreFmuState(
+    const JsonObject& checkpoint,
+    const std::vector<std::string>& variables) {
+    JsonArray variable_names;
+    variable_names.reserve(variables.size());
+    for (const auto& variable : variables) {
+        variable_names.emplace_back(variable);
+    }
+    JsonObject request = {
+        {"type", JsonValue(std::string(kSimRestoreFmuState))},
+        {"requestId", JsonValue(NextRequestId())},
+        {"sessionId", JsonValue(session_id_)},
+        {"checkpoint", JsonValue(checkpoint)},
+        {"variables", JsonValue(std::move(variable_names))},
+    };
+    const auto response = SendRequest(request);
+    if (!response) {
+        return ValueResult<OutputSnapshot>::Failure(response.status.code, response.status.message);
+    }
+    const auto type_status = EnsureResponseType(response.value, kSimState);
+    if (!type_status) {
+        return ValueResult<OutputSnapshot>::Failure(type_status.code, type_status.message);
+    }
+    const JsonValue* simulation_time = FindObjectValue(response.value, "simTime");
+    if (simulation_time == nullptr || !simulation_time->IsNumber()) {
+        return ValueResult<OutputSnapshot>::Failure("GATEWAY_PROTOCOL_ERROR", "Gateway did not return the restored FMU time");
+    }
+    OutputSnapshot snapshot;
+    snapshot.sim_time = simulation_time->AsNumber();
+    const JsonValue* outputs = FindObjectValue(response.value, "outputs");
+    if (outputs != nullptr && outputs->AsObject() != nullptr) {
+        snapshot.values = *outputs->AsObject();
+    }
+    const auto event_metadata_status = ParseNextEventMetadata(response.value, &snapshot);
+    if (!event_metadata_status) {
+        return ValueResult<OutputSnapshot>::Failure(event_metadata_status.code, event_metadata_status.message);
     }
     return ValueResult<OutputSnapshot>::Success(std::move(snapshot));
 }

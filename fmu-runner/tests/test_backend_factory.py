@@ -53,6 +53,7 @@ def test_backend_factory_keeps_local_mode_metadata_only_without_executor():
         health_loader=dependencies["health_loader"],
         model_metadata_loader=dependencies["model_metadata_loader"],
         list_loader=dependencies["list_loader"],
+        related_resources_loader=None,
     )
     dependencies["logger"].error.assert_called_once_with(
         "FMU_BACKEND_MODE=local requires FMU_LOCAL_DEV_MODE=true; "

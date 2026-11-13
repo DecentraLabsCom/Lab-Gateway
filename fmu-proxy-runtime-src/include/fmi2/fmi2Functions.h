@@ -31,6 +31,29 @@ FMI2_Export fmi2Status fmi2SetupExperiment(fmi2Component c,
                                            fmi2Real stopTime);
 FMI2_Export fmi2Status fmi2EnterInitializationMode(fmi2Component c);
 FMI2_Export fmi2Status fmi2ExitInitializationMode(fmi2Component c);
+FMI2_Export fmi2Status fmi2EnterEventMode(fmi2Component c);
+FMI2_Export fmi2Status fmi2NewDiscreteStates(fmi2Component c, fmi2EventInfo* eventInfo);
+FMI2_Export fmi2Status fmi2EnterContinuousTimeMode(fmi2Component c);
+FMI2_Export fmi2Status fmi2SetTime(fmi2Component c, fmi2Real time);
+FMI2_Export fmi2Status fmi2SetContinuousStates(fmi2Component c,
+                                                const fmi2Real x[],
+                                                size_t nx);
+FMI2_Export fmi2Status fmi2GetContinuousStates(fmi2Component c,
+                                                fmi2Real x[],
+                                                size_t nx);
+FMI2_Export fmi2Status fmi2GetDerivatives(fmi2Component c,
+                                          fmi2Real derivatives[],
+                                          size_t nx);
+FMI2_Export fmi2Status fmi2GetEventIndicators(fmi2Component c,
+                                              fmi2Real eventIndicators[],
+                                              size_t ni);
+FMI2_Export fmi2Status fmi2GetNominalsOfContinuousStates(fmi2Component c,
+                                                          fmi2Real x_nominal[],
+                                                          size_t nx);
+FMI2_Export fmi2Status fmi2CompletedIntegratorStep(fmi2Component c,
+                                                    fmi2Boolean noSetFMUStatePriorToCurrentPoint,
+                                                    fmi2Boolean* enterEventMode,
+                                                    fmi2Boolean* terminateSimulation);
 FMI2_Export fmi2Status fmi2Terminate(fmi2Component c);
 FMI2_Export fmi2Status fmi2Reset(fmi2Component c);
 FMI2_Export fmi2Status fmi2SetDebugLogging(fmi2Component c,

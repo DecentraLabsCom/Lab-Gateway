@@ -107,14 +107,24 @@ El script te guía automáticamente por los siguientes pasos:
    un `ISSUER` externo selecciona Lite. Lite exige un trust bundle coincidente
    emitido por el plano de control Full remoto.
 5. **Configura las operaciones de Lab Station y capacidades opcionales**: pide
-   la lista privada `WINRM_MANAGEMENT_CIDRS` usada por las estaciones locales
-   y, en Linux, si se debe activar el overlay macvlan de la LAN física de las
-   estaciones. Si se activa, pide la interfaz física, la subred de Stations,
+   `STATION_MANAGEMENT_CIDRS`, las redes privadas de destino que contienen las
+   direcciones de Station que Ops Worker puede gestionar. Puede diferir de la
+   subred de origen/macvlan del Gateway y no se puede deducir con seguridad de
+   las rutas. Los valores existentes de `WINRM_MANAGEMENT_CIDRS` se migran como
+   valor alternativo. Después pregunta si se debe activar el overlay macvlan de
+   la LAN física de las estaciones. Si se activa, pide la interfaz física, la subred de Stations,
    si la VLAN tiene router, la dirección opcional del gateway y el rango
-   macvlan reservado. Escribe `COMPOSE_FILE`, `WOL_LAN_PARENT`,
-   `WOL_LAN_SUBNET` y `WOL_LAN_IP_RANGE` en `.env`, además de
-   `WOL_LAN_GATEWAY` cuando se selecciona el modo con gateway. Déjalo vacío
-   para una VLAN aislada. En Windows, `setup.bat` deja desactivado este
+   macvlan reservado. También pide las IP fijas de `guacd` y `ops-worker`
+   dentro de ese rango, y valida que sean direcciones IPv4 de host distintas
+   entre sí. Escribe `COMPOSE_FILE`, `WOL_LAN_PARENT`, `WOL_LAN_SUBNET`,
+   `WOL_LAN_IP_RANGE`, `WOL_LAN_GUACD_IPV4` y `WOL_LAN_OPS_WORKER_IPV4` en
+   `.env`, además de `WOL_LAN_GATEWAY` cuando se selecciona el modo con gateway.
+   Excluye `WOL_LAN_IP_RANGE` del pool dinámico del servidor DHCP real, que
+   puede ser el router o `dnsmasq` del propio Gateway. El wizard solo configura
+   Compose; no modifica el servicio DHCP del host/router. Comprueba leases antes
+   de cambiar un pool existente. Deja `WOL_LAN_GATEWAY` vacío para una VLAN
+   aislada. En Windows,
+   `setup.bat` deja desactivado este
    overlay exclusivo de Linux. Después configura FMU y, únicamente en Full,
    AAS integrado, externo o deshabilitado. Déjala vacía solo si todavía no se
    van a configurar hosts de Ops.
@@ -123,6 +133,11 @@ El script te guía automáticamente por los siguientes pasos:
 El script es interactivo deliberadamente. Para un cambio repetible y no
 interactivo, usa la [guía manual de Compose](instalar-compose-manual.md) y la
 [referencia de configuración](../reference/configuration.md).
+
+En Linux/macOS, el script también repara los permisos del bind mount de los
+esquemas públicos Station Contract v3: establece `0755` en los directorios y
+`0644` en los ficheros JSON para que Ops Worker, que no se ejecuta como root,
+pueda validar los heartbeats, incluso al conservar un checkout antiguo.
 
 ## Paso 5 - Verificar que el stack esta en ejecucion
 

@@ -35,9 +35,16 @@ DecentraLabs exposes a protected FMU as a reservation-scoped remote simulation:
 - Reservation windows, availability rules, terms and existing lab metadata apply to FMU resources in
   the same way as to physical laboratories.
 
-The current product focuses on FMI 2.x and FMI 3.x Co-Simulation. See the Executor's
-[FMI conformance baseline](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#fmi-conformance-baseline)
-for the validated execution subset; the native proxy's platform and tool validation is tracked in
+The current product supports FMI 2.x and FMI 3.x Co-Simulation and Model Exchange. The provider
+runtime can integrate Model Exchange models with CVode, and FMI 3 Model Exchange models declaring
+the supported FMI-LS-DAE profile can use the experimental IDAS path. Web apps use one standard
+remote Co-Simulation flow and do not select an FMI interface. The Executor chooses and runs the
+source interface on the provider side. A native `proxy.fmu`, by contrast, exposes only the
+source-declared interfaces authorized in the AAS access-control submodel; if the source declares
+both Co-Simulation and Model Exchange, the provider can authorize either or both. With one declared
+interface, that interface is the default and there is no provider selection control. See the
+Executor's [FMI conformance baseline](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/docs/runtime.md#fmi-execution-scope)
+for the supported execution subset; the native proxy's platform and tool validation is tracked in
 [proxy runtime source](../fmu-proxy-runtime-src/README.md).
 
 FMI identifies its major and minor version in modelDescription.xml (for example, 2.0 or 3.0), not
@@ -106,9 +113,15 @@ Before publication, validate it through the Station's private Executor API. Its
 [internal API](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#internal-api)
 and [validation results](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#admission-expiry-isolation-and-execution-evidence)
 document the validation fields, optional isolated probe, quarantine operations, and limits of what
-a passing probe establishes. These private endpoints are not called by Marketplace users. Gateway
-public descriptions use the reduced `publicOnly=true` view where appropriate; the Executor still
-validates and parses the full model description.
+a passing probe establishes. With `probe=true`, the Executor also discovers and runs supported
+REF smoke experiments. The current interpreter accepts transient tests with optional SSP parameters;
+tests may also use local `text/csv` stimuli with a `time` column and numeric FMU input columns. Rows
+must begin at the experiment start, increase strictly, align to the declared step size and fit the
+128-event schedule limit; each row becomes a runtime input change. Positive solver tolerances are
+supported and passed to FMI initialization; reference time series and other unsupported features
+are reported as skipped. These private endpoints are not called by Marketplace users. Gateway public descriptions
+use the reduced `publicOnly=true` view where appropriate; the Executor still validates and parses the
+full model description.
 
 ### 2. Publish the resource
 
@@ -172,8 +185,26 @@ ticket redemption and durable session observation. The public booking JWT is not
 protection of the internal channel.
 
 The Gateway uses FMPy to read model descriptions for AAS metadata and proxy generation; model
-loading and simulation are handled by the Executor. Lab Stations package a released Executor
-snapshot in their platform runtime.
+loading and simulation are handled by the Executor. The metadata path also reads the bounded source
+`modelDescription.xml` as a fallback for FMI type definitions and explicit attributes that some FMPy
+releases omit, including named FMI 3 Binary and Clock types. The generated proxy preserves supported
+unit and display-unit conversion metadata, type definitions, variable bounds and descriptions, FMI 3
+aliases, enumeration items, clock associations and array dimensions. It also exposes valid
+`DefaultExperiment` start time, stop time, step size and tolerance; the independent variable's FMI
+time unit; output dependencies, state derivatives, clocked states, initial unknowns and event
+indicators from `ModelStructure`; and declared Co-Simulation/Model Exchange capabilities.
+
+Marketplace uses the defaults to initialize its simulation controls and shows the declared time
+unit on controls, timeline and graphs. The declared tolerance is displayed read-only. A selected
+FMI-LS experiment may override it for that run; the Executor passes the effective tolerance to FMI
+initialization and uses it for internal Model Exchange and FMI-LS-DAE integration. Marketplace's
+FMI structure panel filters variable relationships through the active reservation's read/write
+permissions and highlights related outputs as recommendations in the GLB graph selector. The Lab
+Manager binding editor also shows declared input dependencies for a selected output. Declared
+capabilities describe the FMU and do not by themselves guarantee that the
+Gateway runtime or reservation policy exposes a feature. Wrapper identity and runtime capabilities
+continue to describe the proxy itself. Lab Stations package a released Executor snapshot in their
+platform runtime.
 
 JWT key retrieval is independent of the FMU execution backend. In Full mode the runner uses
 `http://blockchain-services:8080/auth/jwks`; in Lite mode it uses the external issuer's JWKS
@@ -233,9 +264,50 @@ Ticket redemption rechecks the current on-chain reservation state.
 
 ### 3. Import and run it in an FMI tool
 
-Import `proxy.fmu` as a normal Co-Simulation FMU. The proxy opens a secure WebSocket to the provider
-Gateway, exchanges the reservation-bound ticket and maps FMI calls to the remote real-time API. No
-local DecentraLabs agent is needed.
+Import `proxy.fmu` as the FMI interface(s) shown in its `modelDescription.xml`. The artifact includes
+the native proxy runtime and reservation-scoped connection configuration. The importer loads the
+binary matching its operating system and architecture; the runtime opens a secure WebSocket to the
+provider Gateway, exchanges the reservation-bound ticket and maps FMI calls to the remote real-time
+API. No separate local DecentraLabs agent or manual Gateway connection configuration is needed. The
+FMI tool must permit native FMU libraries and outbound TLS WebSocket connections. The currently
+validated proxy binaries target Windows x64 and Linux x64; macOS is not yet validated.
+
+The proxy preserves the source's authorized FMI interface. In Co-Simulation, the provider-side
+source FMU advances through `DoStep`. In Model Exchange, the importing tool owns integration and the
+proxy forwards time, state, input, derivative, event-indicator, and event-mode calls to the remote
+source FMU; the original binary remains on the provider side. When both interfaces are authorized,
+the importer selects one when instantiating the proxy, as with any multi-interface FMU. The AAS
+`AuthorizedExecutionInterfaces` property controls the interfaces included in the native proxy. An
+importer cannot use a source interface that is absent from the generated proxy.
+
+An importer may reconfigure a declared tunable FMI 3 structural parameter from Step Mode for
+Co-Simulation or Event Mode for Model Exchange. The proxy applies the change to the remote session
+and returns to the mode required by the selected interface. This includes the FMI-LS-DAE Boolean
+selector when the model declares one, but reconfiguration is not specific to that selector.
+
+For Model Exchange, the proxy includes the source's supported FMI-LS-DAE manifest when the AAS
+authorizes Model Exchange. A DAE-capable importing tool can then own the integration and solve the
+remote algebraic equations; it must support the declared FMI-LS-DAE profile. The provider-side
+Executor also retains its own experimental FMI-LS-DAE path for web and provider-managed runs. That
+path accepts continuous Float32 and Float64 algebraic variables and residuals, including arrays
+whose dimensions are resolved from run structural parameters. It accepts only FMI-LS-DAE
+`1.0.0-alpha.1` and semi-explicit index-1 equations in Continuous-Time Mode. Provider-managed
+integration composes that solver with FMI 3 Model Exchange event semantics: event-indicator root
+location, Event Mode iteration, `nextEventTime`, input Clock activation, clocked output sampling,
+and solver reinitialization after state or input discontinuities. These hybrid behaviors come from
+the FMI 3 Model Exchange contract and remain experimental for DAE equations. FMI 3 Scheduled
+Execution, including `fmi3ActivateModelPartition`, is a separate interface and is not included.
+When an FMI-LS-DAE FMU declares Clocks, run it in DAE mode; its alternate ODE mode does not schedule
+Clocks. The proxy supports scalar triggered input and output Clocks when the source can use Event
+Mode. It rejects periodic or aperiodic Clocks, dimensioned Clocks, and Scheduled Execution.
+
+For provider-managed runs of an FMU exposing both Co-Simulation and Model Exchange, the Executor
+selects Model Exchange by default for a valid FMI-LS-DAE declaration when its native binary is
+available; otherwise it prefers Co-Simulation. Internal runtime callers may request
+`executionInterface` explicitly. This is not a selector exposed by the Three.js SDK or GLB web apps:
+they use the single remote Co-Simulation flow. In a provider-managed Model Exchange FMI-LS-DAE run,
+the Executor enables the manifest selector by default; an explicit `false` keeps ODE mode unless
+the model declares Clocks, which require DAE mode in this implementation.
 
 The externally advertised Gateway facade is:
 
@@ -248,11 +320,16 @@ Internal `fmu-runner` paths may appear as `/api/v1/...` behind the OpenResty rou
 ### 4. Session lifecycle
 
 The proxy forwards FMI lifecycle and variable operations through the Gateway's authenticated
-WebSocket facade. Gateway ticket redemption binds the session to the user, lab and reservation;
+WebSocket facade. `stopTimeDefined = false` in FMI 2/3 is forwarded as an open-ended simulation
+horizon; the proxy does not substitute `DefaultExperiment.stopTime` or a local fallback. Gateway
+ticket redemption binds the session to the user, lab and reservation;
 reservation expiry closes it. In Station mode, an unexpected internal disconnect can be resumed
 with `session.attach` during the configured grace window. The Executor README owns the message
 types, payloads, step behavior, and reconnect contract in its
 [Realtime WebSocket protocol](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#realtime-websocket-protocol).
+The generated proxy advertises FMI state get/set and serialization only when the source FMU declares
+both capabilities. Station stores serialized state privately and returns a signed,
+reservation-bound checkpoint reference through the session protocol.
 
 A session ticket is bound to the user, lab and reservation. Its default TTL is 120 seconds and its
 configured maximum is 300 seconds. Tickets remain reusable for reconnects while valid; redemption
@@ -270,6 +347,18 @@ results. Step negotiation, tunable FMI 2/3 parameters, scheduled writes, event h
 subscriptions and rate limits are part of the Executor's
 [runtime contract](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#runtime-capabilities).
 
+The browser batch route `POST /fmu/api/v1/simulations/stream` returns NDJSON.
+Marketplace SDK and generated GLB viewers connect to it directly from the
+browser with a short-lived reservation-bound session ticket in the Bearer
+header; the ticket is not sent to Station. Gateway redeems it, applies the
+effective AAS variable policy, filters streamed values and forwards execution
+through the private Station connection. Gateway CORS must allow the exact
+Marketplace origin. For sandboxed Three.js apps, the Marketplace host page
+makes the request and relays bounded, acknowledged samples to the iframe; the
+opaque-origin iframe does not receive the batch ticket. For FMUs without a
+linked GLB scene or Three.js app, Marketplace provides a proxy-FMU download
+guide; an external FMI tool drives execution through the generated proxy.
+
 ### 6. Jobs, batches, and history
 
 Clients can submit one asynchronous simulation or a small batch of parameter scenarios through the
@@ -283,6 +372,18 @@ reservation-authorized Gateway API:
 | `POST` | `/fmu/api/v1/simulations/{id}/cancel` | Cancel an active run or remaining cases |
 | `GET` | `/fmu/api/v1/simulations/{id}/result` | Read final or terminal partial output |
 | `GET` | `/fmu/api/v1/simulations/history?limit=20&offset=0` | Browse history for the current reservation |
+| `GET` | `/fmu/api/v1/simulations/parameter-sets` | Discover FMI-LS-REF parameter presets, filtered to complete configurations writable during initialization for this reservation |
+
+Parameter presets stay attached to the FMU as SSP files referenced by
+FMI-LS-REF. Generated FMU shells publish the REF manifest's local resource
+descriptors in the versioned `FmiLsRelatedResources` AAS submodel so users and
+M2M clients can discover roles, media types, descriptions, labels and archive
+availability without opening the FMU. The projection does not copy parameter
+values or other file contents. Simulation preset values remain behind the
+reservation-authorized parameter-set API; the FMU and its REF manifest remain
+the source of truth. External REF URIs are omitted from this public projection.
+Generated REF and STRUCT manifests use the exact required `fmi-ls-description`
+values defined by their respective layered-standard schemas.
 
 For example, a batch body contains shared options and one parameter map per case:
 
@@ -290,7 +391,7 @@ For example, a batch body contains shared options and one parameter map per case
 {
   "labId": "lab-01",
   "reservationKey": "reservation-123",
-  "options": {"startTime": 0, "stopTime": 10, "stepSize": 0.01},
+  "options": {"startTime": 0, "stopTime": 10, "stepSize": 0.01, "tolerance": 1e-7},
   "scenarios": [
     {"label": "low", "parameters": {"ambient": 285}},
     {"label": "high", "parameters": {"ambient": 305}}
@@ -410,6 +511,6 @@ Use these documents when the work is implementation- or deployment-specific:
 - [ ] A valid reservation exists for the requested window.
 - [ ] The proxy was downloaded from the authorized Gateway endpoint.
 - [ ] The artifact hash/signature was verified when supplied.
-- [ ] The proxy was imported as an FMI Co-Simulation FMU.
+- [ ] The proxy was imported through one of the authorized FMI interfaces.
 - [ ] The FMI tool uses the intended simulation time mode and step size.
 - [ ] The session is terminated when the simulation is complete.

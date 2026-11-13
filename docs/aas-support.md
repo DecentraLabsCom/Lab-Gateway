@@ -47,9 +47,10 @@ shell.
 FMU shells describe `RunSimulation`, `CancelSimulation` and, when
 Co-Simulation is available, `CreateRealtimeSession` plus the real-time
 vocabulary (`Initialize`, `Start`, `Pause`, `Resume`, `Reset`, `Step`,
-`RunUntil`, `SetInputs`, `GetOutputs` and `TerminateSession`). Physical-lab
-shells describe `PrepareAccessSession`, `StartInteractiveSession`,
-`EndInteractiveSession` and `ReadOperationalStatus`. These names are useful
+`RunUntil`, `SetInputs`, `GetOutputs` and `TerminateSession`). FMUs that declare
+both state get/set and serialization support also describe `CaptureFMUState`
+and `RestoreFMUState`. Physical-lab shells describe `PrepareAccessSession`,
+`StartInteractiveSession`, `EndInteractiveSession` and `ReadOperationalStatus`. These names are useful
 for clients and adapters without pretending that every laboratory exposes the
 same physical commands.
 
@@ -82,10 +83,16 @@ flowchart LR
 The Full Gateway owns the provider control plane and may expose AAS. The bundled BaSyx service is optional and is enabled with the `aas` Compose profile:
 
 ~~~bash
-docker compose --profile aas up -d
+AAS_ENABLED=true docker compose --profile aas up -d
 # or
-COMPOSE_PROFILES=aas docker compose up -d
+AAS_ENABLED=true COMPOSE_PROFILES=aas docker compose up -d
 ~~~
+
+Persist `AAS_ENABLED=true` in the Gateway root `.env` when configuring bundled
+BaSyx manually. Compose profiles start the AAS containers; the flag enables
+OpenResty's AAS routes. For an external AAS, a non-empty `BASYX_AAS_URL`
+enables the routes automatically unless `AAS_ENABLED=false`. The setup scripts
+persist the selected profile and the necessary route setting.
 
 The bundled deployment persists AAS data through MongoDB and named volumes.
 For local FMU development, start both the `fmu-local-dev` and `aas` Compose
@@ -264,7 +271,7 @@ The main generated submodels vary by resource type:
 
 | Resource | Main submodels | Typical information |
 | --- | --- | --- |
-| FMU simulation | IDTA 02005 `SimulationModels`, IDTA 02020 `CapabilityDescription`, IDTA 02017 `AssetInterfacesDescription`, IDTA 02003 `TechnicalData`, IDTA 02002/02004 | Summary, FMI file type/version, ports, tools, solver values, model-file hash, runner status and discoverable execution affordances. |
+| FMU simulation | IDTA 02005 `SimulationModels`, IDTA 02020 `CapabilityDescription`, IDTA 02017 `AssetInterfacesDescription`, IDTA 02003 `TechnicalData`, IDTA 02002/02004, DecentraLabs `FmiLsRelatedResources` when REF is present | Summary, FMI file type/version, ports, tools, solver values, model-file hash, runner status, discoverable execution affordances and a public index of embedded FMI-LS-REF resources. |
 | Physical laboratory | IDTA 02006 `Nameplate`, IDTA 02020 `CapabilityDescription`, IDTA 02017 `AssetInterfacesDescription`, IDTA 02003 `TechnicalData`, IDTA 02002/02004 | Standard identity, host/network details as permitted arbitrary nameplate properties, heartbeat, station state and discoverable access/status affordances. |
 
 The FMU `SimulationModels` submodel currently includes:
@@ -280,6 +287,26 @@ The generated `CapabilityDescription` and `AssetInterfacesDescription`
 submodels are intentionally separate from `SimulationModels` and
 `TechnicalData`. They describe capabilities and affordances, not live status
 and not authorization grants.
+
+### FMI-LS-REF related resources
+
+When the FMU contains a valid FMI-LS-REF manifest, generated synchronization
+adds `FmiLsRelatedResources` with semantic ID
+`urn:decentralabs:aas:FmiLsRelatedResources:1`. It projects the manifest name
+and version plus each safe relative `Related` entry's role, media type, source
+URI, description, labels and whether the referenced file exists in the FMU.
+Absolute/external URIs are omitted so provider-private endpoints and credentials
+are not copied into the public shell. File contents and parameter values are
+not copied; FMI-LS-REF parameter presets continue to be read from the FMU by the
+reservation-authorized simulation API. The whole projection is regenerated
+from the current FMU on synchronization.
+
+`HandoverDocumentation` continues to expose the selected visual asset through
+its standard `File` element. That value is the Gateway-managed immutable asset
+path used by Marketplace; it is a delivery reference, not a second copy of the
+GLB or webapp ZIP. The related-resources submodel complements that viewer link
+with a discoverable inventory of all embedded REF files, including alternative
+visuals and parameter-set descriptors.
 
 ### Automatic versus manual data
 
@@ -314,7 +341,7 @@ substitute for provider validation of the actual model and license metadata.
 IDTA 02005 standardizes a port variable's name, range, type family,
 description, unit and causality. It does not define FMI-specific fields such as
 the exact FMI type, value reference, variability, initial attribute, start
-value, nominal, display-unit conversion, vector dimensions or enumeration
+value, FMI alias names, nominal, display-unit conversion, vector dimensions or enumeration
 items. Generated FMU shells keep the IDTA fields in their standard locations
 and add only those missing FMI details to a versioned AAS `Extension` on each
 port variable (`decentralabs.fmi.variableMetadata.v1`). This is a compact
@@ -330,6 +357,15 @@ type, bound, default or unit falls back to FMU metadata. AAS descriptions and
 display names remain presentation metadata. The FMU description is still the
 authority for execution and validation. External or older AAS shells without
 the extension continue to work through standard fields and FMU fallback.
+
+Generated `SimulationModels` submodels also carry a compact
+`decentralabs.fmi.modelDescription.v1` extension for model-level FMI metadata
+not represented by IDTA 02005, including source generation metadata, unit and
+named type definitions, and the default experiment. It excludes FMU identifiers
+and execution secrets. Large FMI integer metadata stays lossless as decimal text
+across JavaScript-based AAS clients. This keeps global units, type definitions
+and experiment values available in the AAS without duplicating the per-variable
+port manifest.
 
 ## FMI variable access policy
 
@@ -347,6 +383,26 @@ in public AAS serialization queries. The private Gateway resolver reads the
 policy from the configured AAS server using provider-side configuration. Its
 cache is bounded to five seconds and is invalidated when AAS synchronization or linking changes the
 association.
+
+The same submodel contains the DecentraLabs property
+`AuthorizedExecutionInterfaces` (`xs:string` with a JSON array value), which
+authorizes native proxy-FMU interfaces independently of Part 4 variable
+rights. Its semantic ID is
+`urn:decentralabs:aas:SimulationAccessControl:AuthorizedExecutionInterfaces:1`.
+Values must be a non-empty subset of the interfaces declared and executable
+for the active FMU. For an FMU declaring both Co-Simulation and Model
+Exchange, generated AAS defaults to Co-Simulation; Lab Manager lets the
+provider authorize either or both. A single available interface is selected
+automatically and has no provider selector. Imported AASX packages may carry
+the same property. When an older or linked AAS has no property, the Gateway
+uses the same safe default and does not write to the linked shell.
+
+This property controls interfaces exposed by `proxy.fmu`; it does not add a
+mode selector to the Three.js SDK or generated GLB applications. Those web
+clients always use the standard remote Co-Simulation flow. Selecting Model
+Exchange for a native proxy permits the importing FMI tool to evaluate the
+remote model through ME calls; the source FMU and its binary remain on the
+provider side.
 
 The current DecentraLabs profile is based on the IDTA 01004 v3.1 JSON
 serialization and accepts exact `REFERABLE` objects for
@@ -371,7 +427,14 @@ external AAS; it can consume the supported restricted Part 4 JSON profile when
 the provider has linked it. The Part 4 `UPDATE` right covers the write phases
 supported for that variable by FMI and the runtime; FMI 2.0 and FMI 3.0
 Co-Simulation `tunable` parameters can be changed at initialization and at
-runtime communication points. The Lab Manager link panel checks FMU AAS links
+runtime communication points. FMI 3.0 fixed and tunable
+`structuralParameter` values are writable in Configuration Mode; tunable
+structural parameters are also writable in Reconfiguration Mode. Dimensions
+referenced by arrays must be scalar `UInt64` structural parameters or
+constant `UInt64` values. Initial dimensions are positive; a reconfigured
+dimension may be zero when permitted by the FMU. The Gateway keeps these
+phases distinct from ordinary initialization and communication-point writes. The Lab
+Manager link panel checks FMU AAS links
 and displays a warning when the linked shell, policy submodel or
 policy-to-FMU mapping cannot be validated. An external AAS with no compatible
 policy uses FMI-derived defaults and is reported as such; the status check
@@ -386,11 +449,11 @@ FMU metadata and runtime capabilities.
 
 | FMI causality | IDTA 02005 port description | Generated Part 4 rights |
 | --- | --- | --- |
-| `input` | `Input` / `Input` | `READ`; `UPDATE` when variability is recognized. |
+| `input` | `Input` / `Input` | `READ`; `UPDATE` when variability is recognized. FMI 3 Clock inputs receive runtime access only when Event Mode is supported. |
 | `output` | `Output` / `Output` | `READ`. |
 | `parameter` | `Parameter` / `Input` | `READ`; `UPDATE` for `fixed` or `tunable` variability. |
 | `calculatedParameter` | `Parameter` / `Input` | `READ`; read-only. |
-| `structuralParameter` | `Parameter` / `Input` | `READ`; writes are unavailable in the current runtime contract. |
+| `structuralParameter` | `Parameter` / `Input` | `READ`; `UPDATE` in Configuration Mode for FMI 3 fixed/tunable structural parameters, and in Reconfiguration Mode for tunable structural parameters. |
 | `independent` | `Internal` / `Acausal` | `READ`; read-only. |
 | `local` | Omitted from generated `Ports` | No access rule. |
 | Unknown causality | `Internal` / `Acausal`, if present | No access; fails closed. |
@@ -399,9 +462,15 @@ Default write phases are:
 
 - **Inputs:** initialization when variability is recognized; runtime for
   `continuous`, `discrete` and `tunable` inputs. `constant` and `fixed` inputs
-  are therefore initialization-only.
+  are therefore initialization-only. FMI 3 Clock inputs can be activated at
+  runtime only when the execution path supports Event Mode.
 - **Parameters:** initialization for `fixed` and `tunable`; runtime
   communication points for `tunable` parameters in FMI 2.0/3.0 Co-Simulation.
+- **Structural parameters:** Configuration Mode for FMI 3.0 fixed and tunable
+  structural parameters. Tunable structural parameters may also be changed in
+  Reconfiguration Mode. In Co-Simulation this is entered from Step Mode; in
+  Model Exchange it is entered from Event Mode. Fixed structural parameters
+  remain initialization-only.
 
 Read access is granted by default for recognized non-`local` causalities. An
 unrecognized variability preserves default read access but grants no write

@@ -5,12 +5,106 @@ ticket issuance, backend access, and artifact generation are injected so the
 application composition root keeps control of deployment-specific behavior.
 """
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 
+from catalog_router import filter_authorized_experiments, filter_authorized_parameter_sets
+from proxy_artifact import ProxyFmiLsRefSizeLimitError
 from simulation_access_policy import filter_model_description
+
+
+def _model_exchange_local_variable_references(metadata: Mapping[str, Any]) -> tuple[set[int], set[str]]:
+    """Find local variables required by the authorized FMI ME description."""
+    references: set[int] = set()
+    names: set[str] = set()
+
+    def add_reference(value: Any) -> None:
+        if type(value) is int and value >= 0:
+            references.add(value)
+
+    def add_structure(raw_structure: Any) -> None:
+        if not isinstance(raw_structure, Mapping):
+            return
+        for entries in raw_structure.values():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, Mapping):
+                    continue
+                for field in ("valueReference", "stateValueReference"):
+                    add_reference(entry.get(field))
+                for field in ("name", "stateName"):
+                    name = entry.get(field)
+                    if isinstance(name, str) and name:
+                        names.add(name)
+                dependencies = entry.get("dependencies")
+                if isinstance(dependencies, list):
+                    for dependency in dependencies:
+                        add_reference(dependency)
+                dependency_names = entry.get("dependencyNames")
+                if isinstance(dependency_names, list):
+                    names.update(name for name in dependency_names if isinstance(name, str) and name)
+
+    add_structure(metadata.get("modelStructure"))
+    fmi_ls_dae = metadata.get("fmiLsDae")
+    if isinstance(fmi_ls_dae, Mapping):
+        raw_algebraic_names = fmi_ls_dae.get("algebraicVariables")
+        if isinstance(raw_algebraic_names, list):
+            names.update(name for name in raw_algebraic_names if isinstance(name, str) and name)
+        raw_algebraic_references = fmi_ls_dae.get("algebraicValueReferences")
+        if isinstance(raw_algebraic_references, list):
+            for reference in raw_algebraic_references:
+                add_reference(reference)
+        raw_residuals = fmi_ls_dae.get("residualVariables")
+        if isinstance(raw_residuals, list):
+            for residual in raw_residuals:
+                if not isinstance(residual, Mapping):
+                    continue
+                add_reference(residual.get("valueReference"))
+                name = residual.get("name")
+                if isinstance(name, str) and name:
+                    names.add(name)
+        add_structure(fmi_ls_dae.get("modelStructure"))
+
+    return references, names
+
+
+def _fmi3_dimension_local_constant_references(metadata: Mapping[str, Any]) -> set[int]:
+    """Find local UInt64 constants needed to declare FMI 3 array dimensions.
+
+    These values are part of the proxy's structural description, not an access
+    grant. They must stay in the generated ModelDescription for both CS and ME.
+    """
+    model_variables = metadata.get("modelVariables")
+    if not isinstance(model_variables, list):
+        return set()
+
+    dimension_references: set[int] = set()
+    for variable in model_variables:
+        if not isinstance(variable, Mapping):
+            continue
+        dimensions = variable.get("dimensions")
+        if not isinstance(dimensions, list):
+            continue
+        for dimension in dimensions:
+            if not isinstance(dimension, Mapping):
+                continue
+            reference = dimension.get("valueReference")
+            if type(reference) is int and reference >= 0:
+                dimension_references.add(reference)
+
+    return {
+        reference
+        for variable in model_variables
+        if isinstance(variable, Mapping)
+        and str(variable.get("causality") or "local").lower() == "local"
+        and str(variable.get("type") or "").lower() == "uint64"
+        and str(variable.get("variability") or "").lower() == "constant"
+        and type(reference := variable.get("valueReference")) is int
+        and reference in dimension_references
+    }
 
 
 def create_proxy_router(
@@ -26,6 +120,9 @@ def create_proxy_router(
     derive_gateway_ws_url: Any,
     get_authorized_model_metadata: Any,
     get_effective_policy: Any = None,
+    get_effective_policy_for_metadata: Any = None,
+    get_authorized_parameter_sets: Any = None,
+    get_authorized_experiments: Any = None,
     build_proxy_model_description_xml: Any,
     parse_fmi_major_version: Any,
     proxy_model_identifier: Any,
@@ -104,12 +201,89 @@ def create_proxy_router(
         model_metadata = await get_authorized_model_metadata(
             claims=claims,
             requested_fmu_filename=str(fmu_filename),
+            include_internal_variables=True,
         )
-        if get_effective_policy is not None:
+        access_policy = None
+        if get_effective_policy_for_metadata is not None:
+            access_policy = await get_effective_policy_for_metadata(claims, model_metadata)
+        elif get_effective_policy is not None:
             access_policy = await get_effective_policy(claims)
+        if access_policy is not None:
             if not isinstance(access_policy, dict) or not isinstance(access_policy.get("variables"), dict):
                 raise HTTPException(status_code=503, detail="FMU access policy is unavailable")
-            model_metadata = filter_model_description(access_policy, model_metadata)
+            authorized_interfaces = access_policy.get("authorizedExecutionInterfaces")
+            if not isinstance(authorized_interfaces, list) or not authorized_interfaces:
+                raise HTTPException(status_code=503, detail="Authorized FMI execution interfaces are unavailable")
+        else:
+            available_interfaces = model_metadata.get("availableExecutionInterfaces")
+            if not isinstance(available_interfaces, list) or not available_interfaces:
+                available_interfaces = ["CoSimulation"] if model_metadata.get("supportsCoSimulation") else ["ModelExchange"]
+            authorized_interfaces = (
+                ["CoSimulation"] if "CoSimulation" in available_interfaces else list(available_interfaces)
+            )
+
+        # Co-Simulation proxies expose external ports. Model Exchange also
+        # needs the local variables referenced by its ModelStructure (states,
+        # derivatives, event indicators and their declared dependencies).
+        # FMI 3 array dimensions can independently refer to local UInt64
+        # constants; preserve those for either interface without granting
+        # variable access. Exclude unrelated local implementation details.
+        required_local_references, required_local_names = _model_exchange_local_variable_references(model_metadata)
+        dimension_constant_references = _fmi3_dimension_local_constant_references(model_metadata)
+        model_variables = []
+        for variable in model_metadata.get("modelVariables", []):
+            if not isinstance(variable, dict):
+                continue
+            causality = str(variable.get("causality") or "local").lower()
+            if causality != "local":
+                model_variables.append(variable)
+                continue
+            reference = variable.get("valueReference")
+            name = variable.get("name")
+            if (
+                (type(reference) is int and reference in dimension_constant_references)
+                or (
+                    "ModelExchange" in authorized_interfaces
+                    and (
+                        (type(reference) is int and reference in required_local_references)
+                        or (isinstance(name, str) and name in required_local_names)
+                    )
+                )
+            ):
+                model_variables.append(variable)
+        model_metadata = {**model_metadata, "modelVariables": model_variables}
+
+        if access_policy is not None:
+            model_metadata = filter_model_description(
+                access_policy,
+                model_metadata,
+                include_proxy_dae_selector=True,
+                include_proxy_model_exchange="ModelExchange" in authorized_interfaces,
+                preserve_local_value_references=dimension_constant_references,
+            )
+            model_metadata["authorizedExecutionInterfaces"] = list(authorized_interfaces)
+        else:
+            model_metadata["authorizedExecutionInterfaces"] = list(authorized_interfaces)
+        raw_parameter_sets = (
+            await get_authorized_parameter_sets(claims=claims)
+            if get_authorized_parameter_sets is not None
+            else []
+        )
+        raw_experiments = (
+            await get_authorized_experiments(claims=claims)
+            if get_authorized_experiments is not None
+            else {"resourceSets": [], "truncated": False}
+        )
+        fmi_ls_parameter_sets = (
+            filter_authorized_parameter_sets(raw_parameter_sets, access_policy)
+            if access_policy is not None
+            else []
+        )
+        fmi_ls_experiments = (
+            filter_authorized_experiments(raw_experiments, access_policy)
+            if access_policy is not None
+            else []
+        )
         model_xml = build_proxy_model_description_xml(model_metadata)
         proxy_fmi_version = (
             "3.0" if parse_fmi_major_version(model_metadata.get("fmiVersion")) >= 3 else "2.0.3"
@@ -128,11 +302,26 @@ def create_proxy_router(
             session_ticket=session_ticket,
             ticket_expires_at=ticket_expiry,
         )
-        archive_bytes = build_proxy_artifact(
-            model_xml=model_xml,
-            config_payload=config_payload,
-            runtime_files=runtime_files,
-        )
+        try:
+            archive_bytes = build_proxy_artifact(
+                model_xml=model_xml,
+                config_payload=config_payload,
+                runtime_files=runtime_files,
+                fmi_ls_struct=model_metadata.get("fmiLsStruct"),
+                fmi_ls_dae=(
+                    model_metadata.get("fmiLsDae")
+                    if "ModelExchange" in model_metadata.get("authorizedExecutionInterfaces", [])
+                    else None
+                ),
+                fmi_ls_parameter_sets=fmi_ls_parameter_sets,
+                fmi_ls_experiments=fmi_ls_experiments,
+                fmi_ls_model_metadata=model_metadata,
+            )
+        except ProxyFmiLsRefSizeLimitError as error:
+            raise HTTPException(
+                status_code=413,
+                detail="FMI-LS-REF resources exceed the supported proxy FMU size limit",
+            ) from error
         signing_key = get_signing_key()
         headers = build_proxy_artifact_headers(
             artifact_bytes=archive_bytes,

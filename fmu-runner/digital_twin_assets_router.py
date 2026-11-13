@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import json
+import math
 import os
 import re
 import struct
@@ -13,9 +14,12 @@ from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urljoin
 import zipfile
+from html.parser import HTMLParser
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
+
+from fmi_ls_ref import read_visual_asset as read_fmi_ls_ref_visual_asset
 
 
 _MAX_SCENE_BYTES = 50 * 1024 * 1024
@@ -34,10 +38,161 @@ _JSON_CHUNK = 0x4E4F534A
 _BIN_CHUNK = 0x004E4942
 _FMI_BINDING_TARGETS = {
     "position.x", "position.y", "position.z",
+    "translation.x", "translation.y", "translation.z",
+    "translation", "rotation", "scale", "weights",
     "rotation.x", "rotation.y", "rotation.z",
     "scale.x", "scale.y", "scale.z",
     "visible", "material.color",
 }
+_FMI_INPUT_POSITION_TARGETS = {
+    "position.x": "x", "position.y": "y", "position.z": "z",
+    "translation.x": "x", "translation.y": "y", "translation.z": "z",
+}
+_FMI_INPUT_ROTATION_TARGETS = {"rotation.x", "rotation.y", "rotation.z"}
+_FMI_VECTOR_TARGET_LENGTHS = {"translation": 3, "scale": 3, "rotation": 4}
+_NUMERIC_FMI_INPUT_TYPES = {
+    "real", "integer", "float32", "float64",
+    "int8", "int16", "int32", "int64",
+    "uint8", "uint16", "uint32", "uint64",
+}
+
+
+def _is_finite_binding_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _is_binding_color(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return 0 <= value <= 0xFFFFFF
+    return (
+        isinstance(value, float)
+        and math.isfinite(value)
+        and value.is_integer()
+        and 0 <= value <= 0xFFFFFF
+    )
+
+
+def _has_valid_fmi_binding_fields(binding: dict[str, Any]) -> bool:
+    for field in ("scale", "offset", "visibleWhenGreaterThanOrEqual"):
+        if field in binding and not _is_finite_binding_number(binding[field]):
+            return False
+    return all(
+        field not in binding or _is_binding_color(binding[field])
+        for field in ("trueColor", "falseColor")
+    )
+
+
+def _fmi_array_dimensions(variable: dict[str, Any]) -> list[dict[str, Any]]:
+    dimensions = variable.get("dimensions")
+    if isinstance(dimensions, list) and dimensions:
+        return [dimension for dimension in dimensions if isinstance(dimension, dict)]
+    start = variable.get("start")
+    return [{"start": len(start)}] if isinstance(start, list) else []
+
+
+def _valid_array_selector(
+    binding: dict[str, Any],
+    variable: dict[str, Any],
+    variables_by_reference: dict[Any, dict[str, Any]],
+    *,
+    allow_whole_array: bool,
+) -> bool:
+    dimensions = _fmi_array_dimensions(variable)
+    indices = binding.get("indices")
+    if indices is None:
+        return not dimensions or allow_whole_array
+    if allow_whole_array or not dimensions or not isinstance(indices, list) or len(indices) != len(dimensions):
+        return False
+    for index, dimension in zip(indices, dimensions):
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+            return False
+        size = dimension.get("start")
+        if size is None and dimension.get("valueReference") is not None:
+            structural_parameter = variables_by_reference.get(dimension.get("valueReference"))
+            size = structural_parameter.get("max") if structural_parameter else None
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            continue
+        if index >= size:
+            return False
+    return True
+
+
+def _draggable_target_keys(target: Any) -> tuple[str, ...]:
+    axis = _FMI_INPUT_POSITION_TARGETS.get(target)
+    if axis:
+        return (f"position.{axis}",)
+    if target in _FMI_INPUT_ROTATION_TARGETS:
+        return (str(target),)
+    return ("position.x", "position.y", "position.z") if target == "translation" else ()
+
+
+def _node_morph_target_count(document: dict[str, Any], node: dict[str, Any]) -> int | None:
+    meshes = document.get("meshes")
+    mesh_index = node.get("mesh")
+    if not isinstance(meshes, list) or isinstance(mesh_index, bool) or not isinstance(mesh_index, int):
+        return None
+    if mesh_index < 0 or mesh_index >= len(meshes) or not isinstance(meshes[mesh_index], dict):
+        return None
+    mesh = meshes[mesh_index]
+    primitives = mesh.get("primitives")
+    if not isinstance(primitives, list) or not primitives:
+        return None
+    target_counts = []
+    for primitive in primitives:
+        if not isinstance(primitive, dict):
+            return None
+        targets = primitive.get("targets", [])
+        if not isinstance(targets, list):
+            return None
+        target_counts.append(len(targets))
+    if not target_counts or any(count <= 0 for count in target_counts) or len(set(target_counts)) != 1:
+        return None
+    count = target_counts[0]
+    mesh_weights = mesh.get("weights")
+    if isinstance(mesh_weights, list) and len(mesh_weights) != count:
+        return None
+    node_weights = node.get("weights")
+    if isinstance(node_weights, list) and len(node_weights) != count:
+        return None
+    return count
+
+
+def _fmi_binding_scale(binding: dict[str, Any]) -> float:
+    raw_scale = binding.get("scale", 1)
+    return float(raw_scale) if _is_finite_binding_number(raw_scale) else math.nan
+
+
+def _is_draggable_input_binding(
+    binding: dict[str, Any],
+    variable: dict[str, Any],
+    variables_by_reference: dict[Any, dict[str, Any]] | None = None,
+) -> bool:
+    return (
+        _has_valid_fmi_binding_fields(binding)
+        and str(variable.get("causality", "")).lower() == "input"
+        and (
+            binding.get("target") in _FMI_INPUT_POSITION_TARGETS
+            or binding.get("target") in _FMI_INPUT_ROTATION_TARGETS
+        )
+        and str(variable.get("type", "")).lower() in _NUMERIC_FMI_INPUT_TYPES
+        and math.isfinite(_fmi_binding_scale(binding))
+        and _fmi_binding_scale(binding) != 0
+        and _valid_array_selector(
+            binding,
+            variable,
+            variables_by_reference or {},
+            allow_whole_array=False,
+        )
+    )
 
 
 def _validate_glb(content: bytes) -> dict[str, Any]:
@@ -108,18 +263,21 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
             "validBindingCount": 0,
             "issueCount": 0,
             "issues": [],
-            "message": "FMU output metadata was unavailable, so scene bindings could not be checked.",
+            "message": "FMU variable metadata was unavailable, so scene bindings could not be checked.",
         }
 
-    output_names: set[str] = set()
+    variables_by_name: dict[str, dict[str, Any]] = {}
+    variables_by_reference: dict[Any, dict[str, Any]] = {}
     for variable in model_variables:
         if not isinstance(variable, dict):
             continue
         variable_name = variable.get("name")
         if not isinstance(variable_name, str):
             continue
-        if str(variable.get("causality", "")).lower() == "output":
-            output_names.add(variable_name)
+        variables_by_name[variable_name] = variable
+        value_reference = variable.get("valueReference")
+        if value_reference is not None:
+            variables_by_reference[value_reference] = variable
     issues: list[dict[str, Any]] = []
     issue_count = 0
     binding_count = 0
@@ -164,6 +322,24 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
             add_issue("invalid_binding_list", "fmiBindings must be an array.", node_name)
             continue
 
+        target_counts: dict[str, int] = {}
+        for candidate in bindings:
+            candidate_target = candidate.get("target") if isinstance(candidate, dict) else None
+            candidate_variable_name = candidate.get("variable") if isinstance(candidate, dict) else None
+            candidate_variable = variables_by_name.get(candidate_variable_name) if isinstance(candidate_variable_name, str) else None
+            is_draggable_input = (
+                _is_draggable_input_binding(candidate, candidate_variable, variables_by_reference)
+                if isinstance(candidate, dict) and candidate_variable
+                else False
+            )
+            if (
+                isinstance(candidate_target, str)
+                and candidate_target in _FMI_BINDING_TARGETS
+                and is_draggable_input
+            ):
+                for axis in _draggable_target_keys(candidate_target):
+                    target_counts[axis] = target_counts.get(axis, 0) + 1
+
         for binding_index, binding in enumerate(bindings):
             binding_count += 1
             if not isinstance(binding, dict):
@@ -173,20 +349,105 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
             variable_name = binding.get("variable")
             target = binding.get("target")
             valid = True
-            if not isinstance(variable_name, str) or not variable_name:
-                add_issue("missing_variable", "The binding must name an FMI output variable.", node_name, binding_index)
+            for field in ("scale", "offset", "visibleWhenGreaterThanOrEqual"):
+                if field in binding and not _is_finite_binding_number(binding[field]):
+                    add_issue(
+                        "invalid_binding_field",
+                        f"The binding field '{field}' must be a finite JSON number.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+            for field in ("trueColor", "falseColor"):
+                if field in binding and not _is_binding_color(binding[field]):
+                    add_issue(
+                        "invalid_binding_field",
+                        f"The binding field '{field}' must be a non-empty color string or a 24-bit color integer.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+            if "valueMap" in binding:
+                value_map = binding.get("valueMap")
+                if (
+                    not isinstance(value_map, dict)
+                    or not value_map
+                    or len(value_map) > 128
+                    or any(not isinstance(key, str) or len(key) > 128 for key in value_map)
+                ):
+                    add_issue(
+                        "invalid_binding_field",
+                        "valueMap must be an object with at most 128 short FMI values.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                elif target == "visible":
+                    if (
+                        "visibleWhenGreaterThanOrEqual" in binding
+                        or any(not isinstance(mapped, bool) for mapped in value_map.values())
+                    ):
+                        add_issue(
+                            "invalid_binding_field",
+                            "A visible valueMap must map FMI values to booleans and cannot use a numeric threshold.",
+                            node_name,
+                            binding_index,
+                            variable_name,
+                        )
+                        valid = False
+                elif target == "material.color":
+                    if any(not _is_binding_color(mapped) for mapped in value_map.values()):
+                        add_issue(
+                            "invalid_binding_field",
+                            "A material.color valueMap must map FMI values to color strings or 24-bit color integers.",
+                            node_name,
+                            binding_index,
+                            variable_name,
+                        )
+                        valid = False
+                else:
+                    add_issue(
+                        "invalid_binding_field",
+                        "valueMap is supported only for visible and material.color targets.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+            binding_indices = binding.get("indices")
+            if binding_indices is not None and (
+                not isinstance(binding_indices, list)
+                or any(isinstance(index, bool) or not isinstance(index, int) or index < 0 for index in binding_indices)
+            ):
+                add_issue("invalid_array_indices", "indices must be an array of non-negative FMI array coordinates.", node_name, binding_index, variable_name)
                 valid = False
-            elif variable_name not in output_names:
+            target_index = binding.get("index")
+            if target_index is not None and (
+                isinstance(target_index, bool) or not isinstance(target_index, int) or target_index < 0
+            ):
+                add_issue("invalid_binding_field", "The binding field 'index' must be a non-negative integer.", node_name, binding_index, variable_name)
+                valid = False
+            if target_index is not None and target != "weights":
+                add_issue("invalid_binding_field", "The binding field 'index' is only supported for the glTF weights target.", node_name, binding_index, variable_name)
+                valid = False
+            if not isinstance(variable_name, str) or not variable_name:
+                add_issue("missing_variable", "The binding must name an FMI input or output variable.", node_name, binding_index)
+                valid = False
+            elif variable_name not in variables_by_name:
                 add_issue(
-                    "unknown_output",
-                    "The variable is not declared as an output by this FMU.",
+                    "unknown_variable",
+                    "The variable is not declared by this FMU.",
                     node_name,
                     binding_index,
                     variable_name,
                 )
                 valid = False
 
-            if not isinstance(target, str) or target not in _FMI_BINDING_TARGETS:
+            target_is_supported = isinstance(target, str) and target in _FMI_BINDING_TARGETS
+            if not target_is_supported:
                 add_issue(
                     "unsupported_target",
                     "The binding target is not supported by the Marketplace GLB viewer.",
@@ -195,6 +456,142 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
                     variable_name,
                 )
                 valid = False
+
+            variable = variables_by_name.get(variable_name) if isinstance(variable_name, str) else None
+            causality = str(variable.get("causality", "")).lower() if variable else ""
+            if variable and target_is_supported:
+                variable_dimensions = _fmi_array_dimensions(variable)
+                vector_target = target in _FMI_VECTOR_TARGET_LENGTHS
+                weights_target = target == "weights"
+                whole_array = vector_target or (weights_target and target_index is None)
+                if not _valid_array_selector(
+                    binding,
+                    variable,
+                    variables_by_reference,
+                    allow_whole_array=whole_array,
+                ):
+                    add_issue(
+                        "invalid_array_selection",
+                        "The FMI array selection must match the declared dimensions and use in-range coordinates.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                if variable_dimensions and not whole_array and binding_indices is None:
+                    add_issue(
+                        "missing_array_indices",
+                        "An FMI array binding to a scalar scene target must declare indices.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                if vector_target:
+                    dimension_size = None
+                    if len(variable_dimensions) == 1:
+                        dimension = variable_dimensions[0]
+                        if dimension.get("start") is not None:
+                            dimension_size = dimension["start"]
+                        elif dimension.get("valueReference") is not None:
+                            structural_parameter = variables_by_reference.get(dimension.get("valueReference"))
+                            dimension_size = structural_parameter.get("max") if structural_parameter else None
+                    expected_size = _FMI_VECTOR_TARGET_LENGTHS[target]
+                    if not variable_dimensions:
+                        add_issue("missing_vector_array", "glTF whole-vector targets require an FMI array variable.", node_name, binding_index, variable_name)
+                        valid = False
+                    elif len(variable_dimensions) != 1:
+                        add_issue("invalid_vector_shape", "glTF vector targets require a one-dimensional FMI array.", node_name, binding_index, variable_name)
+                        valid = False
+                    elif (
+                        isinstance(dimension_size, int)
+                        and (
+                            (variable_dimensions[0].get("start") is not None and dimension_size != expected_size)
+                            or (variable_dimensions[0].get("valueReference") is not None and dimension_size < expected_size)
+                        )
+                    ):
+                        add_issue("invalid_vector_shape", f"The FMI array length must be {expected_size} for the {target} target.", node_name, binding_index, variable_name)
+                        valid = False
+                    if variable and str(variable.get("type", "")).lower() not in _NUMERIC_FMI_INPUT_TYPES:
+                        add_issue("non_numeric_vector", "glTF vector targets require numeric FMI variables.", node_name, binding_index, variable_name)
+                        valid = False
+                if weights_target:
+                    morph_target_count = _node_morph_target_count(document, node)
+                    if morph_target_count is None:
+                        add_issue("missing_morph_targets", "The glTF node must reference a mesh with compatible morph targets.", node_name, binding_index, variable_name)
+                        valid = False
+                    elif target_index is not None and target_index >= morph_target_count:
+                        add_issue("invalid_morph_target_index", "The morph-target index is outside the node mesh's weights.", node_name, binding_index, variable_name)
+                        valid = False
+                    if target_index is None:
+                        if len(variable_dimensions) != 1:
+                            add_issue("invalid_weight_array", "A whole weights target requires a one-dimensional FMI array.", node_name, binding_index, variable_name)
+                            valid = False
+                        elif morph_target_count is not None:
+                            dimension = variable_dimensions[0]
+                            dimension_size = dimension.get("start")
+                            if dimension_size is None and dimension.get("valueReference") is not None:
+                                structural_parameter = variables_by_reference.get(dimension.get("valueReference"))
+                                dimension_size = structural_parameter.get("max") if structural_parameter else None
+                            if isinstance(dimension_size, int) and (
+                                (dimension.get("start") is not None and dimension_size != morph_target_count)
+                                or (dimension.get("valueReference") is not None and dimension_size < morph_target_count)
+                            ):
+                                add_issue("invalid_weight_array", "The FMI array cannot provide one value per glTF morph target.", node_name, binding_index, variable_name)
+                                valid = False
+                    if str(variable.get("type", "")).lower() not in _NUMERIC_FMI_INPUT_TYPES:
+                        add_issue("non_numeric_weights", "Morph-target weights require numeric FMI values.", node_name, binding_index, variable_name)
+                        valid = False
+            if variable and causality not in {"input", "output"}:
+                add_issue(
+                    "unsupported_causality",
+                    "GLB bindings can reference FMI inputs or outputs only.",
+                    node_name,
+                    binding_index,
+                    variable_name,
+                )
+                valid = False
+            elif variable and causality == "input" and target_is_supported:
+                if target not in _FMI_INPUT_POSITION_TARGETS and target not in _FMI_INPUT_ROTATION_TARGETS:
+                    add_issue(
+                        "unsupported_input_target",
+                        "Writable scene inputs must target one translation or rotation axis.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                elif any(target_counts.get(axis, 0) > 1 for axis in _draggable_target_keys(target)):
+                    add_issue(
+                        "competing_input_target",
+                        "This scene axis has another input binding on the node, so the input cannot be dragged.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                elif str(variable.get("type", "")).lower() not in _NUMERIC_FMI_INPUT_TYPES:
+                    add_issue(
+                        "non_numeric_input",
+                        "A draggable scene input must be a numeric FMI variable.",
+                        node_name,
+                        binding_index,
+                        variable_name,
+                    )
+                    valid = False
+                elif not _has_valid_fmi_binding_fields(binding):
+                    valid = False
+                else:
+                    scale = _fmi_binding_scale(binding)
+                    if not math.isfinite(scale) or scale == 0:
+                        add_issue(
+                            "non_invertible_input_binding",
+                            "A draggable input binding must have a finite, non-zero scale.",
+                            node_name,
+                            binding_index,
+                            variable_name,
+                        )
+                        valid = False
 
             if valid:
                 valid_binding_count += 1
@@ -209,7 +606,7 @@ def _validate_glb_bindings(document: dict[str, Any], model_metadata: Any) -> dic
         "validBindingCount": valid_binding_count,
         "issueCount": issue_count,
         "issues": issues,
-        "message": "Scene bindings match this FMU's declared outputs." if issue_count == 0 else "Review the scene binding findings before publishing.",
+        "message": "Scene bindings match this FMU's declared inputs and outputs." if issue_count == 0 else "Review the scene binding findings before publishing.",
     }
 
 
@@ -234,7 +631,7 @@ async def _asset_validation_report(
             "validBindingCount": 0,
             "issueCount": 0,
             "issues": [],
-            "message": "FMU output metadata was unavailable, so scene bindings could not be checked.",
+            "message": "FMU variable metadata was unavailable, so scene bindings could not be checked.",
         }
     try:
         model_metadata = await get_model_metadata(access_key)
@@ -246,9 +643,30 @@ async def _asset_validation_report(
             "validBindingCount": 0,
             "issueCount": 0,
             "issues": [],
-            "message": "FMU output metadata could not be read, so scene bindings were not checked.",
+            "message": "FMU variable metadata could not be read, so scene bindings were not checked.",
         }
     return _validate_glb_bindings(document, model_metadata)
+
+
+class _WebappAssetReferenceParser(HTMLParser):
+    """Reject remote asset loads while allowing ordinary HTTPS documentation links."""
+
+    _NAVIGATION_TAGS = frozenset({"a", "area"})
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.has_unbundled_asset = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for name, value in attrs:
+            if name not in {"src", "href"} or not value:
+                continue
+            reference = value.strip()
+            navigation_link = name == "href" and tag.lower() in self._NAVIGATION_TAGS
+            if navigation_link and reference.lower().startswith("https://"):
+                continue
+            if re.match(r"(?:https?:)?//|/", reference, re.IGNORECASE):
+                self.has_unbundled_asset = True
 
 
 def _validate_webapp_archive(content: bytes) -> dict[str, bytes]:
@@ -310,8 +728,13 @@ def _validate_webapp_archive(content: bytes) -> dict[str, bytes]:
         raise HTTPException(status_code=400, detail="Three.js application index.html must use UTF-8") from exc
     if "<html" not in html or "<base" in html:
         raise HTTPException(status_code=400, detail="Three.js application index.html is invalid or uses a base URL")
-    if re.search(r"(?:src|href)\s*=\s*['\"](?:https?:|//|/)", html):
-        raise HTTPException(status_code=400, detail="Three.js application must use bundled relative assets")
+    references = _WebappAssetReferenceParser()
+    references.feed(html)
+    if references.has_unbundled_asset:
+        raise HTTPException(
+            status_code=400,
+            detail="Three.js application must bundle remote assets; HTTPS navigation links are allowed",
+        )
     if len(files) > _MAX_WEBAPP_FILES:
         raise HTTPException(status_code=413, detail="Three.js application has too many files")
     return files
@@ -415,8 +838,8 @@ def _store_webapp(root: Path, lab_id: str, content: bytes) -> dict[str, Any]:
 
 def _validate_asset_type(asset_type: Any) -> str:
     normalized = str(asset_type or "").strip().lower()
-    if normalized not in {"glb", "threejs-app"}:
-        raise HTTPException(status_code=400, detail="assetType must be glb or threejs-app")
+    if normalized not in {"auto", "glb", "threejs-app"}:
+        raise HTTPException(status_code=400, detail="assetType must be auto, glb, or threejs-app")
     return normalized
 
 
@@ -430,6 +853,66 @@ def _validate_access_key(access_key: Any) -> str:
     ):
         raise HTTPException(status_code=400, detail="Invalid FMU access key")
     return access_key
+
+
+def store_local_preview_assets(
+    *,
+    root: Path,
+    lab_id: str,
+    access_key: str,
+    fmu_data_root: Path,
+    resolve_local_fmu_path,
+) -> list[dict[str, str]]:
+    """Store local companion visuals under their synthetic preview lab ID.
+
+    This helper is only used by the local-preview provisioner. The public
+    Lab Manager routes continue to accept numeric lab IDs exclusively.
+    """
+    if not isinstance(lab_id, str) or re.fullmatch(r"local_demo_[a-f0-9]{24}", lab_id) is None:
+        raise ValueError("Invalid local preview laboratory ID")
+    access_key = _validate_access_key(access_key)
+    expected_lab_id = f"local_demo_{hashlib.sha256(access_key.encode()).hexdigest()[:24]}"
+    if lab_id != expected_lab_id:
+        raise ValueError("Local preview laboratory ID does not match its FMU")
+    if resolve_local_fmu_path is None:
+        return []
+
+    try:
+        local_root = Path(fmu_data_root).expanduser().resolve(strict=True)
+        fmu_path = Path(resolve_local_fmu_path(access_key)).resolve(strict=True)
+        fmu_path.relative_to(local_root)
+    except FileNotFoundError:
+        return []
+    except (ValueError, IndexError) as exc:
+        raise ValueError("Invalid local preview companion asset path") from exc
+
+    asset_root = Path(root).expanduser().resolve()
+    assets: list[dict[str, str]] = []
+    for suffix, asset_type in ((".webapp.zip", "threejs-app"), (".glb", "glb")):
+        try:
+            companion_path = fmu_path.with_name(fmu_path.stem + suffix).resolve(strict=True)
+            companion_path.relative_to(local_root)
+        except (FileNotFoundError, ValueError):
+            continue
+
+        content = _read_local_companion(companion_path, asset_type)
+        if content is None:
+            continue
+        if asset_type == "glb":
+            document = _validate_glb(content)
+            stored = _store_scene(asset_root, lab_id, content, validated_document=document)
+            content_type = "model/gltf-binary"
+            renderer = "glb"
+        else:
+            stored = _store_webapp(asset_root, lab_id, content)
+            content_type = "text/html"
+            renderer = "threejs-app"
+        assets.append({
+            "path": stored["path"],
+            "contentType": content_type,
+            "renderer": renderer,
+        })
+    return assets
 
 
 async def _read_limited_response(response: httpx.Response, limit: int, label: str) -> bytes:
@@ -468,6 +951,24 @@ async def _read_limited_request(request: Request, limit: int, *, label: str) -> 
             raise HTTPException(status_code=413, detail=f"{label} exceeds the request size limit")
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+def _read_local_companion(path: Path, asset_type: str) -> bytes | None:
+    if not path.is_file():
+        return None
+    size_limit = _MAX_SCENE_BYTES if asset_type == "glb" else _MAX_WEBAPP_ARCHIVE_BYTES
+    label = "GLB" if asset_type == "glb" else "Three.js application"
+    try:
+        if path.stat().st_size > size_limit:
+            raise HTTPException(status_code=413, detail=f"Companion {label} exceeds the size limit")
+        content = path.read_bytes()
+    except HTTPException:
+        raise
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=f"Companion {label} could not be read") from exc
+    if len(content) > size_limit:
+        raise HTTPException(status_code=413, detail=f"Companion {label} exceeds the size limit")
+    return content
 
 
 def create_digital_twin_assets_router(
@@ -540,10 +1041,9 @@ def create_digital_twin_assets_router(
             raise HTTPException(status_code=400, detail="A JSON accessKey is required")
         access_key = _validate_access_key(body.get("accessKey"))
         asset_type = _validate_asset_type(body.get("assetType"))
-        is_glb = asset_type == "glb"
-        suffix = ".glb" if is_glb else ".webapp.zip"
-        media_type = "model/gltf-binary" if is_glb else "application/zip"
-        size_limit = _MAX_SCENE_BYTES if is_glb else _MAX_WEBAPP_ARCHIVE_BYTES
+        selected_asset_type = asset_type
+        asset_source = "legacy-sibling"
+        content = None
 
         if fmu_backend_mode == "local":
             if resolve_local_fmu_path is None:
@@ -552,20 +1052,48 @@ def create_digital_twin_assets_router(
                 fmu_path = Path(resolve_local_fmu_path(access_key)).resolve(strict=True)
                 local_root = Path(fmu_data_root).expanduser().resolve(strict=True)
                 fmu_path.relative_to(local_root)
-                companion_path = fmu_path.with_name(fmu_path.stem + suffix).resolve(strict=True)
-                companion_path.relative_to(local_root.resolve())
             except FileNotFoundError as exc:
-                raise HTTPException(status_code=404, detail="Companion digital twin asset not found for this FMU") from exc
+                raise HTTPException(status_code=404, detail="FMU was not found") from exc
             except (ValueError, IndexError) as exc:
-                raise HTTPException(status_code=400, detail="Invalid companion GLB path") from exc
-            try:
-                if not companion_path.is_file():
+                raise HTTPException(status_code=400, detail="Invalid companion asset path") from exc
+
+            if asset_type == "auto":
+                declared_asset = read_fmi_ls_ref_visual_asset(fmu_path)
+                if declared_asset is not None and declared_asset[1] == "threejs-app":
+                    content, selected_asset_type, asset_source = declared_asset
+                else:
+                    app_path = fmu_path.with_name(fmu_path.stem + ".webapp.zip")
+                    try:
+                        app_path = app_path.resolve(strict=True)
+                        app_path.relative_to(local_root)
+                    except (FileNotFoundError, ValueError):
+                        app_path = None
+                    if app_path is not None:
+                        content = _read_local_companion(app_path, "threejs-app")
+                        selected_asset_type = "threejs-app"
+                        asset_source = "legacy-sibling"
+                    elif declared_asset is not None:
+                        content, selected_asset_type, asset_source = declared_asset
+                    else:
+                        glb_path = fmu_path.with_name(fmu_path.stem + ".glb")
+                        try:
+                            glb_path = glb_path.resolve(strict=True)
+                            glb_path.relative_to(local_root)
+                        except (FileNotFoundError, ValueError):
+                            glb_path = None
+                        if glb_path is not None:
+                            content = _read_local_companion(glb_path, "glb")
+                            selected_asset_type = "glb"
+            else:
+                suffix = ".glb" if asset_type == "glb" else ".webapp.zip"
+                try:
+                    companion_path = fmu_path.with_name(fmu_path.stem + suffix).resolve(strict=True)
+                    companion_path.relative_to(local_root)
+                except (FileNotFoundError, ValueError) as exc:
+                    raise HTTPException(status_code=404, detail="Companion digital twin asset not found for this FMU") from exc
+                content = _read_local_companion(companion_path, asset_type)
+                if content is None:
                     raise HTTPException(status_code=404, detail="Companion digital twin asset not found for this FMU")
-                if companion_path.stat().st_size > size_limit:
-                    raise HTTPException(status_code=413, detail="Companion digital twin asset exceeds the size limit")
-                content = companion_path.read_bytes()
-            except OSError as exc:
-                raise HTTPException(status_code=503, detail="Companion digital twin asset could not be read") from exc
             source = "gateway"
         elif fmu_backend_mode == "station":
             if not station_base_url or not station_internal_token:
@@ -580,15 +1108,50 @@ def create_digital_twin_assets_router(
                     timeout=station_request_timeout,
                     follow_redirects=False,
                 ) as client:
-                    async with client.stream("GET", station_url, params={"assetType": asset_type}, headers=headers) as response:
-                        if response.status_code == 404:
-                            raise HTTPException(status_code=404, detail="Companion digital twin asset not found on Lab Station")
-                        if response.status_code != 200:
-                            raise HTTPException(status_code=502, detail="Lab Station could not provide the companion digital twin asset")
-                        response_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-                        if response_type != media_type:
-                            raise HTTPException(status_code=502, detail="Lab Station returned an invalid digital twin asset type")
-                        content = await _read_limited_response(response, size_limit, asset_type)
+                    async def read_station_asset(requested_type: str):
+                        async with client.stream(
+                            "GET", station_url, params={"assetType": requested_type}, headers=headers,
+                        ) as response:
+                            if response.status_code == 404:
+                                return None
+                            if response.status_code == 400 and requested_type == "auto":
+                                try:
+                                    error_body = json.loads((await response.aread()).decode("utf-8"))
+                                except (UnicodeDecodeError, json.JSONDecodeError):
+                                    error_body = {}
+                                if error_body.get("detail") == "INVALID_COMPANION_ASSET_TYPE":
+                                    return "auto-unsupported"
+                            if response.status_code != 200:
+                                raise HTTPException(status_code=502, detail="Lab Station could not provide the companion digital twin asset")
+
+                            resolved_type = requested_type
+                            resolved_source = "legacy-sibling"
+                            if requested_type == "auto":
+                                resolved_type = response.headers.get("x-digital-twin-asset-type", "").strip().lower()
+                                if resolved_type not in {"glb", "threejs-app"}:
+                                    raise HTTPException(status_code=502, detail="Lab Station returned an invalid digital twin asset type")
+                                resolved_source = response.headers.get("x-digital-twin-asset-source", "").strip().lower()
+                                if resolved_source not in {"fmi-ls-ref", "legacy-sibling"}:
+                                    raise HTTPException(status_code=502, detail="Lab Station returned an invalid digital twin asset source")
+                            response_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                            expected_media_type = "model/gltf-binary" if resolved_type == "glb" else "application/zip"
+                            if response_type != expected_media_type:
+                                raise HTTPException(status_code=502, detail="Lab Station returned an invalid digital twin asset type")
+                            size_limit = _MAX_SCENE_BYTES if resolved_type == "glb" else _MAX_WEBAPP_ARCHIVE_BYTES
+                            response_content = await _read_limited_response(response, size_limit, resolved_type)
+                            return response_content, resolved_type, resolved_source
+
+                    station_asset = await read_station_asset(asset_type)
+                    if station_asset == "auto-unsupported":
+                        # Older Station Executors do not accept `auto`; preserve their
+                        # same-name companion behavior until the REF-aware release lands.
+                        for fallback_type in ("threejs-app", "glb"):
+                            station_asset = await read_station_asset(fallback_type)
+                            if station_asset is not None:
+                                break
+                    if station_asset is None or station_asset == "auto-unsupported":
+                        raise HTTPException(status_code=404, detail="Companion digital twin asset not found on Lab Station")
+                    content, selected_asset_type, asset_source = station_asset
             except HTTPException:
                 raise
             except httpx.TimeoutException as exc:
@@ -599,6 +1162,10 @@ def create_digital_twin_assets_router(
         else:
             raise HTTPException(status_code=503, detail="Digital twin FMU backend mode is unsupported")
 
+        if content is None:
+            raise HTTPException(status_code=404, detail="Companion digital twin asset not found for this FMU")
+
+        is_glb = selected_asset_type == "glb"
         document = _validate_glb(content) if is_glb else None
         stored = (
             _store_scene(root, lab_id, content, validated_document=document)
@@ -606,9 +1173,11 @@ def create_digital_twin_assets_router(
             else _store_webapp(root, lab_id, content)
         )
         stored["source"] = source
+        stored["assetSource"] = asset_source
+        stored["assetType"] = selected_asset_type
         stored["accessKey"] = access_key
         stored["validation"] = await _asset_validation_report(
-            asset_type,
+            selected_asset_type,
             access_key=access_key,
             document=document,
             get_model_metadata=get_model_metadata,

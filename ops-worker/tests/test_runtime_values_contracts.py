@@ -14,6 +14,7 @@ def test_runtime_values_contract_preserves_static_defaults_and_patterns():
     assert runtime_values.ENOUGH_DISCOVERY_SIGNALS == {
         "labstation-detected",
         "winrm-reachable",
+        "management-trust-pending",
     }
     assert runtime_values.HTTP_HEADER_NAME_RE.fullmatch("X-Ops-Internal-Token")
     assert runtime_values.HOST_NAME_RE.fullmatch("lab-ws-01")

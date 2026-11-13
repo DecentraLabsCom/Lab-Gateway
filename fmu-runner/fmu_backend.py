@@ -1,19 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+from collections import OrderedDict
 from dataclasses import dataclass
 import json
 import logging
-import math
 import re
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse, urlunparse
 
 import httpx
 from fastapi import HTTPException
+from fmu_model_normalization import ModelMetadata, normalize_model_metadata
 
 
-ModelMetadata = dict[str, Any]
 logger = logging.getLogger("fmu-runner.backend")
 
 _FMU_ACCESS_KEY_SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
@@ -55,6 +56,24 @@ _SAFE_SIMULATION_ERRORS = {
     "FMU_WORKER_ISOLATION_UNAVAILABLE",
     "FMU_WORKER_START_FAILED",
 }
+
+# model.description can legitimately contain tens of thousands of FMI
+# variables. BOPTEST's public FMU description is about 25 MiB and takes more
+# than the ordinary Station request timeout to serialize, so give only that
+# metadata operation a larger minimum budget. Keep the configured timeout
+# behavior for every smaller request.
+_MIN_MODEL_DESCRIPTION_REQUEST_TIMEOUT_SECONDS = 30.0
+_MAX_CACHED_MODEL_DESCRIPTIONS = 2
+
+
+class _ModelDescriptionNotModified(dict[str, Any]):
+    """Internal signal that the Station's conditional metadata request was unchanged."""
+
+    def __init__(self, etag: str, metadata: ModelMetadata):
+        super().__init__()
+        self.etag = etag
+        self.metadata = metadata
+
 
 
 class BaseFmuBackend:
@@ -108,12 +127,24 @@ class BaseFmuBackend:
     async def list_authorized_fmu(self, *, claims: dict) -> dict:
         raise NotImplementedError
 
+    async def get_authorized_parameter_sets(self, *, claims: dict) -> list[dict[str, Any]]:
+        return []
+
+    async def get_authorized_experiments(self, *, claims: dict) -> dict[str, Any]:
+        self.authorized_access_key(claims)
+        return {"resourceSets": [], "truncated": False}
+
+    async def get_authorized_related_resources(self, *, claims: dict) -> dict[str, Any]:
+        self.authorized_access_key(claims)
+        return {"manifestName": None, "manifestVersion": None, "resources": []}
+
 
 @dataclass
 class LocalFmuMetadataBackend(BaseFmuBackend):
     health_loader: Callable[..., dict]
     model_metadata_loader: Callable[..., ModelMetadata]
     list_loader: Callable[[str], dict]
+    related_resources_loader: Optional[Callable[[str], dict[str, Any]]] = None
 
     mode = "local"
 
@@ -140,6 +171,18 @@ class LocalFmuMetadataBackend(BaseFmuBackend):
     async def list_authorized_fmu(self, *, claims: dict) -> dict:
         return self.list_loader(self.authorized_access_key(claims))
 
+    async def get_authorized_parameter_sets(self, *, claims: dict) -> list[dict[str, Any]]:
+        # Local metadata mode does not execute simulations and has no private
+        # Executor endpoint from which to load FMI-LS-REF parameter presets.
+        self.authorized_access_key(claims)
+        return []
+
+    async def get_authorized_related_resources(self, *, claims: dict) -> dict[str, Any]:
+        access_key = self.authorized_access_key(claims)
+        if self.related_resources_loader is None:
+            return {"manifestName": None, "manifestVersion": None, "resources": []}
+        return self.related_resources_loader(access_key)
+
 
 class StationFmuBackend(BaseFmuBackend):
     mode = "station"
@@ -154,6 +197,11 @@ class StationFmuBackend(BaseFmuBackend):
         self.base_url = base_url.rstrip("/")
         self.internal_token = internal_token
         self.request_timeout = request_timeout
+        self._model_description_cache: OrderedDict[
+            tuple[str, bool], tuple[str, ModelMetadata]
+        ] = OrderedDict()
+        self._model_description_response_etags: dict[tuple[str, bool], str] = {}
+        self._model_description_locks: OrderedDict[tuple[str, bool], asyncio.Lock] = OrderedDict()
 
     def _headers(self) -> dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -187,6 +235,8 @@ class StationFmuBackend(BaseFmuBackend):
         options: Optional[dict[str, Any]] = None,
         input_schedule: Optional[list[dict[str, Any]]] = None,
         scenarios: Optional[list[dict[str, Any]]] = None,
+        checkpoint: Optional[dict[str, Any]] = None,
+        capture_fmu_state: bool = False,
     ) -> dict[str, Any]:
         gateway_context = {
             "mode": self.mode,
@@ -218,6 +268,10 @@ class StationFmuBackend(BaseFmuBackend):
             payload["scenarios"] = scenarios
         if input_schedule:
             payload["inputSchedule"] = input_schedule
+        if checkpoint is not None:
+            payload["checkpoint"] = checkpoint
+        if capture_fmu_state:
+            payload["captureFmuState"] = True
         if lab_id:
             payload["labId"] = lab_id
         if reservation_key:
@@ -338,7 +392,7 @@ class StationFmuBackend(BaseFmuBackend):
             path = "/internal/health"
         elif operation == "capacity":
             path = "/internal/fmu/capacity"
-        elif operation in {"describe", "catalog"}:
+        elif operation in {"describe", "catalog", "parameter-sets", "experiments", "related-resources"}:
             if access_key is None:
                 raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
             key = str(access_key)
@@ -347,22 +401,40 @@ class StationFmuBackend(BaseFmuBackend):
                 key,
             ):
                 raise HTTPException(status_code=400, detail="Token contains an invalid FMU file key")
-            route = "describe" if operation == "describe" else "catalog"
+            route = {
+                "describe": "describe",
+                "catalog": "catalog",
+                "parameter-sets": "parameter-sets",
+                "experiments": "experiments",
+                "related-resources": "related-resources",
+            }[operation]
             path = f"/internal/fmu/{route}"
         else:
             raise ValueError("Unsupported Station GET operation")
 
         try:
-            async with httpx.AsyncClient(base_url=self.base_url, timeout=self.request_timeout) as client:
+            timeout = self.request_timeout
+            if operation == "describe":
+                timeout = max(timeout, _MIN_MODEL_DESCRIPTION_REQUEST_TIMEOUT_SECONDS)
+            async with httpx.AsyncClient(base_url=self.base_url, timeout=timeout) as client:
                 request_kwargs: dict[str, Any] = {"headers": self._headers()}
-                if operation in {"describe", "catalog"}:
+                if operation in {"describe", "catalog", "parameter-sets", "experiments", "related-resources"}:
                     request_kwargs["headers"]["X-FMU-Access-Key"] = key
                 if operation == "describe" and public_only:
                     request_kwargs["params"] = {"publicOnly": "true"}
+                cache_key = (key, public_only)
+                cached_description = self._model_description_cache.get(cache_key)
+                if operation == "describe" and cached_description is not None:
+                    request_kwargs["headers"]["If-None-Match"] = cached_description[0]
                 response = await client.get(path, **request_kwargs)
         except httpx.HTTPError as exc:
-            logger.warning("Station backend GET failed: %s", exc)
+            logger.warning("Station backend %s GET failed (%s)", operation, type(exc).__name__)
             raise HTTPException(status_code=503, detail="Station backend unavailable") from exc
+
+        if response.status_code == 304 and operation == "describe":
+            if cached_description is not None:
+                return _ModelDescriptionNotModified(*cached_description)
+            raise HTTPException(status_code=502, detail="Station returned an unexpected FMI metadata validator")
 
         if response.status_code >= 400:
             detail_text = response.text
@@ -383,6 +455,12 @@ class StationFmuBackend(BaseFmuBackend):
 
         if not isinstance(payload, dict):
             raise HTTPException(status_code=502, detail="Station backend returned invalid payload")
+        if operation == "describe":
+            etag = response.headers.get("ETag")
+            if isinstance(etag, str) and etag.strip() and len(etag) <= 256:
+                self._model_description_response_etags[(key, public_only)] = etag.strip()
+            else:
+                self._model_description_response_etags.pop((key, public_only), None)
         return payload
 
     async def _post_json(
@@ -454,6 +532,8 @@ class StationFmuBackend(BaseFmuBackend):
             parameters=request_payload.get("parameters"),
             options=request_payload.get("options"),
             input_schedule=request_payload.get("inputSchedule"),
+            checkpoint=request_payload.get("checkpoint"),
+            capture_fmu_state=request_payload.get("captureFmuState", False),
         )
         key = str(access_key)
         if not re.fullmatch(
@@ -676,271 +756,6 @@ class StationFmuBackend(BaseFmuBackend):
     ) -> dict[str, Any]:
         return await self._request_scoped_json("cancel", claims=claims, sim_id=sim_id)
 
-    @staticmethod
-    def _normalize_variable(raw: dict[str, Any], fallback_reference: int) -> dict[str, Any]:
-        value_reference = raw.get("valueReference")
-        if value_reference is None:
-            value_reference = fallback_reference
-        entry = {
-            "name": str(raw.get("name") or ""),
-            "type": str(raw.get("type") or "Real"),
-            "causality": str(raw.get("causality") or "local"),
-            "variability": str(raw.get("variability") or "continuous"),
-            "valueReference": int(value_reference),
-        }
-        if raw.get("unit") is not None:
-            entry["unit"] = raw.get("unit")
-        if raw.get("start") is not None:
-            entry["start"] = raw.get("start")
-        initial = raw.get("initial")
-        if isinstance(initial, str) and initial.strip():
-            entry["initial"] = initial.strip()[:32]
-        nominal = raw.get("nominal")
-        if nominal is not None and not isinstance(nominal, bool):
-            try:
-                normalized_nominal = float(nominal)
-            except (TypeError, ValueError, OverflowError):
-                normalized_nominal = 0.0
-            if math.isfinite(normalized_nominal) and normalized_nominal > 0:
-                entry["nominal"] = normalized_nominal
-        integer_type = entry["type"] in {
-            "Integer", "Enumeration", "Int8", "UInt8", "Int16", "UInt16",
-            "Int32", "UInt32", "Int64", "UInt64",
-        }
-        for bound in ("min", "max"):
-            raw_bound = raw.get(bound)
-            if raw_bound is None:
-                continue
-            try:
-                value = float(raw_bound)
-                if not math.isfinite(value) or (integer_type and not value.is_integer()):
-                    continue
-                entry[bound] = int(value) if integer_type else value
-            except (TypeError, ValueError, OverflowError):
-                continue
-        description = raw.get("description")
-        if isinstance(description, str) and description.strip():
-            entry["description"] = description.strip()[:4096]
-        display_name = raw.get("displayName")
-        if isinstance(display_name, str) and display_name.strip():
-            entry["displayName"] = display_name.strip()[:256]
-        quantity = raw.get("quantity")
-        if isinstance(quantity, str) and quantity.strip():
-            entry["quantity"] = quantity.strip()[:256]
-        display_unit = raw.get("displayUnit")
-        if isinstance(display_unit, str) and display_unit.strip():
-            entry["displayUnit"] = display_unit.strip()[:64]
-        elif isinstance(display_unit, dict):
-            name = display_unit.get("name")
-            try:
-                factor = float(display_unit.get("factor", 1.0))
-                offset = float(display_unit.get("offset", 0.0))
-            except (TypeError, ValueError, OverflowError):
-                factor = 0.0
-                offset = 0.0
-            raw_inverse = display_unit.get("inverse", False)
-            inverse = raw_inverse is True or str(raw_inverse).strip().lower() in {"true", "1"}
-            if (
-                isinstance(name, str)
-                and name.strip()
-                and math.isfinite(factor)
-                and factor != 0
-                and math.isfinite(offset)
-                and (not inverse or offset == 0)
-            ):
-                normalized_display_unit: dict[str, Any] = {
-                    "name": name.strip()[:64],
-                    "factor": factor,
-                    "offset": offset,
-                }
-                if inverse:
-                    normalized_display_unit["inverse"] = True
-                entry["displayUnit"] = normalized_display_unit
-        raw_dimensions = raw.get("dimensions")
-        if isinstance(raw_dimensions, list) and len(raw_dimensions) <= 64:
-            dimensions = []
-            for dimension in raw_dimensions:
-                if not isinstance(dimension, dict):
-                    continue
-                normalized_dimension = {}
-                for field in ("start", "valueReference"):
-                    value = dimension.get(field)
-                    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-                        normalized_dimension[field] = value
-                variable_name = dimension.get("variableName")
-                if isinstance(variable_name, str) and variable_name.strip():
-                    normalized_dimension["variableName"] = variable_name.strip()[:256]
-                if normalized_dimension:
-                    dimensions.append(normalized_dimension)
-            if dimensions:
-                entry["dimensions"] = dimensions
-        raw_declared_type = raw.get("declaredType")
-        if isinstance(raw_declared_type, dict):
-            declared_type = {}
-            for field, maximum_length in (
-                ("name", 256), ("type", 64), ("description", 4096),
-                ("unit", 128), ("quantity", 256), ("displayUnit", 64),
-            ):
-                value = raw_declared_type.get(field)
-                if isinstance(value, str) and value.strip():
-                    declared_type[field] = value.strip()[:maximum_length]
-            for bound in ("min", "max"):
-                value = raw_declared_type.get(bound)
-                if value is None or isinstance(value, bool):
-                    continue
-                try:
-                    number = float(value)
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                if math.isfinite(number):
-                    declared_type[bound] = int(number) if integer_type and number.is_integer() else number
-            raw_items = raw_declared_type.get("items")
-            if isinstance(raw_items, list) and len(raw_items) <= 256:
-                items = []
-                for item in raw_items:
-                    if not isinstance(item, dict) or not isinstance(item.get("name"), str):
-                        continue
-                    raw_value = item.get("value")
-                    if raw_value is None or isinstance(raw_value, bool) or not isinstance(raw_value, (str, int, float)):
-                        continue
-                    try:
-                        number = float(raw_value)
-                    except (TypeError, ValueError, OverflowError):
-                        continue
-                    if not math.isfinite(number) or not number.is_integer():
-                        continue
-                    normalized_item = {"name": item["name"].strip()[:256], "value": int(number)}
-                    description = item.get("description")
-                    if isinstance(description, str) and description.strip():
-                        normalized_item["description"] = description.strip()[:1024]
-                    if normalized_item["name"]:
-                        items.append(normalized_item)
-                if items:
-                    declared_type["items"] = items
-            if declared_type:
-                entry["declaredType"] = declared_type
-        enum_items = raw.get("enumItems")
-        if entry["type"] == "Enumeration" and isinstance(enum_items, list) and len(enum_items) <= 256:
-            normalized_items = []
-            for item in enum_items:
-                if not isinstance(item, dict) or not isinstance(item.get("name"), str):
-                    continue
-                raw_value = item.get("value")
-                if raw_value is None or isinstance(raw_value, bool) or not isinstance(raw_value, (str, int, float)):
-                    continue
-                try:
-                    numeric_value = float(raw_value)
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                if not math.isfinite(numeric_value) or not numeric_value.is_integer():
-                    continue
-                value = int(numeric_value)
-                normalized_item = {"value": value, "name": item["name"].strip()[:256]}
-                item_description = item.get("description")
-                if isinstance(item_description, str) and item_description.strip():
-                    normalized_item["description"] = item_description.strip()[:1024]
-                if normalized_item["name"]:
-                    normalized_items.append(normalized_item)
-            if normalized_items:
-                entry["enumItems"] = normalized_items
-        return entry
-
-    def _normalize_model_metadata(self, payload: dict[str, Any]) -> ModelMetadata:
-        raw_variables = payload.get("modelVariables")
-        if raw_variables is None:
-            raw_variables = payload.get("variables")
-        if not isinstance(raw_variables, list):
-            raise HTTPException(status_code=502, detail="Station backend response is missing model variables")
-
-        supports_cs = payload.get("supportsCoSimulation")
-        supports_me = payload.get("supportsModelExchange")
-        simulation_kind = payload.get("simulationKind")
-        simulation_type = payload.get("simulationType")
-
-        if simulation_kind is None:
-            if simulation_type == "CoSimulation":
-                simulation_kind = "coSimulation"
-            elif simulation_type == "ModelExchange":
-                simulation_kind = "modelExchange"
-            else:
-                simulation_kind = "coSimulation" if supports_cs else ("modelExchange" if supports_me else "unknown")
-
-        if simulation_type is None:
-            simulation_type = "CoSimulation" if simulation_kind == "coSimulation" else (
-                "ModelExchange" if simulation_kind == "modelExchange" else "Unknown"
-            )
-
-        def optional_number(name: str) -> Optional[float]:
-            value = payload.get(name)
-            return float(value) if value is not None else None
-
-        normalized = {
-            "modelName": str(payload.get("modelName") or "DecentraLabsProxy"),
-            "guid": payload.get("guid"),
-            "fmiVersion": str(payload.get("fmiVersion") or "2.0"),
-            "simulationKind": str(simulation_kind),
-            "simulationType": str(simulation_type),
-            "supportsCoSimulation": bool(supports_cs if supports_cs is not None else simulation_kind == "coSimulation"),
-            "supportsModelExchange": bool(supports_me if supports_me is not None else simulation_kind == "modelExchange"),
-            "defaultStartTime": optional_number("defaultStartTime"),
-            "defaultStopTime": optional_number("defaultStopTime"),
-            "defaultStepSize": optional_number("defaultStepSize"),
-            "modelVariables": [],
-        }
-
-        for field, maximum_length in (
-            ("description", 4096),
-            ("author", 256),
-            ("version", 128),
-            ("license", 256),
-            ("generationTool", 256),
-        ):
-            value = payload.get(field)
-            if isinstance(value, str) and value.strip():
-                normalized[field] = value.strip()[:maximum_length]
-        default_tolerance = payload.get("defaultTolerance")
-        if default_tolerance is not None and not isinstance(default_tolerance, bool):
-            try:
-                tolerance_value = float(default_tolerance)
-            except (TypeError, ValueError, OverflowError):
-                tolerance_value = 0.0
-            if math.isfinite(tolerance_value) and tolerance_value > 0:
-                normalized["defaultTolerance"] = tolerance_value
-        raw_capabilities = payload.get("capabilities")
-        if isinstance(raw_capabilities, dict):
-            capabilities = {}
-            for field in (
-                "canGetAndSetFMUstate",
-                "canSerializeFMUstate",
-                "canHandleVariableCommunicationStepSize",
-                "providesDirectionalDerivative",
-                "providesAdjointDerivatives",
-            ):
-                value = raw_capabilities.get(field)
-                if isinstance(value, bool):
-                    capabilities[field] = value
-            fixed_step = raw_capabilities.get("fixedInternalStepSize")
-            if fixed_step is not None and not isinstance(fixed_step, bool):
-                try:
-                    fixed_step_value = float(fixed_step)
-                except (TypeError, ValueError, OverflowError):
-                    fixed_step_value = 0.0
-                if math.isfinite(fixed_step_value) and fixed_step_value > 0:
-                    capabilities["fixedInternalStepSize"] = fixed_step_value
-            if capabilities:
-                normalized["capabilities"] = capabilities
-
-        guid = payload.get("guid")
-        if guid:
-            normalized["guid"] = str(guid)
-
-        for index, variable in enumerate(raw_variables, start=1):
-            if not isinstance(variable, dict):
-                raise HTTPException(status_code=502, detail="Station backend returned an invalid model variable entry")
-            normalized["modelVariables"].append(self._normalize_variable(variable, index))
-
-        return normalized
-
     async def health(self, *, lab_id: Optional[str] = None) -> dict:
         checks = {
             "stationConfigured": bool(self.base_url),
@@ -1009,11 +824,114 @@ class StationFmuBackend(BaseFmuBackend):
         include_internal_variables: bool = True,
     ) -> ModelMetadata:
         access_key = self.ensure_requested_access_key(claims, requested_fmu_filename)
-        if include_internal_variables:
-            payload = await self._request_json("describe", access_key=access_key)
-        else:
-            payload = await self._request_json("describe", access_key=access_key, public_only=True)
-        return self._normalize_model_metadata(payload)
+        cache_key = (access_key, not include_internal_variables)
+        lock = self._model_description_locks.get(cache_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._model_description_locks[cache_key] = lock
+        self._model_description_locks.move_to_end(cache_key)
+        for candidate_key, candidate_lock in list(self._model_description_locks.items()):
+            if len(self._model_description_locks) <= 32:
+                break
+            if candidate_key != cache_key and not candidate_lock.locked():
+                self._model_description_locks.pop(candidate_key, None)
+        async with lock:
+            if include_internal_variables:
+                payload = await self._request_json("describe", access_key=access_key)
+            else:
+                payload = await self._request_json("describe", access_key=access_key, public_only=True)
+
+            if isinstance(payload, _ModelDescriptionNotModified):
+                cached = payload.metadata
+                self._model_description_cache[cache_key] = (payload.etag, cached)
+                self._model_description_cache.move_to_end(cache_key)
+                return cached
+
+            etag = self._model_description_response_etags.get(cache_key)
+            try:
+                metadata = normalize_model_metadata(payload)
+            except Exception:
+                self._model_description_cache.pop(cache_key, None)
+                self._model_description_response_etags.pop(cache_key, None)
+                raise
+            if isinstance(etag, str):
+                self._model_description_cache[cache_key] = (etag, metadata)
+                self._model_description_cache.move_to_end(cache_key)
+                while len(self._model_description_cache) > _MAX_CACHED_MODEL_DESCRIPTIONS:
+                    evicted_key, _ = self._model_description_cache.popitem(last=False)
+                    self._model_description_response_etags.pop(evicted_key, None)
+                    evicted_lock = self._model_description_locks.get(evicted_key)
+                    if evicted_lock is not None and not evicted_lock.locked():
+                        self._model_description_locks.pop(evicted_key, None)
+            else:
+                self._model_description_cache.pop(cache_key, None)
+                self._model_description_response_etags.pop(cache_key, None)
+            return metadata
+
+    async def get_authorized_parameter_sets(self, *, claims: dict) -> list[dict[str, Any]]:
+        access_key = self.authorized_access_key(claims)
+        payload = await self._request_json("parameter-sets", access_key=access_key)
+        parameter_presets = payload.get("fmiLsParameterPresets")
+        if not isinstance(parameter_presets, list) or len(parameter_presets) > 24:
+            raise HTTPException(status_code=502, detail="Station backend returned invalid parameter sets")
+        return [preset for preset in parameter_presets if isinstance(preset, dict)]
+
+    async def get_authorized_experiments(self, *, claims: dict) -> dict[str, Any]:
+        access_key = self.authorized_access_key(claims)
+        payload = await self._request_json("experiments", access_key=access_key)
+        resource_sets = payload.get("resourceSets")
+        if not isinstance(resource_sets, list) or len(resource_sets) > 8:
+            raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-REF experiments")
+        return {
+            "resourceSets": [resource_set for resource_set in resource_sets if isinstance(resource_set, dict)],
+            "truncated": payload.get("truncated") is True,
+        }
+
+    async def get_authorized_related_resources(self, *, claims: dict) -> dict[str, Any]:
+        access_key = self.authorized_access_key(claims)
+        payload = await self._request_json("related-resources", access_key=access_key)
+        resources = payload.get("resources")
+        if not isinstance(resources, list) or len(resources) > 128:
+            raise HTTPException(status_code=502, detail="Station backend returned invalid FMI-LS-REF resources")
+
+        normalized = []
+        for resource in resources:
+            if not isinstance(resource, dict):
+                continue
+            source = resource.get("source")
+            if not isinstance(source, str) or not source.strip() or len(source) > 2048:
+                continue
+            labels = resource.get("labels")
+            normalized_labels = []
+            if isinstance(labels, list):
+                for label in labels[:32]:
+                    if not isinstance(label, dict):
+                        continue
+                    name = label.get("name")
+                    if not isinstance(name, str) or not name.strip():
+                        continue
+                    description = label.get("description")
+                    normalized_labels.append({
+                        "name": name.strip()[:256],
+                        "description": description.strip()[:1024] if isinstance(description, str) else "",
+                    })
+            normalized.append({
+                "id": str(resource.get("id") or "")[:64],
+                "role": str(resource.get("role") or "")[:128],
+                "type": str(resource.get("type") or "")[:256],
+                "source": source.strip(),
+                "description": str(resource.get("description") or "")[:2048],
+                "labels": normalized_labels,
+                "availableInFmu": resource.get("availableInFmu") is True,
+            })
+
+        manifest_name = payload.get("manifestName")
+        manifest_version = payload.get("manifestVersion")
+        return {
+            "manifestName": manifest_name if isinstance(manifest_name, str) else None,
+            "manifestVersion": manifest_version[:64] if isinstance(manifest_version, str) else None,
+            "resources": normalized,
+        }
 
     async def list_authorized_fmu(self, *, claims: dict) -> dict:
         access_key = self.authorized_access_key(claims)

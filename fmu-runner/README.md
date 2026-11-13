@@ -53,6 +53,7 @@ does not change between these topologies.
 | GET | `/api/v1/fmu/list` | Return authorised FMU through the active backend |
 | GET | `/api/v1/fmu/proxy/{labId}?reservationKey=...` | Auto-generate reservation-scoped `proxy.fmu` |
 | GET | `/api/v1/simulations/describe?fmuFileName=<file>` | Read FMU model description through the active backend |
+| GET | `/api/v1/simulations/parameter-sets` | Return FMI-LS-REF parameter presets fully writable under the current reservation policy |
 | POST | `/api/v1/simulations/run` | Execute a simulation through the active backend |
 | POST | `/api/v1/simulations/jobs` | Submit one reservation-scoped, cancellable simulation |
 | POST | `/api/v1/simulations/batches` | Submit up to 8 parameter scenarios against the same FMU |
@@ -65,6 +66,10 @@ does not change between these topologies.
 
 The model-description response is defined by the
 [FMU Executor](https://github.com/DecentraLabsCom/FMU-Executor/blob/main/README.md#runtime-capabilities).
+FMI 3 descriptions can include FMI-LS-STRUCT map declarations. Reservation
+access filters out each map unless every member variable is readable, and
+generated proxy FMUs preserve the permitted declarations. The Marketplace
+renders fixed-size one-dimensional domain/codomain maps as reference curves.
 The Gateway applies its AAS-based variable-access policy separately; see
 [AAS support](../docs/aas-support.md#fmi-variable-access-policy).
 
@@ -148,7 +153,7 @@ docker compose --profile fmu-runner up --build fmu-runner
 FMU_RUNNER_ENABLED=true docker compose --profile fmu-local-dev up --build fmu-runner-local
 ```
 
-The local profile pulls `ghcr.io/decentralabscom/fmu-executor:0.3.4` by default.
+The local profile pulls `ghcr.io/decentralabscom/fmu-executor:0.3.10` by default.
 Set `FMU_EXECUTOR_IMAGE` in `.env` to select another released image tag. No
 FMU-Executor source checkout is required. Station mode and the local profile
 require FMU Executor 0.3.4 or newer for the asynchronous job, batch, status,

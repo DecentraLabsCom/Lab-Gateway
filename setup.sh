@@ -20,6 +20,7 @@ compose_profiles=""
 cf_enabled=false
 certbot_enabled=false
 aas_bundled=false
+aas_support_enabled=false
 fmu_runner_enabled=false
 fmu_runner_profile="fmu-runner"
 setup_python_cmd=""
@@ -93,6 +94,33 @@ secure_gateway_state() {
            -o -name '*credential*' -o -name '*.json' \) \
         -exec chmod 600 {} +; then
         echo "Unable to restrict private key and credential file permissions." >&2
+        return 1
+    fi
+}
+
+repair_station_contract_permissions() {
+    # ops-worker runs as an unprivileged user and bind-mounts these public
+    # schemas read-only. Keep the host directories traversable and schema
+    # files readable, including checkouts carried forward from older installs.
+    local schema_dir
+
+    for schema_dir in contracts contracts/station contracts/station/v3; do
+        if [ ! -d "$schema_dir" ]; then
+            echo "Station Contract v3 schema directory is missing: $schema_dir." >&2
+            return 1
+        fi
+        if ! chmod 755 "$schema_dir"; then
+            echo "Unable to make Station Contract v3 schema directory traversable: $schema_dir. Run setup as its owner or with sudo." >&2
+            return 1
+        fi
+    done
+
+    if ! find contracts/station/v3 -maxdepth 1 -type f -name '*.json' -print -quit | grep -q .; then
+        echo "No Station Contract v3 JSON schema files found in contracts/station/v3." >&2
+        return 1
+    fi
+    if ! find contracts/station/v3 -maxdepth 1 -type f -name '*.json' -exec chmod 644 {} +; then
+        echo "Unable to make Station Contract v3 JSON schemas readable. Run setup as their owner or with sudo." >&2
         return 1
     fi
 }
@@ -308,11 +336,15 @@ configure_station_lan_overlay() {
     local current_subnet
     local current_ip_range
     local current_gateway
+    local current_guacd_ipv4
+    local current_ops_worker_ipv4
     local station_parent
     local station_subnet
     local station_ip_range
     local station_gateway_answer
     local station_gateway
+    local station_guacd_ipv4
+    local station_ops_worker_ipv4
 
     system_name="$(uname -s 2>/dev/null || true)"
     if [ "$system_name" != "Linux" ]; then
@@ -324,6 +356,8 @@ configure_station_lan_overlay() {
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET"
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE"
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GUACD_IPV4"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_OPS_WORKER_IPV4"
         echo
         return
     fi
@@ -333,6 +367,8 @@ configure_station_lan_overlay() {
     current_subnet="$(get_env_default "WOL_LAN_SUBNET" "$ROOT_ENV_FILE")"
     current_ip_range="$(get_env_default "WOL_LAN_IP_RANGE" "$ROOT_ENV_FILE")"
     current_gateway="$(get_env_default "WOL_LAN_GATEWAY" "$ROOT_ENV_FILE")"
+    current_guacd_ipv4="$(get_env_default "WOL_LAN_GUACD_IPV4" "$ROOT_ENV_FILE")"
+    current_ops_worker_ipv4="$(get_env_default "WOL_LAN_OPS_WORKER_IPV4" "$ROOT_ENV_FILE")"
     station_lan_overlay="N"
     if compose_file_contains_wol_overlay "$current_compose_file"; then
         station_lan_overlay="Y"
@@ -366,6 +402,8 @@ configure_station_lan_overlay() {
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET"
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE"
         remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_GUACD_IPV4"
+        remove_env_var "$ROOT_ENV_FILE" "WOL_LAN_OPS_WORKER_IPV4"
         echo "   * Physical Station LAN overlay disabled."
         echo
         return
@@ -404,12 +442,20 @@ configure_station_lan_overlay() {
     fi
     read -p "Reserved Docker macvlan range [${current_ip_range:-required, e.g. 10.192.38.240/28}]: " station_ip_range
     station_ip_range="${station_ip_range:-$current_ip_range}"
-    if [ -z "$station_subnet" ] || [ -z "$station_ip_range" ]; then
-        echo "The Station subnet and reserved Docker range are required when the overlay is enabled." >&2
+    echo "Exclude the complete range ${station_ip_range} from the actual DHCP server (router or dnsmasq on this host)."
+    echo "setup.sh configures Compose only; it does not edit DHCP. Check leases before changing the pool."
+    echo "Choose two unused host IPs inside the excluded range; keep them reserved for the Gateway services."
+    read -p "Fixed guacd IPv4 inside the reserved range [${current_guacd_ipv4:-required, e.g. 10.192.38.241}]: " station_guacd_ipv4
+    station_guacd_ipv4="${station_guacd_ipv4:-$current_guacd_ipv4}"
+    read -p "Fixed ops-worker IPv4 inside the reserved range [${current_ops_worker_ipv4:-required, e.g. 10.192.38.242}]: " station_ops_worker_ipv4
+    station_ops_worker_ipv4="${station_ops_worker_ipv4:-$current_ops_worker_ipv4}"
+    if [ -z "$station_subnet" ] || [ -z "$station_ip_range" ] \
+        || [ -z "$station_guacd_ipv4" ] || [ -z "$station_ops_worker_ipv4" ]; then
+        echo "The Station subnet, reserved Docker range, and both static service IPs are required when the overlay is enabled." >&2
         exit 1
     fi
 
-    if ! "$setup_python_cmd" - "$station_subnet" "$station_ip_range" "$station_gateway" <<'PY'
+    if ! "$setup_python_cmd" - "$station_subnet" "$station_ip_range" "$station_gateway" "$station_guacd_ipv4" "$station_ops_worker_ipv4" <<'PY'
 import ipaddress
 import sys
 
@@ -417,12 +463,14 @@ try:
     subnet = ipaddress.ip_network(sys.argv[1], strict=True)
     ip_range = ipaddress.ip_network(sys.argv[2], strict=True)
     gateway = ipaddress.ip_address(sys.argv[3]) if sys.argv[3] else None
+    guacd_ipv4 = ipaddress.ip_address(sys.argv[4])
+    ops_worker_ipv4 = ipaddress.ip_address(sys.argv[5])
 except ValueError as exc:
-    print(f"Invalid Station subnet, Docker range or gateway: {exc}", file=sys.stderr)
+    print(f"Invalid Station subnet, Docker range, gateway or static service IP: {exc}", file=sys.stderr)
     raise SystemExit(1)
 
-if subnet.version != 4 or ip_range.version != 4:
-    print("The Station subnet and Docker range must be IPv4 networks.", file=sys.stderr)
+if subnet.version != 4 or ip_range.version != 4 or guacd_ipv4.version != 4 or ops_worker_ipv4.version != 4:
+    print("The Station subnet, Docker range and static service IPs must use IPv4.", file=sys.stderr)
     raise SystemExit(1)
 if not ip_range.subnet_of(subnet):
     print("The Docker macvlan range must be contained in the Station subnet.", file=sys.stderr)
@@ -440,6 +488,19 @@ if gateway is not None:
     if gateway in ip_range:
         print("The Station gateway cannot be inside the reserved Docker range.", file=sys.stderr)
         raise SystemExit(1)
+if guacd_ipv4 == ops_worker_ipv4:
+    print("guacd and ops-worker must use different static IP addresses.", file=sys.stderr)
+    raise SystemExit(1)
+for label, address in (("guacd", guacd_ipv4), ("ops-worker", ops_worker_ipv4)):
+    if address not in subnet or address in (subnet.network_address, subnet.broadcast_address):
+        print(f"The {label} static IP must be a usable address inside the Station subnet.", file=sys.stderr)
+        raise SystemExit(1)
+    if address not in ip_range or address in (ip_range.network_address, ip_range.broadcast_address):
+        print(f"The {label} static IP must be a usable address inside the reserved Docker range.", file=sys.stderr)
+        raise SystemExit(1)
+    if gateway == address:
+        print(f"The {label} static IP cannot equal the Station gateway.", file=sys.stderr)
+        raise SystemExit(1)
 PY
     then
         exit 1
@@ -449,6 +510,8 @@ PY
     update_env_var "$ROOT_ENV_FILE" "WOL_LAN_PARENT" "$station_parent"
     update_env_var "$ROOT_ENV_FILE" "WOL_LAN_SUBNET" "$station_subnet"
     update_env_var "$ROOT_ENV_FILE" "WOL_LAN_IP_RANGE" "$station_ip_range"
+    update_env_var "$ROOT_ENV_FILE" "WOL_LAN_GUACD_IPV4" "$station_guacd_ipv4"
+    update_env_var "$ROOT_ENV_FILE" "WOL_LAN_OPS_WORKER_IPV4" "$station_ops_worker_ipv4"
     if [ -n "$station_gateway" ]; then
         update_env_var "$ROOT_ENV_FILE" "WOL_LAN_GATEWAY" "$station_gateway"
     else
@@ -456,6 +519,8 @@ PY
     fi
     echo "   * Physical Station LAN overlay enabled."
     echo "   * COMPOSE_FILE includes docker-compose.wol.yml."
+    echo "   * guacd static IPv4: $station_guacd_ipv4."
+    echo "   * ops-worker static IPv4: $station_ops_worker_ipv4."
     if [ -n "$station_gateway" ]; then
         echo "   * Station LAN gateway configured: $station_gateway."
     else
@@ -822,7 +887,7 @@ update_env_var "$ROOT_ENV_FILE" "FMU_LOCAL_EXECUTOR_INTERNAL_TOKEN" "$fmu_local_
 # a second source checkout. Keep any explicit operator override.
 fmu_executor_image="$(get_env_default "FMU_EXECUTOR_IMAGE" "$ROOT_ENV_FILE")"
 if [ -z "$fmu_executor_image" ]; then
-    fmu_executor_image="ghcr.io/decentralabscom/fmu-executor:0.3.4"
+    fmu_executor_image="ghcr.io/decentralabscom/fmu-executor:0.3.10"
 fi
 update_env_var "$ROOT_ENV_FILE" "FMU_EXECUTOR_IMAGE" "$fmu_executor_image"
 remove_env_var "$ROOT_ENV_FILE" "FMU_EXECUTOR_SOURCE_PATH"
@@ -847,19 +912,24 @@ else
 fi
 echo
 
-echo "Lab Station WinRM Management Network"
+echo "Lab Station Management Network"
 echo "===================================="
-echo "This restricts Ops Worker WinRM access to the private management network used by Lab Stations."
+echo "These destination CIDRs must contain the IP addresses of the Lab Stations Ops Worker will manage."
+echo "They may differ from the Gateway/macvlan subnet; routes do not identify which networks are authorized."
 echo "Enter comma-separated CIDRs. Leave empty only if no Ops hosts will be configured yet."
-winrm_management_cidrs_default="$(get_env_default "WINRM_MANAGEMENT_CIDRS" "$ROOT_ENV_FILE")"
-read -p "WINRM_MANAGEMENT_CIDRS [${winrm_management_cidrs_default:-empty -> configure before adding hosts}]: " winrm_management_cidrs
-winrm_management_cidrs="${winrm_management_cidrs:-$winrm_management_cidrs_default}"
-winrm_management_cidrs=$(echo "$winrm_management_cidrs" | sed 's/[[:space:]]//g')
-update_env_var "$ROOT_ENV_FILE" "WINRM_MANAGEMENT_CIDRS" "$winrm_management_cidrs"
-if [ -z "$winrm_management_cidrs" ]; then
-    echo "   * WINRM_MANAGEMENT_CIDRS left empty; configure it before adding Ops hosts."
+station_management_cidrs_default="$(get_env_default "STATION_MANAGEMENT_CIDRS" "$ROOT_ENV_FILE")"
+if [ -z "$station_management_cidrs_default" ]; then
+    station_management_cidrs_default="$(get_env_default "WINRM_MANAGEMENT_CIDRS" "$ROOT_ENV_FILE")"
+fi
+read -p "STATION_MANAGEMENT_CIDRS [${station_management_cidrs_default:-e.g. 10.192.38.0/24; empty only if no hosts yet}]: " station_management_cidrs
+station_management_cidrs="${station_management_cidrs:-$station_management_cidrs_default}"
+station_management_cidrs=$(echo "$station_management_cidrs" | sed 's/[[:space:]]//g')
+update_env_var "$ROOT_ENV_FILE" "STATION_MANAGEMENT_CIDRS" "$station_management_cidrs"
+remove_env_var "$ROOT_ENV_FILE" "WINRM_MANAGEMENT_CIDRS"
+if [ -z "$station_management_cidrs" ]; then
+    echo "   * STATION_MANAGEMENT_CIDRS left empty; configure it before adding Ops hosts."
 else
-    echo "   * WINRM_MANAGEMENT_CIDRS set to: $winrm_management_cidrs"
+    echo "   * STATION_MANAGEMENT_CIDRS set to: $station_management_cidrs"
 fi
 echo
 
@@ -1253,6 +1323,7 @@ else
                 echo "No URL provided. AAS support disabled."
                 update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" ""
             else
+                aas_support_enabled=true
                 echo "   * External AAS server: $external_aas_url"
                 echo "   * Bundled basyx-aas-server / basyx-mongo containers will NOT be started."
                 update_env_var "$ROOT_ENV_FILE" "BASYX_AAS_URL" "$external_aas_url"
@@ -1286,8 +1357,18 @@ else
             update_env_var "$ROOT_ENV_FILE" "AAS_ALLOWED_HOSTS" ""
             update_env_var "$ROOT_ENV_FILE" "AAS_SERVICE_TOKEN" ""
             aas_bundled=true
+            aas_support_enabled=true
             ;;
     esac
+fi
+if [ "$aas_bundled" = true ]; then
+    update_env_var "$ROOT_ENV_FILE" "AAS_ENABLED" "true"
+elif [ "$aas_support_enabled" = true ]; then
+    # A non-empty BASYX_AAS_URL already enables external AAS automatically.
+    # Keep the URL as the single source of truth instead of duplicating it.
+    update_env_var "$ROOT_ENV_FILE" "AAS_ENABLED" ""
+else
+    update_env_var "$ROOT_ENV_FILE" "AAS_ENABLED" "false"
 fi
 echo
 
@@ -1405,6 +1486,10 @@ chmod 755 fmu-proxy-runtime/binaries/darwin64 2>/dev/null || true
 chmod 700 ops-data/guac-revocation-spool 2>/dev/null || true
 chmod 700 ops-data/winrm-certificates 2>/dev/null || true
 secure_gateway_state
+if ! repair_station_contract_permissions; then
+    echo "Repair Station Contract v3 permissions before starting Compose." >&2
+    exit 1
+fi
 if ! align_state_ownership; then
     echo "State directories are not writable by the Compose service identity." >&2
     exit 1
@@ -1540,6 +1625,11 @@ if [ "$fmu_runner_enabled" = "true" ]; then
         compose_profiles="--profile $fmu_runner_profile"
     fi
 fi
+
+# Persist the selected profiles so plain `docker compose up -d` calls after
+# setup, updates, or a Compose down/up cycle start the same optional services.
+persisted_compose_profiles=$(printf '%s' "$compose_profiles" | sed 's/--profile //g; s/ /,/g')
+update_env_var "$ROOT_ENV_FILE" "COMPOSE_PROFILES" "$persisted_compose_profiles"
 
 # Build final compose command
 compose_full="$compose_cmd"

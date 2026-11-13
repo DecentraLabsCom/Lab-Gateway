@@ -13,10 +13,13 @@ import httpx
 
 from aas_model_builders import (
     _SEMANTIC_ID_SIMULATION_ACCESS_CONTROL,
+    _SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES,
+    _standard_property,
     _encode_id,
     _submodel_id_for_access_control,
     build_simulation_access_control_submodel,
 )
+from simulation_access_policy import normalize_authorized_execution_interfaces
 
 logger = logging.getLogger("fmu-runner.aas")
 _AAS_ENCODED_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,1024}")
@@ -81,6 +84,34 @@ def _find_property_value(payload: Any, id_short: str) -> Optional[str]:
                 return found
     return None
 
+
+def _set_authorized_execution_interfaces(payload: dict[str, Any], metadata: dict[str, Any], value: Any = None) -> None:
+    interfaces = normalize_authorized_execution_interfaces(metadata, value)
+    elements = payload.get("submodelElements")
+    if not isinstance(elements, list):
+        raise ValueError("AAS access control submodel elements are invalid")
+    matches = [
+        element for element in elements
+        if isinstance(element, dict) and element.get("idShort") == "AuthorizedExecutionInterfaces"
+    ]
+    if len(matches) > 1 or (matches and matches[0].get("modelType") != "Property"):
+        raise ValueError("AAS execution-interface policy is invalid")
+    encoded = json.dumps(interfaces, separators=(",", ":"))
+    if matches:
+        matches[0]["valueType"] = "xs:string"
+        matches[0]["value"] = encoded
+        matches[0]["semanticId"] = {
+            "type": "ExternalReference",
+            "keys": [{"type": "GlobalReference", "value": _SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES}],
+        }
+    else:
+        elements.append(_standard_property(
+            "AuthorizedExecutionInterfaces",
+            "xs:string",
+            encoded,
+            _SEMANTIC_ID_AUTHORIZED_EXECUTION_INTERFACES,
+        ))
+
 async def _sync_simulation_access_control(
     client: httpx.AsyncClient,
     lab_id: str,
@@ -110,6 +141,13 @@ async def _sync_simulation_access_control(
             return {"error": "AAS access control resource is invalid"}
         old_generated_digest = _find_property_value(existing, "GeneratedPolicyDigest")
         old_interface_digest = _find_property_value(existing, "InterfaceDigest")
+        old_execution_interfaces = _find_property_value(existing, "AuthorizedExecutionInterfaces")
+        configured_interfaces = None
+        if old_execution_interfaces is not None:
+            try:
+                configured_interfaces = json.loads(old_execution_interfaces)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                configured_interfaces = []
         old_blob = next((
             element for element in existing.get("submodelElements", [])
             if isinstance(element, dict)
@@ -141,6 +179,13 @@ async def _sync_simulation_access_control(
             }
         else:
             return_flags = {"accessPolicyRegenerated": True} if force_regenerate else {}
+            try:
+                _set_authorized_execution_interfaces(payload, metadata, configured_interfaces)
+            except ValueError:
+                # If an FMU update removed a previously authorized mode, reset
+                # generated policy to its safe default (Co-Simulation when
+                # available). Provider-authored access rules remain untouched.
+                _set_authorized_execution_interfaces(payload, metadata)
     elif current.status_code == 404:
         return_flags = {}
     else:

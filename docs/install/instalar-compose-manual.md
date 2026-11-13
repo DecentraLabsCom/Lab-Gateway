@@ -70,7 +70,7 @@ OPS_BACKEND_MYSQL_PASSWORD=cambia_a_contraseña_segura
 OPS_GUACAMOLE_MYSQL_USER=ops_guac
 OPS_GUACAMOLE_MYSQL_PASSWORD=cambia_a_contraseña_segura
 OPS_SECRETS_KEY=<clave-fernet-estable>
-STATION_MANAGEMENT_CIDRS=10.7.74.0/24
+STATION_MANAGEMENT_CIDRS=10.192.38.0/24
 OPS_WINRM_TRUST_PATH=/app/data/winrm-certificates
 
 # Administrador de Guacamole (no uses 'guacadmin' en producción)
@@ -90,18 +90,25 @@ CORS_ALLOWED_ORIGINS=https://www.decentralabs-marketplace.app
 FMU_JWT_AUDIENCE=https://lab.tu-institucion.edu/fmu
 ```
 
-`STATION_MANAGEMENT_CIDRS` es la lista de redes privadas desde las que Ops
-Worker puede alcanzar las Lab Stations configuradas. Windows v2 usa WinRM
-HTTPS por el puerto 5986; Linux v3 usa SSH en el puerto definido para el host.
-Es obligatoria antes de configurar cualquier host de Ops, y la dirección de
-cada estación debe pertenecer a una de esas redes. `WINRM_MANAGEMENT_CIDRS`
-sigue disponible como alias de compatibilidad. Es una política de seguridad y
-no se deduce de Guacamole: Guacamole también puede contener conexiones de
-escritorio exclusivamente administrativas y no proporciona la máscara de red
-autorizada.
+`STATION_MANAGEMENT_CIDRS` contiene las redes de destino de las direcciones de
+Lab Station que Ops Worker puede gestionar. La dirección configurada de cada
+estación debe resolver a una IP dentro de una de esas redes. No es la subred de
+origen del Gateway y no tiene por qué coincidir con
+`WOL_LAN_SUBNET`: una ruta indica cómo alcanzar una dirección, pero no qué red
+debe autorizarse. Configura las subredes reales de las estaciones que gestiona
+cada Gateway; pueden variar entre Gateways y se separan con comas. El CIDR es
+obligatorio antes de configurar hosts de Ops. Las estaciones Windows usan
+WinRM HTTPS en el puerto 5986; Lab Manager configura las nuevas con Station
+Contract v3 por defecto y mantiene v2 para estaciones antiguas. Linux v3 usa
+SSH en el puerto definido para el host. Si se añade un host directamente al
+catálogo estático, declara `contract.major` como `3` para una estación actual
+o `2` para una estación antigua. `WINRM_MANAGEMENT_CIDRS` sigue disponible
+como alias para despliegues existentes. Es una política de seguridad y no se
+deduce de Guacamole: Guacamole también puede contener conexiones de escritorio
+exclusivamente administrativas y no proporciona la máscara autorizada.
 
-Usa el CIDR real de la VLAN de gestión. Si solo se autoriza una estación, usa
-un `/32` específico, por ejemplo:
+Usa el CIDR real de la red de Station de este Gateway. Si solo se autoriza una
+estación, usa un `/32` específico, por ejemplo:
 
 ```env
 STATION_MANAGEMENT_CIDRS=10.192.38.82/32
@@ -110,6 +117,37 @@ STATION_MANAGEMENT_CIDRS=10.192.38.82/32
 Para varias estaciones de la misma `/24`, usa la subred real, por ejemplo
 `10.192.38.0/24`. En un gateway Lite, configura el CIDR de las estaciones
 locales gestionadas por ese gateway Lite.
+
+### Overlay opcional de LAN física para Stations Linux
+
+Si la interfaz física del Gateway Linux alcanza la VLAN de las estaciones y
+`guacd` necesita acceso RDP directo o `ops-worker` necesita WoL/gestión,
+activa el overlay macvlan en `.env`:
+
+```env
+COMPOSE_FILE=docker-compose.yml:docker-compose.wol.yml
+WOL_LAN_PARENT=eno3
+WOL_LAN_SUBNET=10.192.38.0/24
+WOL_LAN_IP_RANGE=10.192.38.240/28
+WOL_LAN_GUACD_IPV4=10.192.38.241
+WOL_LAN_OPS_WORKER_IPV4=10.192.38.242
+# WOL_LAN_GATEWAY=10.192.38.1
+```
+
+Excluye `WOL_LAN_IP_RANGE` del rango dinámico del servidor DHCP real, ya sea el
+router o `dnsmasq` ejecutado en el propio Gateway. Docker IPAM no coordina con
+DHCP, y ni Compose ni `setup.sh` modifican ese servicio. Comprueba las leases
+antes de cambiar un pool existente. Por ejemplo, con la subred `/24` y
+`WOL_LAN_IP_RANGE=10.192.38.240/28`, reserva los hosts `.240–.254` para macvlan
+y limita el pool DHCP a `.239` o antes; `.255` es broadcast. Si `dnsmasq` carga
+`/etc/dnsmasq.d` mediante `conf-dir`, guarda sus copias de respaldo fuera de
+ese directorio. Elige dentro del rango reservado dos direcciones de host libres
+y distintas para `guacd` y `ops-worker`. Compose las fija para que las IP de
+origen de RDP y WinRM sigan estables al recrear los contenedores.
+`WOL_LAN_GATEWAY` es opcional en una VLAN aislada; si se configura,
+debe ser el router de esa VLAN. El overlay solo funciona en Linux y conserva
+las redes privadas existentes de Compose. Valídalo con
+`docker compose config --quiet` antes de arrancar el stack.
 
 En un gateway Full, configura tambien las credenciales usadas para el canje de
 codigos de acceso opacos y la observacion de sesiones FMU. Los valores JSON
@@ -309,6 +347,21 @@ porque almacena los mapeos FMU cifrados y persistentes. Si ejecutas el stack
 mediante `sudo`, conserva el `HOST_UID` y `HOST_GID` de la cuenta de despliegue;
 no los sustituyas silenciosamente por los de root.
 
+Ops Worker también necesita leer los esquemas públicos Station Contract v3 de
+su bind mount de solo lectura. En Linux/macOS, ajusta los permisos del
+repositorio antes de iniciar Compose (y repítelo tras una actualización si el
+checkout perdió estos modos):
+
+```bash
+chmod 755 contracts contracts/station contracts/station/v3
+chmod 644 contracts/station/v3/*.json
+```
+
+Si los ficheros del repositorio pertenecen a root, ejecuta estos comandos con
+`sudo`. El script de setup repara estos permisos automáticamente. Si los
+corriges en un despliegue manual que ya está en marcha, reinicia el worker con
+`docker compose restart ops-worker`.
+
 ## Paso 6 — Añadir certificados SSL
 
 **Producción** — coloca aquí tus certificados de una CA o de Let's Encrypt:
@@ -381,7 +434,7 @@ docker compose --profile fmu-runner up -d --build
 ```
 
 Para ejecución FMU local exclusiva de desarrollo usa `fmu-local-dev`; nunca
-arranques los dos perfiles FMU a la vez. El perfil descarga la imagen versionada del FMU-Executor configurada por `FMU_EXECUTOR_IMAGE` (por defecto `ghcr.io/decentralabscom/fmu-executor:0.3.4`) y delega allí las simulaciones. No hace falta clonar otro repositorio:
+arranques los dos perfiles FMU a la vez. El perfil descarga la imagen versionada del FMU-Executor configurada por `FMU_EXECUTOR_IMAGE` (por defecto `ghcr.io/decentralabscom/fmu-executor:0.3.10`) y delega allí las simulaciones. No hace falta clonar otro repositorio:
 
 `setup.sh` crea `fmu-executor-state/` como directorio privado y persistente
 para el historial y los resultados asociados a cada reserva. La instalación
@@ -392,10 +445,12 @@ requieren FMU Executor 0.3.4 o posterior.
 FMU_RUNNER_ENABLED=true
 FMU_BACKEND_MODE=local
 FMU_LOCAL_DEV_MODE=true
+AAS_ENABLED=true
+COMPOSE_PROFILES=fmu-local-dev,aas
 ```
 
 ```bash
-docker compose --profile fmu-local-dev up -d --build openresty fmu-runner-local
+docker compose --profile fmu-local-dev --profile aas up -d --build openresty fmu-runner-local
 ```
 
 El runner local necesita `secrets/session_observer_signing_secret`, generado

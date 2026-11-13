@@ -22,8 +22,6 @@
         resourceType,
         fmuFileName = '',
         unavailableWindows = [],
-        priceUnit,
-        rawPricePerSecond,
         bookingMode,
         timeSlots = [],
         allowedDurationRange = null,
