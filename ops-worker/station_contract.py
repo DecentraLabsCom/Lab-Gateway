@@ -188,6 +188,11 @@ def _normalize_v3(payload: Mapping[str, Any]) -> Dict[str, Any]:
         key: _capability(readiness.get(key, {}), f"readiness.{key}")
         for key in ("physicalLab", "wake", "fmu")
     }
+    primary_capability = "fmu" if payload["profile"] == "fmu-only" else "physicalLab"
+    if summary["ready"] != normalized_readiness[primary_capability]["ready"]:
+        raise StationContractError(
+            f"summary.ready must match readiness.{primary_capability}.ready"
+        )
     if "remoteAccess" in readiness:
         normalized_readiness["remoteAccess"] = _capability(readiness["remoteAccess"], "readiness.remoteAccess")
     return {

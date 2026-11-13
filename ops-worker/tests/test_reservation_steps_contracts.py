@@ -66,7 +66,7 @@ def test_wake_uses_thirty_second_default_wait():
         "192.168.1.50",
         3,
         30.0,
-        probe_port=None,
+        probe_port=5986,
     )
 
 

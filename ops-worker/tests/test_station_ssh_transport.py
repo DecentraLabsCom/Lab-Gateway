@@ -287,7 +287,7 @@ def test_v2_timeout_reconciles_stored_result_without_reissuing_lifecycle(monkeyp
         if command == "identity":
             stdout = json.dumps({
                 "dispatcherVersions": [1, 2],
-                "capabilities": ["reservation-lease-v1"],
+                "capabilities": ["reservation-lease-v1", "operation-status-v1"],
             })
         elif operation == "operation.status":
             status_count += 1

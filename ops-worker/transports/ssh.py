@@ -14,6 +14,7 @@ import paramiko
 
 from station_credentials import load_ssh_credential
 from station_errors import StationAuthenticationFailed, StationCommandRejected, StationTrustMismatch, StationUnreachable
+from station_operation_reconciliation import execute_with_operation_reconciliation
 from station_ssh_trust import load_confirmed_ssh_host_key
 from station_transport import normalize_command_result, validate_station_command
 
@@ -170,6 +171,8 @@ class SshTransport:
             return response
         except (socket.timeout, TimeoutError) as exc:
             raise StationUnreachable("SSH command timed out") from exc
+        except (OSError, EOFError, paramiko.SSHException) as exc:
+            raise StationUnreachable("SSH command outcome is uncertain") from exc
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise StationUnreachable("Station dispatcher returned an invalid response") from exc
         finally:
@@ -198,8 +201,9 @@ class SshTransport:
             or 2 not in versions
             or not isinstance(capabilities, list)
             or "reservation-lease-v1" not in capabilities
+            or "operation-status-v1" not in capabilities
         ):
-            raise StationUnreachable("Station does not support reservation lease dispatcher v2")
+            raise StationUnreachable("Station does not support durable lease and operation-status dispatcher v2")
 
     def _operation_status(
         self,
@@ -222,7 +226,12 @@ class SshTransport:
         if not isinstance(record, dict):
             raise StationUnreachable("Station operation status is malformed")
         state = record.get("state")
+        reported_operation_id = record.get("operationId")
+        if reported_operation_id is not None and reported_operation_id != operation_id:
+            raise StationUnreachable("Station operation status is malformed")
         if state == "not-found":
+            if reported_operation_id != operation_id:
+                raise StationUnreachable("Station operation status is malformed")
             return None
         if state == "processing":
             raise StationUnreachable("Station operation is still in progress")
@@ -307,30 +316,24 @@ class SshTransport:
             ):
                 raise StationCommandRejected()
             self._require_dispatcher_v2(host)
-            previous = self._operation_status(host, operation_id, command)
-            if previous is not None:
-                result = previous
-            else:
-                envelope = {
-                    "schemaVersion": 2,
-                    "id": operation_id,
-                    "operation": "execute",
-                    "command": command,
-                    "args": args,
-                    "issuedAt": issued_at,
-                    "executeBefore": execute_before,
-                    "context": dict(context),
-                }
-                try:
-                    result = self._dispatch(host, envelope, timeout_seconds=timeout_seconds)
-                except StationUnreachable as original_error:
-                    try:
-                        previous = self._operation_status(host, operation_id, command)
-                    except StationUnreachable:
-                        raise original_error
-                    if previous is None:
-                        raise original_error
-                    result = previous
+            envelope = {
+                "schemaVersion": 2,
+                "id": operation_id,
+                "operation": "execute",
+                "command": command,
+                "args": args,
+                "issuedAt": issued_at,
+                "executeBefore": execute_before,
+                "context": dict(context),
+            }
+            result = execute_with_operation_reconciliation(
+                read_status=lambda: self._operation_status(host, operation_id, command),
+                dispatch=lambda: self._dispatch(host, envelope, timeout_seconds=timeout_seconds),
+                normalize_stored=lambda stored: dict(stored),
+                classify_uncertain=lambda error: (
+                    error if isinstance(error, StationUnreachable) else None
+                ),
+            )
             request_id = operation_id
         exit_code = result["exitCode"]
         normalized = normalize_command_result(

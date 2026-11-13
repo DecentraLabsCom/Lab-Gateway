@@ -1,3 +1,4 @@
+import json
 from flask import Flask
 
 import pytest
@@ -6,11 +7,31 @@ from station_api_blueprint import create_station_api_blueprint
 from station_errors import StationAuthenticationFailed, StationTrustRequired, StationUnreachable
 
 
+def _status_result():
+    return {
+        "exitCode": 0,
+        "stdout": json.dumps({
+            "profile": "dedicated",
+            "localModeEnabled": False,
+            "sessions": {"queryOk": True, "localSessionActive": False},
+        }),
+    }
+
+
+def _command_handler(operation_result):
+    def run(host, command, args, **kwargs):
+        if command == "status-json" and "request_id" not in kwargs:
+            return _status_result()
+        return {"id": kwargs.get("request_id"), "command": command, "args": args, **operation_result}
+
+    return run
+
+
 @pytest.fixture
 def station_api():
     handlers = {
         "find_host": lambda name: {"name": name, "address": "192.0.2.12"} if name == "linux-1" else None,
-        "run_station_command": lambda host, command, args, **kwargs: {"id": kwargs["request_id"], "command": command, "args": args, "exitCode": 0},
+        "run_station_command": _command_handler({"exitCode": 0}),
         "generate_ssh_credential": lambda ref, **kwargs: {"credentialRef": ref, "username": kwargs["username"]},
         "public_ssh_credential": lambda ref: {"credentialRef": ref, "publicKey": "ssh-ed25519 public"} if ref == "cred-1" else None,
         "delete_ssh_credential": lambda ref: ref == "cred-1",
@@ -66,12 +87,12 @@ def test_station_command_returns_not_found_and_preserves_warning_exit_status(sta
     missing = client.post("/api/station/command", json={"host": "unknown", "command": "status-json"})
     assert missing.status_code == 404
 
-    handlers["run_station_command"] = lambda *args, **kwargs: {"exitCode": 1, "outcome": "warning"}
+    handlers["run_station_command"] = _command_handler({"exitCode": 1, "outcome": "warning"})
     warning = client.post("/api/station/command", json={"host": "linux-1", "command": "prepare-session"})
     assert warning.status_code == 200
     assert warning.json["exitCode"] == 1
 
-    handlers["run_station_command"] = lambda *args, **kwargs: {"exitCode": 2, "outcome": "failure"}
+    handlers["run_station_command"] = _command_handler({"exitCode": 2, "outcome": "failure"})
     failure = client.post("/api/station/command", json={"host": "linux-1", "command": "prepare-session"})
     assert failure.status_code == 409
 

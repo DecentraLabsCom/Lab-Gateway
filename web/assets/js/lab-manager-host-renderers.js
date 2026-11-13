@@ -382,12 +382,16 @@
                             ? 'Refresh Station status to verify active sessions'
                             : 'Prepare physical lab session';
             const profileActionsMarkup = profile === 'fmu-only'
-                ? ''
+                ? '<button class="mini-btn primary" data-action="prepare" title="Physical session actions are unavailable for the FMU-only profile" disabled>Prepare</button>'
+                    + '<button class="mini-btn" data-action="release" title="Physical session actions are unavailable for the FMU-only profile" disabled>Release</button>'
                 : hasPhysicalProfile
                     ? `<button class="mini-btn primary" data-action="prepare" title="${escapeHtml(prepareTitle)}"${prepareBlocked ? ' disabled' : ''}>Prepare</button>`
                         + '<button class="mini-btn" data-action="release" title="Release the managed physical lab session">Release</button>'
                     : '<button class="mini-btn primary" data-action="prepare" title="Refresh Station status to verify its profile" disabled>Prepare</button>'
                         + '<button class="mini-btn" data-action="release" title="Refresh Station status to verify its profile" disabled>Release</button>';
+            const localModeUnavailableTitle = ['dedicated', 'fmu-only'].includes(profile)
+                ? 'Local mode is only available on hybrid stations'
+                : 'Refresh Station status to verify its profile';
             const localActionMarkup = localMode === true
                 ? '<button class="mini-btn secondary" data-action="toggle-local-mode" title="Disable local mode">Disable Local</button>'
                 : profile === 'hybrid'
@@ -398,7 +402,7 @@
                                 ? '<button class="mini-btn secondary" data-action="toggle-local-mode" title="Refresh Station status to verify the remote lab-user session" disabled>Enable Local</button>'
                                 : '<button class="mini-btn secondary" data-action="toggle-local-mode" title="Enable local mode for on-site use">Enable Local</button>'
                         : '<button class="mini-btn secondary" data-action="toggle-local-mode" title="Refresh Station status to verify local mode" disabled>Local status unknown</button>'
-                    : '';
+                    : `<button class="mini-btn secondary" data-action="toggle-local-mode" title="${escapeHtml(localModeUnavailableTitle)}" disabled>Enable Local</button>`;
             const lastForced = operations.lastForcedLogoff;
             const lastPower = operations.lastPowerAction;
             const updated = heartbeat.timestamp;
@@ -472,9 +476,9 @@
                 </div>
                 <div class="host-meta host-address">Address: <span class="mono">${safeAddress}</span></div>
                 <div class="host-meta">Connections: ${guacamoleStatusMarkup}</div>
-                <div class="host-meta">Platform: ${escapeHtml(platformLabel)} · Profile: ${escapeHtml(profileLabel)}${configuredProfileMarkup} · Station contract: ${escapeHtml(reportedContractVersion)}${configuredContractMarkup}</div>
-                <div class="host-meta">Management: ${escapeHtml(transportLabel)}:${escapeHtml(meta.managementPort || (transport === 'ssh' ? 22 : 5986))}</div>
-                <div class="host-meta">${escapeHtml(transportLabel)} credentials / ${transport === 'ssh' ? 'host-key trust' : 'TLS'}: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update ${escapeHtml(transportLabel)} management credentials" aria-label="Set or update ${escapeHtml(transportLabel)} management credentials"><span class="host-status-text ${credentialsConfigured ? 'good' : 'warn'}">${credentialsConfigured ? 'configured' : 'missing'}</span></button> / <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage ${escapeHtml(transportLabel)} trust" aria-label="Manage ${escapeHtml(transportLabel)} trust"><span class="host-status-text ${winrmTrust.className}">${escapeHtml(winrmTrust.label)}</span></button></div>
+                <div class="host-meta">Platform: ${escapeHtml(platformLabel)} · Profile: ${escapeHtml(profileLabel)}${configuredProfileMarkup}</div>
+                <div class="host-meta">Management: ${escapeHtml(transportLabel)}:${escapeHtml(meta.managementPort || (transport === 'ssh' ? 22 : 5986))} · Contract ver.: ${escapeHtml(reportedContractVersion)}${configuredContractMarkup}</div>
+                <div class="host-meta">${escapeHtml(transportLabel)} credentials / ${transport === 'ssh' ? 'host-key trust' : 'TLS trust'}: <button type="button" class="host-status-action" data-action="set-winrm-credentials" title="Set or update ${escapeHtml(transportLabel)} management credentials" aria-label="Set or update ${escapeHtml(transportLabel)} management credentials"><span class="host-status-text ${credentialsConfigured ? 'good' : 'warn'}">${credentialsConfigured ? 'configured' : 'missing'}</span></button> / <button type="button" class="host-status-action" data-action="manage-winrm-trust" title="Manage ${escapeHtml(transportLabel)} trust" aria-label="Manage ${escapeHtml(transportLabel)} trust"><span class="host-status-text ${winrmTrust.className}">${escapeHtml(winrmTrust.label)}</span></button></div>
             </div>
             <div class="host-state-column">
                 <div class="host-meta host-state" aria-label="Current station state">

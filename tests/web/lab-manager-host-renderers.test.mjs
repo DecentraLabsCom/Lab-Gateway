@@ -357,7 +357,7 @@ test('host row renderer separates configured and reported Station contracts', ()
   const meta = { contractVersion: '2.x', winrmConfigured: true, winrmTrustStatus: 'ready' };
   const unreported = renderer.renderHostRowMarkup('PC-Siemens', {}, meta);
 
-  assert.match(unreported, /Station contract: not reported \(configured: 2\.x\)/);
+  assert.match(unreported, /Contract ver.: not reported \(configured: 2\.x\)/);
 
   for (const data of [
     { heartbeat: { schemaVersion: '3.0.0' } },
@@ -365,7 +365,7 @@ test('host row renderer separates configured and reported Station contracts', ()
     { heartbeat: {}, normalized: { contractVersion: '3.0.0' } },
   ]) {
     const html = renderer.renderHostRowMarkup('PC-Siemens', data, meta);
-    assert.match(html, /Station contract: 3\.0\.0 \(configured: 2\.x\)/);
+    assert.match(html, /Contract ver.: 3\.0\.0 \(configured: 2\.x\)/);
   }
 });
 

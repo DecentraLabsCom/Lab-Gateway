@@ -30,8 +30,12 @@ class StationAuthenticationFailed(StationError):
 
 
 class StationUnreachable(StationError):
-    def __init__(self, message: str = "Station management endpoint is unreachable"):
-        super().__init__("STATION_UNREACHABLE", message, "ssh")
+    def __init__(
+        self,
+        message: str = "Station management endpoint is unreachable",
+        transport: Optional[str] = "ssh",
+    ):
+        super().__init__("STATION_UNREACHABLE", message, transport)
 
 
 class StationCommandRejected(StationError):

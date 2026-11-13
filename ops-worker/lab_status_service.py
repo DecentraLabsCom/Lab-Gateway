@@ -384,11 +384,10 @@ def _project_fmu_runner_status(
 def _capability_ready(
     heartbeat: Mapping[str, Any],
     capability: str,
-    fallback: bool,
 ) -> bool:
     """Read capability readiness while accepting pre-capability heartbeats."""
     ready = capability_ready(heartbeat, capability)
-    return fallback if ready is None else ready
+    return ready is True
 
 
 def _fresh_status(
@@ -533,20 +532,19 @@ def project_lab_status(
         })
         return result
 
-    fallback_ready = heartbeat.get("ready") is True
     physical = _fresh_status(
         lab_id,
         observed,
         age_seconds,
         current,
-        ready=_capability_ready(heartbeat, "physicalLab", fallback_ready),
+        ready=_capability_ready(heartbeat, "physicalLab"),
     )
     fmu = _fresh_status(
         lab_id,
         observed,
         age_seconds,
         current,
-        ready=_capability_ready(heartbeat, "fmu", fallback_ready),
+        ready=_capability_ready(heartbeat, "fmu"),
         reason_ready="fmu_ready",
         reason_not_ready="fmu_not_ready",
     )

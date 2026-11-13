@@ -4,10 +4,13 @@ import os
 from datetime import datetime, timedelta
 import json
 import re
+import uuid
 from collections.abc import Callable, Mapping
 from typing import Any, Dict, List, Optional
 
+from errors import is_winrm_unreachable_error
 from station_errors import StationCommandRejected, StationError, StationShutdownBlocked, StationUnreachable
+from station_operation_reconciliation import execute_with_operation_reconciliation
 from station_transport import normalize_command_result, validate_station_command
 from station_shutdown_policy import shutdown_preflight_error
 from transports.ssh import SshTransport
@@ -98,10 +101,24 @@ class StationTransportRuntime:
             wire_argument = "--request-json=" + json.dumps(envelope, separators=(",", ":"), ensure_ascii=True)
             if len(wire_argument) > 16000:
                 raise StationCommandRejected()
-            raw = self._run_winrm_command(
-                host, "lease-dispatch", [wire_argument], *legacy_args, **legacy_kwargs
+            operation_id = str(envelope["id"])
+            return execute_with_operation_reconciliation(
+                read_status=lambda: self._winrm_operation_status(
+                    host, operation_id, command, *legacy_args, **legacy_kwargs
+                ),
+                dispatch=lambda: self._normalize_winrm_dispatch_result(
+                    command,
+                    args,
+                    envelope,
+                    self._run_winrm_command(
+                        host, "lease-dispatch", [wire_argument], *legacy_args, **legacy_kwargs
+                    ),
+                ),
+                normalize_stored=lambda stored: self._normalize_winrm_stored_result(
+                    command, args, operation_id, stored
+                ),
+                classify_uncertain=self._winrm_uncertain_failure,
             )
-            return self._normalize_winrm_dispatch_result(command, args, envelope, raw)
         result = self._run_winrm_command(host, command, args, *legacy_args, **legacy_kwargs)
         exit_code = int(result.get("exit_code", result.get("exitCode", 2)))
         normalized = normalize_command_result(
@@ -119,18 +136,142 @@ class StationTransportRuntime:
         return normalized
 
     def _require_winrm_lease_dispatcher(self, host: Mapping[str, Any]) -> None:
-        status_result = self._run_winrm_command(host, "status-json", [])
+        try:
+            status_result = self._run_winrm_command(host, "status-json", [])
+        except StationUnreachable as exc:
+            raise StationUnreachable(str(exc), "winrm") from exc
+        except StationError:
+            raise
+        except Exception as exc:
+            if is_winrm_unreachable_error(exc):
+                raise StationUnreachable("Station status is unavailable for lease capability negotiation", "winrm") from exc
+            raise
         if not isinstance(status_result, Mapping):
-            raise StationUnreachable("Station status is invalid for lease capability negotiation")
+            raise StationUnreachable("Station status is invalid for lease capability negotiation", "winrm")
         if int(status_result.get("exit_code", status_result.get("exitCode", 2))) >= 2:
-            raise StationUnreachable("Station status is unavailable for lease capability negotiation")
+            raise StationUnreachable("Station status is unavailable for lease capability negotiation", "winrm")
         try:
             status = json.loads(str(status_result.get("stdout") or ""))
         except (TypeError, json.JSONDecodeError) as exc:
-            raise StationUnreachable("Station status is invalid for lease capability negotiation") from exc
+            raise StationUnreachable("Station status is invalid for lease capability negotiation", "winrm") from exc
         capabilities = status.get("managementCapabilities") if isinstance(status, dict) else None
-        if not isinstance(capabilities, list) or "reservation-lease-v1" not in capabilities:
-            raise StationUnreachable("Station does not advertise durable reservation lease support")
+        if (
+            not isinstance(capabilities, list)
+            or "reservation-lease-v1" not in capabilities
+            or "operation-status-v1" not in capabilities
+        ):
+            raise StationUnreachable("Station does not advertise durable lease and operation-status support", "winrm")
+
+    @staticmethod
+    def _winrm_uncertain_failure(error: Exception) -> Optional[StationUnreachable]:
+        if isinstance(error, StationUnreachable):
+            return StationUnreachable(str(error), "winrm")
+        if is_winrm_unreachable_error(error):
+            return StationUnreachable("WinRM command outcome is uncertain", "winrm")
+        return None
+
+    def _winrm_operation_status(
+        self,
+        host: Mapping[str, Any],
+        operation_id: str,
+        command: str,
+        *legacy_args: Any,
+        **legacy_kwargs: Any,
+    ) -> Optional[Dict[str, Any]]:
+        envelope = {
+            "schemaVersion": 2,
+            "id": str(uuid.uuid4()),
+            "operation": "operation.status",
+            "operationId": operation_id,
+        }
+        wire_argument = "--request-json=" + json.dumps(envelope, separators=(",", ":"), ensure_ascii=True)
+        try:
+            raw = self._run_winrm_command(
+                host, "lease-dispatch", [wire_argument], *legacy_args, **legacy_kwargs
+            )
+            result = self._normalize_winrm_dispatch_result(
+                "operation.status", [], envelope, raw
+            )
+        except StationUnreachable as exc:
+            raise StationUnreachable(str(exc), "winrm") from exc
+        except StationError:
+            raise
+        except Exception as exc:
+            if not is_winrm_unreachable_error(exc):
+                raise
+            raise StationUnreachable("Station operation status could not be read", "winrm") from exc
+        if result["exitCode"] >= 2:
+            raise StationUnreachable("Station operation status could not be read", "winrm")
+        try:
+            record = json.loads(str(result.get("stdout") or ""))
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise StationUnreachable("Station operation status is malformed", "winrm") from exc
+        if not isinstance(record, dict):
+            raise StationUnreachable("Station operation status is malformed", "winrm")
+        state = record.get("state")
+        reported_operation_id = record.get("operationId")
+        if reported_operation_id is not None and reported_operation_id != operation_id:
+            raise StationUnreachable("Station operation status is malformed", "winrm")
+        if state == "not-found":
+            if reported_operation_id != operation_id:
+                raise StationUnreachable("Station operation status is malformed", "winrm")
+            return None
+        if state == "processing":
+            raise StationUnreachable("Station operation is still in progress", "winrm")
+        stored = record.get("result")
+        if state not in {"completed", "recovery-required"} or not isinstance(stored, dict):
+            raise StationUnreachable("Station operation status is incomplete", "winrm")
+        self._validate_winrm_stored_result(stored, operation_id, command)
+        return stored
+
+    @staticmethod
+    def _validate_winrm_stored_result(
+        result: Mapping[str, Any], operation_id: str, command: str
+    ) -> None:
+        try:
+            completed = datetime.fromisoformat(str(result.get("completedAt", "")).replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise StationUnreachable("Station returned an invalid stored result", "winrm") from exc
+        exit_code = result.get("exitCode")
+        expected_outcome = "success" if exit_code == 0 else "warning" if exit_code == 1 else "failure"
+        if (
+            result.get("id") != operation_id
+            or result.get("command") != command
+            or type(exit_code) is not int
+            or exit_code < 0
+            or completed.tzinfo is None
+            or not isinstance(result.get("message"), str)
+            or not isinstance(result.get("stdout"), str)
+            or not isinstance(result.get("stderr"), str)
+            or type(result.get("durationMs")) is not int
+            or result["durationMs"] < 0
+            or not isinstance(result.get("metadata"), dict)
+            or type(result.get("success")) is not bool
+            or result["success"] != (exit_code < 2)
+            or result.get("outcome") != expected_outcome
+        ):
+            raise StationUnreachable("Station returned an invalid stored result", "winrm")
+
+    @staticmethod
+    def _normalize_winrm_stored_result(
+        command: str, args: List[str], operation_id: str, result: Mapping[str, Any]
+    ) -> Dict[str, Any]:
+        exit_code = int(result["exitCode"])
+        normalized = normalize_command_result(
+            command,
+            exit_code,
+            str(result.get("stdout") or ""),
+            str(result.get("stderr") or ""),
+            int(result.get("durationMs", 0) or 0),
+            "winrm",
+            request_id=operation_id,
+            metadata=dict(result.get("metadata") or {}),
+            options={"args": list(args)},
+        )
+        normalized["completedAt"] = str(result["completedAt"])
+        normalized["message"] = str(result["message"])
+        normalized.update({"exit_code": normalized["exitCode"], "duration_ms": normalized["durationMs"]})
+        return normalized
 
     @staticmethod
     def _build_dispatcher_envelope(
@@ -227,7 +368,7 @@ class StationTransportRuntime:
             or response.get("outcome") != expected_outcome
         ):
             raise StationUnreachable("Station dispatcher returned an inconsistent result")
-        if exit_code < 2:
+        if exit_code < 2 and envelope.get("operation") == "execute":
             lease = response["metadata"].get("lease")
             expected_generation = envelope["context"].get("generation")
             if envelope["command"] == "prepare-session":

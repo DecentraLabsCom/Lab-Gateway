@@ -123,6 +123,7 @@
     },
     "summary": {
       "type": "object",
+      "description": "Readiness verdict for the profile's primary capability: readiness.physicalLab for dedicated or hybrid profiles, and readiness.fmu for fmu-only. Other capabilities remain independent.",
       "required": ["state", "ready", "issues"],
       "properties": {
         "state": { "enum": ["ready", "degraded", "unavailable", "unknown"] },

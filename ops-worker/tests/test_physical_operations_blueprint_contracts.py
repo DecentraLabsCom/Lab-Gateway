@@ -65,7 +65,7 @@ def test_physical_operations_blueprint_forwards_wol_contract():
     assert calls == [
         (
             ("00:11:22:33:44:55", None, 9, "192.168.1.50", 4, 1.5),
-            {"probe_port": None},
+            {"probe_port": 5986},
         )
     ]
 

@@ -25,7 +25,7 @@ def host_registry():
 
 def test_wol_and_wait_retries():
     with patch("worker.wake") as mock_packet, patch(
-        "worker.host_is_up", side_effect=[False, True]
+        "worker._wol_host_is_up", side_effect=[False, True]
     ) as mock_up:
         result, attempts = worker.wol_and_wait(
             "00:11:22:33:44:55",

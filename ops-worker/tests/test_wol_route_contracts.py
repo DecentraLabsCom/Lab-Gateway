@@ -23,6 +23,7 @@ def test_wol_route_contract_forwards_host_defaults_and_returns_result(client, mo
         "winrm_port": 5986,
     }
     monkeypatch.setattr(worker.HOSTS, "get", Mock(return_value=host))
+    monkeypatch.setattr("physical_operations_blueprint.wait_for_station_identity", Mock(return_value=True))
     wol_and_wait = Mock(return_value=(True, 2))
     monkeypatch.setattr(worker, "wol_and_wait", wol_and_wait)
 

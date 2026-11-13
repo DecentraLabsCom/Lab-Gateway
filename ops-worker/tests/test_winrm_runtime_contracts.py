@@ -40,7 +40,7 @@ def _context(**overrides):
     return WinRMContext(**values)
 
 
-def test_winrm_runtime_uses_explicit_context_dependencies():
+def test_winrm_runtime_resolves_omitted_connection_arguments_from_context():
     calls = []
     result = SimpleNamespace(status_code=7, std_out=b"ok\n", std_err=b"failed\n")
     clock_values = iter((10.0, 10.5))
@@ -67,7 +67,7 @@ def test_winrm_runtime_uses_explicit_context_dependencies():
     ) == (True, 5986, "ntlm")
     assert runtime.winrm_credentials({}, None, None) == ("user", "password")
     assert runtime.run_labstation_command(
-        {"address": "192.0.2.10"}, "status-json", [], None, None, None, None, None
+        {"address": "192.0.2.10"}, "status-json", []
     ) == {
         "exit_code": 7,
         "stdout": "ok\n",

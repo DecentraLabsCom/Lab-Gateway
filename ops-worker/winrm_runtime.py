@@ -113,11 +113,11 @@ class WinRMRuntime:
         host: Dict[str, Any],
         command: str,
         args: Optional[list],
-        user: Optional[str],
-        password: Optional[str],
-        transport: Optional[str],
-        use_ssl: Optional[bool],
-        port: Optional[int],
+        user: Optional[str] = None,
+        password: Optional[str] = None,
+        transport: Optional[str] = None,
+        use_ssl: Optional[bool] = None,
+        port: Optional[int] = None,
     ) -> Dict[str, Any]:
         context = self._context
         return run_labstation_command(

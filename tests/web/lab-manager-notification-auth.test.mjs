@@ -1765,7 +1765,7 @@ test('renders station identity, connection counts, operation history and WinRM t
   assert.doesNotMatch(script, /FMU token:/);
   assert.match(script, /Heartbeat: \$\{safeUpdated\}<\/span>\s*<span class="host-history-item">Forced logoff: \$\{safeLastForced\}<\/span>\s*<span class="host-history-item">Power action: \$\{safeLastPower\}/);
   assert.match(styles, /\.host-history-heartbeat\s*\{[\s\S]*flex-basis:\s*100%/);
-  assert.match(script, /credentials \/ \$\{transport === 'ssh' \? 'host-key trust' : 'TLS'\}/);
+  assert.match(script, /credentials \/ \$\{transport === 'ssh' \? 'host-key trust' : 'TLS trust'\}/);
   assert.match(script, /formatConnectionsStatus/);
   assert.match(script, /return 'No connections'/);
   assert.match(script, /\$\{connections\.length\} connections/);
@@ -1857,13 +1857,13 @@ test('renders the complete station status card with truthful empty and configure
   assert.doesNotMatch(row.rawInnerHTML, /ambiguous/);
   assert.match(row.rawInnerHTML, /class="host-state-column"[\s\S]*Last activity:[\s\S]*Heartbeat: not available[\s\S]*Forced logoff: not available[\s\S]*Power action: not available/);
   assert.doesNotMatch(row.rawInnerHTML, /<div class="host-meta host-history">\s*<span class="host-history-item">Heartbeat:/);
-  assert.match(row.rawInnerHTML, /WinRM credentials \/ TLS: <button type="button" class="host-status-action" data-action="set-winrm-credentials"[^>]*><span class="host-status-text good">configured<\/span><\/button> \/ <button type="button" class="host-status-action" data-action="manage-winrm-trust"[^>]*><span class="host-status-text good">ready<\/span><\/button><\/div>/);
+  assert.match(row.rawInnerHTML, /WinRM credentials \/ TLS trust: <button type="button" class="host-status-action" data-action="set-winrm-credentials"[^>]*><span class="host-status-text good">configured<\/span><\/button> \/ <button type="button" class="host-status-action" data-action="manage-winrm-trust"[^>]*><span class="host-status-text good">ready<\/span><\/button><\/div>/);
   assert.doesNotMatch(row.rawInnerHTML, /class="mini-btn" data-action="set-winrm-credentials"/);
   assert.match(row.rawInnerHTML, /Forced logoff: not available/);
   assert.match(row.rawInnerHTML, /Power action: not available/);
   assert.match(row.rawInnerHTML, /class="pill warn ready-indicator"[^>]*>Readiness unknown/);
   assert.doesNotMatch(row.rawInnerHTML, />Not ready/);
-  assert.match(row.rawInnerHTML, /Station contract: not reported \(configured: 2\.x\)/);
+  assert.match(row.rawInnerHTML, /Contract ver.: not reported \(configured: 2\.x\)/);
   assert.match(row.rawInnerHTML, /No connector readiness reported by Lab Station\./);
   assert.doesNotMatch(row.rawInnerHTML, /Ready:/);
   assert.match(row.rawInnerHTML, /Active session: n\/a/);

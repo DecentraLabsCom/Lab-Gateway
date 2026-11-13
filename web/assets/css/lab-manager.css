@@ -1588,10 +1588,9 @@ body {
 }
 .host-history-items {
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px 12px;
+    flex-direction: column;
+    gap: 3px;
 }
-.host-history-heartbeat { flex-basis: 100%; }
 .host-history-item { overflow-wrap: anywhere; }
 .candidate-station-status {
     align-self: start;

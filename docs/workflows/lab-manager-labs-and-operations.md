@@ -177,7 +177,7 @@ Until both credentials and certificate trust are ready, heartbeat streaming is
 not started for that host.
 
 The host card groups both statuses in one row, for example
-`WinRM credentials / TLS: configured / ready`. Click the first status to manage
+`WinRM credentials / TLS trust: configured / ready`. Click the first status to manage
 credentials or the second to manage TLS trust:
 
 - credentials `missing` means no user/password is stored;
@@ -194,7 +194,7 @@ served by the Station matches the trusted certificate.
 
 ### Manage WinRM TLS trust
 
-Click the TLS status in the `WinRM credentials / TLS` row to open its certificate
+Click the TLS status in the `WinRM credentials / TLS trust` row to open its certificate
 panel. The panel is the single entry point for this host's trust lifecycle:
 
 1. Select the public certificate exported by Lab Station, normally

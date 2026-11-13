@@ -1,9 +1,21 @@
+import json
+import re
 from unittest.mock import Mock
 
 from flask import Flask
 
 import worker
 from local_mode_blueprint import create_local_mode_blueprint
+
+
+def _hybrid_status_result():
+    return {
+        "exitCode": 0,
+        "stdout": json.dumps({
+            "profile": "hybrid",
+            "sessions": {"queryOk": True, "labUserRemoteActive": False},
+        }),
+    }
 
 
 def _blueprint(**overrides):
@@ -13,6 +25,7 @@ def _blueprint(**overrides):
         "get_flag_path": lambda _host: r"C:\LabStation\labstation\data\local-mode.flag",
         "write_remote_file": lambda *_args: None,
         "remove_remote_file": lambda *_args: None,
+        "run_station_command": lambda *_args, **_kwargs: _hybrid_status_result(),
         "internal_error_response": lambda message, exc, **kwargs: (
             {"error": message},
             500,
@@ -44,6 +57,9 @@ def test_local_mode_blueprint_forwards_enable_and_disable_operations():
             parse_bool=lambda value, _default: value in {True, "yes"},
             write_remote_file=lambda *args: calls.append(("write", *args)),
             remove_remote_file=lambda *args: calls.append(("remove", *args)),
+            run_station_command=lambda host, command, args, **kwargs: (
+                calls.append(("command", host, command, args)) or _hybrid_status_result()
+            ),
         )
     )
     client = app.test_client()
@@ -55,10 +71,15 @@ def test_local_mode_blueprint_forwards_enable_and_disable_operations():
     assert enable.get_json() == {"host": "lab-ws-01", "localModeEnabled": True}
     assert disable.status_code == 200
     assert disable.get_json() == {"host": "lab-ws-01", "localModeEnabled": False}
-    assert calls == [
+    assert calls[:3] == [
         ("find", "lab-ws-01"),
         ("path", host),
-        ("write", host, r"C:\flags\local-mode.flag", "1", None, None, None, None, None),
+        ("command", host, "status-json", []),
+    ]
+    assert calls[3][:3] == ("write", host, r"C:\flags\local-mode.flag")
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", calls[3][3])
+    assert calls[3][4:] == (None, None, None, None, None)
+    assert calls[4:] == [
         ("find", "lab-ws-01"),
         ("path", host),
         ("remove", host, r"C:\flags\local-mode.flag", None, None, None, None, None),
@@ -114,6 +135,7 @@ def test_worker_local_mode_route_is_owned_by_the_blueprint(monkeypatch):
         lambda *args: calls.append(("write", *args)),
     )
     monkeypatch.setattr(worker, "remove_remote_file", lambda *args: calls.append(("remove", *args)))
+    monkeypatch.setattr(worker, "run_station_command", lambda *_args, **_kwargs: _hybrid_status_result())
 
     rules = [rule for rule in worker.APP.url_map.iter_rules() if rule.rule == "/api/hosts/local-mode"]
     assert len(rules) == 1
@@ -125,7 +147,8 @@ def test_worker_local_mode_route_is_owned_by_the_blueprint(monkeypatch):
 
     assert response.status_code == 200
     assert response.json == {"host": "lab-ws-01", "localModeEnabled": True}
-    assert calls == [
-        ("path", host),
-        ("write", host, r"C:\flags\local-mode.flag", "1", None, None, None, None, None),
-    ]
+    assert calls[0] == ("path", host)
+    assert calls[1][:3] == ("write", host, r"C:\flags\local-mode.flag")
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", calls[1][3])
+    assert calls[1][4:] == (None, None, None, None, None)
+    assert len(calls) == 2

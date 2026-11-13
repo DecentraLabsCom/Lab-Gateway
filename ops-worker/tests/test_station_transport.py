@@ -16,6 +16,30 @@ class _FakeSshTransport(SshTransport):
         return artifact_id
 
 
+def _winrm_operation_status_response(envelope, record):
+    exit_code = 1 if record["state"] == "not-found" else 0
+    outcome = "warning" if exit_code == 1 else "success"
+    response = {
+        "id": envelope["id"],
+        "command": "operation.status",
+        "completedAt": datetime.now(timezone.utc).isoformat(),
+        "success": True,
+        "exitCode": exit_code,
+        "outcome": outcome,
+        "message": "operation status retrieved",
+        "stdout": json.dumps(record),
+        "stderr": "",
+        "durationMs": 1,
+        "metadata": {"operationId": record["operationId"], "state": record["state"]},
+    }
+    return {
+        "exit_code": exit_code,
+        "stdout": json.dumps(response),
+        "stderr": "",
+        "duration_ms": 1,
+    }
+
+
 @pytest.mark.parametrize(
     ("exit_code", "outcome", "success"),
     [(0, "success", True), (1, "warning", True), (2, "failure", False), (255, "failure", False), (-1, "failure", False)],
@@ -114,12 +138,28 @@ def test_winrm_dispatcher_v2_sends_a_single_json_argument_and_parses_durable_res
         "metadata": {"lease": {"leaseId": "lease-1", "generation": 1, "state": "active", "expiresAt": "2026-10-08T23:00:00Z"}},
     }
     calls = []
+
+    def run_winrm_command(*args, **kwargs):
+        calls.append((args, kwargs))
+        if args[1] == "status-json":
+            return {
+                "exit_code": 0,
+                "stdout": json.dumps({
+                    "managementCapabilities": ["reservation-lease-v1", "operation-status-v1"]
+                }),
+                "stderr": "",
+                "duration_ms": 2,
+            }
+        envelope = json.loads(args[2][0].partition("=")[2])
+        if envelope["operation"] == "operation.status":
+            return _winrm_operation_status_response(envelope, {
+                "operationId": envelope["operationId"],
+                "state": "not-found",
+            })
+        return {"exit_code": 0, "stdout": json.dumps(response), "stderr": "", "duration_ms": 18}
+
     runtime = StationTransportRuntime(
-        run_winrm_command=lambda *args, **kwargs: calls.append((args, kwargs)) or (
-            {"exit_code": 0, "stdout": json.dumps({"managementCapabilities": ["reservation-lease-v1"]}), "stderr": "", "duration_ms": 2}
-            if args[1] == "status-json"
-            else {"exit_code": 0, "stdout": json.dumps(response), "stderr": "", "duration_ms": 18}
-        ),
+        run_winrm_command=run_winrm_command,
         read_winrm_file=lambda *args: "{}",
         write_winrm_file=lambda *args: None,
         remove_winrm_file=lambda *args: None,
@@ -148,7 +188,13 @@ def test_winrm_dispatcher_v2_sends_a_single_json_argument_and_parses_durable_res
     assert result["metadata"]["lease"]["generation"] == 1
     assert result["transport"] == "winrm"
     assert calls[0][0][1:3] == ("status-json", [])
-    args = calls[1][0]
+    assert len(calls) == 3
+    status_args = calls[1][0]
+    assert status_args[1] == "lease-dispatch"
+    status_envelope = json.loads(status_args[2][0].partition("=")[2])
+    assert status_envelope["operation"] == "operation.status"
+    assert status_envelope["operationId"] == "lease-operation-1"
+    args = calls[2][0]
     assert args[1] == "lease-dispatch"
     assert len(args[2]) == 1 and args[2][0].startswith("--request-json=")
     envelope = json.loads(args[2][0].partition("=")[2])
@@ -165,17 +211,34 @@ def test_winrm_dispatcher_v2_sends_a_single_json_argument_and_parses_durable_res
 
 
 def test_winrm_dispatcher_v2_rejects_mismatched_result_and_request_id():
-    runtime = StationTransportRuntime(
-        run_winrm_command=lambda *args, **kwargs: (
-            {"exit_code": 0, "stdout": json.dumps({"managementCapabilities": ["reservation-lease-v1"]}), "stderr": "", "duration_ms": 1}
-            if args[1] == "status-json"
-            else {
+    calls = []
+
+    def run_winrm_command(*args, **kwargs):
+        calls.append(args)
+        if args[1] == "status-json":
+            return {
                 "exit_code": 0,
-                "stdout": json.dumps({"id": "different-id", "command": "prepare-session"}),
+                "stdout": json.dumps({
+                    "managementCapabilities": ["reservation-lease-v1", "operation-status-v1"]
+                }),
                 "stderr": "",
                 "duration_ms": 1,
             }
-        ),
+        envelope = json.loads(args[2][0].partition("=")[2])
+        if envelope["operation"] == "operation.status":
+            return _winrm_operation_status_response(envelope, {
+                "operationId": envelope["operationId"],
+                "state": "not-found",
+            })
+        return {
+            "exit_code": 0,
+            "stdout": json.dumps({"id": "different-id", "command": "prepare-session"}),
+            "stderr": "",
+            "duration_ms": 1,
+        }
+
+    runtime = StationTransportRuntime(
+        run_winrm_command=run_winrm_command,
         read_winrm_file=lambda *args: "{}",
         write_winrm_file=lambda *args: None,
         remove_winrm_file=lambda *args: None,
@@ -189,8 +252,97 @@ def test_winrm_dispatcher_v2_rejects_mismatched_result_and_request_id():
     }
     with pytest.raises(StationUnreachable, match="invalid result"):
         runtime.execute({"management_transport": "winrm"}, "prepare-session", [], dispatcher_request=request)
+    assert [call[1] for call in calls] == [
+        "status-json", "lease-dispatch", "lease-dispatch", "lease-dispatch"
+    ]
     with pytest.raises(StationCommandRejected):
         runtime.execute({"management_transport": "winrm"}, "prepare-session", [], request_id="other-id", dispatcher_request=request)
+
+
+def test_winrm_dispatcher_v2_reconciles_uncertain_dispatch_without_repeating_operation():
+    operation_id = "lease-operation-reconcile-1"
+    stored_result = {
+        "id": operation_id,
+        "command": "prepare-session",
+        "completedAt": datetime.now(timezone.utc).isoformat(),
+        "success": True,
+        "exitCode": 0,
+        "outcome": "success",
+        "message": "session prepared",
+        "stdout": "session prepared",
+        "stderr": "",
+        "durationMs": 12,
+        "metadata": {"lease": {"leaseId": "lease-1", "generation": 1, "state": "active", "expiresAt": "2026-10-08T23:00:00Z"}},
+    }
+    calls = []
+    status_query_count = 0
+
+    def run_winrm_command(*args, **kwargs):
+        nonlocal status_query_count
+        calls.append(args)
+        if args[1] == "status-json":
+            return {
+                "exit_code": 0,
+                "stdout": json.dumps({
+                    "managementCapabilities": ["reservation-lease-v1", "operation-status-v1"]
+                }),
+                "stderr": "",
+                "duration_ms": 1,
+            }
+        envelope = json.loads(args[2][0].partition("=")[2])
+        if envelope["operation"] == "operation.status":
+            status_query_count += 1
+            record = (
+                {"operationId": operation_id, "state": "not-found"}
+                if status_query_count == 1
+                else {"operationId": operation_id, "state": "completed", "result": stored_result}
+            )
+            return _winrm_operation_status_response(envelope, record)
+        raise ConnectionError("WinRM disconnected after dispatch")
+
+    runtime = StationTransportRuntime(
+        run_winrm_command=run_winrm_command,
+        read_winrm_file=lambda *args: "{}",
+        write_winrm_file=lambda *args: None,
+        remove_winrm_file=lambda *args: None,
+    )
+    issued = datetime.now(timezone.utc).replace(microsecond=0)
+    request = {
+        "requestId": operation_id,
+        "issuedAt": issued.isoformat().replace("+00:00", "Z"),
+        "executeBefore": (issued + timedelta(minutes=4)).isoformat().replace("+00:00", "Z"),
+        "timeoutSeconds": 120,
+        "context": {
+            "kind": "reservation",
+            "labId": "lab-1",
+            "reservationKey": "reservation-1",
+            "leaseId": "lease-1",
+            "generation": 0,
+            "notBefore": issued.isoformat().replace("+00:00", "Z"),
+            "expiresAt": "2026-10-08T23:00:00Z",
+        },
+    }
+
+    result = runtime.execute(
+        {"name": "windows-station", "management_transport": "winrm"},
+        "prepare-session",
+        [],
+        dispatcher_request=request,
+    )
+
+    assert [call[1] for call in calls] == [
+        "status-json", "lease-dispatch", "lease-dispatch", "lease-dispatch"
+    ]
+    envelopes = [
+        json.loads(call[2][0].partition("=")[2])
+        for call in calls[1:]
+    ]
+    assert [envelope["operation"] for envelope in envelopes] == [
+        "operation.status", "execute", "operation.status"
+    ]
+    assert envelopes[0]["operationId"] == envelopes[1]["id"] == envelopes[2]["operationId"] == operation_id
+    assert result["id"] == operation_id
+    assert result["metadata"]["lease"]["generation"] == 1
 
 
 def test_winrm_dispatcher_fails_closed_when_station_has_not_advertised_lease_support():

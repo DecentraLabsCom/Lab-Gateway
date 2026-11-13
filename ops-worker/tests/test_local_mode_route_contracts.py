@@ -1,7 +1,15 @@
+import re
 from unittest.mock import Mock
 
 import worker
 from local_mode_route import get_local_mode_flag_path
+
+
+def _hybrid_status_result(*_args, **_kwargs):
+    return {
+        "exitCode": 0,
+        "stdout": '{"profile":"hybrid","sessions":{"queryOk":true,"labUserRemoteActive":false}}',
+    }
 
 
 def test_local_mode_flag_path_contract_preserves_host_override_and_default():
@@ -51,6 +59,7 @@ def test_local_mode_route_contract_enables_flag_with_legacy_arguments(client, mo
     monkeypatch.setattr(worker.HOSTS, "get", Mock(return_value=host))
     monkeypatch.setattr(worker, "write_remote_file", write_remote_file)
     monkeypatch.setattr(worker, "remove_remote_file", remove_remote_file)
+    monkeypatch.setattr(worker, "run_station_command", _hybrid_status_result)
 
     response = client.post(
         "/api/hosts/local-mode",
@@ -59,16 +68,11 @@ def test_local_mode_route_contract_enables_flag_with_legacy_arguments(client, mo
 
     assert response.status_code == 200
     assert response.json == {"host": "lab-ws-01", "localModeEnabled": True}
-    write_remote_file.assert_called_once_with(
-        host,
-        r"C:\flags\local-mode.flag",
-        "1",
-        None,
-        None,
-        None,
-        None,
-        None,
-    )
+    write_remote_file.assert_called_once()
+    write_args = write_remote_file.call_args.args
+    assert write_args[:2] == (host, r"C:\flags\local-mode.flag")
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", write_args[2])
+    assert write_args[3:] == (None, None, None, None, None)
     remove_remote_file.assert_not_called()
 
 
