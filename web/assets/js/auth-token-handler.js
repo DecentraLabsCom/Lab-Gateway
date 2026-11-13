@@ -27,7 +27,7 @@
             <div id="authTokenModal" class="auth-token-modal" hidden>
                 <div class="auth-token-modal-overlay"></div>
                 <div class="auth-token-modal-content">
-                    <div class="auth-token-modal-header"><h2 id="authTokenModalTitle">Access Token Required</h2><button id="authTokenModalClose" class="auth-token-modal-close" type="button">&times;</button></div>
+                    <div class="auth-token-modal-header"><h2><svg class="auth-token-modal-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 10V7a5 5 0 0 1 10 0v3"></path><rect x="4" y="10" width="16" height="11" rx="2"></rect><circle cx="12" cy="15" r="1"></circle><path d="M12 16v2"></path></svg><span id="authTokenModalTitle" class="auth-token-modal-title">Access Token Required</span></h2><button id="authTokenModalClose" class="auth-token-modal-close" type="button">&times;</button></div>
                     <div class="auth-token-modal-body"><p id="authTokenModalDescription"></p><div class="auth-token-input-group"><input type="password" id="authTokenInput" class="auth-token-input" autocomplete="off" maxlength="512"></div><div id="authTokenError" class="auth-token-error" hidden></div></div>
                     <div class="auth-token-modal-footer"><button id="authTokenCancel" class="auth-token-btn auth-token-btn-cancel" type="button">Cancel</button><button id="authTokenSubmit" class="auth-token-btn auth-token-btn-primary" type="button">Submit</button></div>
                 </div>
