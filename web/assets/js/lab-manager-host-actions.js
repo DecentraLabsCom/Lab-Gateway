@@ -100,8 +100,18 @@
                     showToast('Unauthorized: check LAB_MANAGER_TOKEN', 'error');
                     return;
                 }
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
+                let data;
+                try {
+                    data = await res.json();
+                } catch (err) {
+                    if (res.ok) throw err;
+                }
+                if (!res.ok) {
+                    const reason = [data?.message, data?.error, data?.stderr]
+                        .find(value => typeof value === 'string' && value.trim());
+                    throw new Error(reason || `HTTP ${res.status}`);
+                }
+                if (!data || typeof data !== 'object') throw new Error('Invalid station response');
                 const code = Number(data.exitCode ?? data.exit_code ?? 2);
                 const ok = code < 2;
                 // Lab Station can finish the session guard just before its
