@@ -138,8 +138,9 @@ prepares the Windows host and cleans the session, while Guacamole launches
 | Field | Value |
 | --- | --- |
 | Program | The Lab Station launcher, for example `AppControl.exe`, or its full path. |
-| Working directory | The folder that contains the Lab Station executable. |
-| Parameters, one application | The existing `AppControl.exe` form: window class, executable path, and optional application arguments. |
+| Working directory | The folder containing the selected launcher. |
+| Parameters, one application | The `AppControl.exe` form: window class, executable path, optional application arguments, and optional AppControl options. |
+| Parameters, coordinate close | For single-application mode, append `@close-coords="X,Y"` using client-area coordinates measured for the AppControl-launched window. |
 | Parameters, workspace | `@workspace=<id>`, where `<id>` names an administrator-managed manifest on the station. |
 
 The single-application form is unchanged. A workspace manifest defines two to
@@ -149,7 +150,32 @@ Run `LabStation.exe remoteapp` or the setup wizard as an administrator to
 create and protect the manifest directory before adding workspace files.
 `LABUSER` receives read-only access. See the Lab Station
 [AppControl guide](https://github.com/DecentraLabsCom/Lab-Station/blob/main/remote-app/README.md)
-for the manifest fields and limitations.
+for the manifest fields and limitations. A workspace app may optionally define
+`closeCoordinates: [X, Y]` for a custom close button on its primary window.
+Capture those client-area coordinates after AppControl has embedded the app in
+its workspace tab. If the app is not the selected visible tab at shutdown,
+AppControl skips the physical click and tries the coordinate messages before
+the standard workspace fallback sequence (`WinClose`, `SC_CLOSE`, `WM_CLOSE`,
+then process-tree cleanup). The apps progress through their close sequences in
+parallel and share a 10-second workspace shutdown deadline. Configure
+coordinates only on apps that need them; omit the field from the other manifest
+entries.
+
+For example, the complete **Parameters** value for a single application with a
+coordinate-based close is:
+
+```text
+InstrumentWindow "C:\LabApps\Instrument.exe" @close-coords="414,823"
+```
+
+Use normal double quotes around Windows paths in Guacamole. Capture the `X,Y`
+values with Window Spy in the same Windows session after AppControl has
+prepared the application window. AppControl attempts to maximize it, but
+fixed-size dialogs may remain windowed; measure the actual final layout. The
+Lab Station guide explains the coordinate capture steps and optional `@test`
+behavior. Omit `@test` when checking an RDP disconnect, because it exercises
+the close five seconds after launch while the connection is still active. See
+[Capture and test close coordinates](https://github.com/DecentraLabsCom/Lab-Station/blob/main/remote-app/README.md#capture-and-test-close-coordinates).
 
 Do not rely on Lab Station Windows Run entries to launch AppControl. A plain
 desktop RDP connection is suitable for station diagnostics or maintenance; an
