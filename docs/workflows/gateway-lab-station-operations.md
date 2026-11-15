@@ -219,7 +219,7 @@ The start path is normally:
    user working data and FMU temporary state before opening the reservation.
 4. Record every attempt in `reservation_operations` and move the local projection to `ACTIVE` only after success.
 
-The end path normally runs `release-session` without rebooting and can request a shutdown or hibernation action. On physical Stations, Release closes the managed remote LABUSER/Tiny Desk session, then restarts an installed FMU Executor to terminate all of its sessions and clears its temporary state. The instructor's console login remains, but this service-wide FMU cleanup can interrupt FMU work launched there. Incomplete FMU cleanup fails Release, leaves a reservation lease `recovery-required`, and prevents a requested reboot. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
+The end path normally runs `release-session` without rebooting and can request a shutdown or hibernation action. On physical Stations, Release closes the managed remote LABUSER/Tiny Desk session, then restarts an installed FMU Executor to terminate all of its sessions and clears its temporary state. The local console session remains, but this service-wide FMU cleanup can interrupt FMU work launched there. Incomplete FMU cleanup fails Release, leaves a reservation lease `recovery-required`, and prevents a requested reboot. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
 
 Each Station checks the lease's `expiresAt` locally as a fail-safe. Linux
 checks from `labstationd`; Windows checks from the setup-managed
@@ -238,7 +238,7 @@ without automatically repeating the session side effect.
 
 Lab Manager's operator `Prepare`/`Release` controls follow the same physical
 profile rules. `Release` closes only the managed remote lab-user session and
-application; it does not sign out the hybrid instructor. The operator path is
+application; it does not sign out the local console user. The operator path is
 available only when no reservation or demo lease is active. `Enable Local` is
 hybrid-only; clearing an already active flag remains possible for cleanup.
 Before manual `Prepare`, the Gateway requires a fresh session inventory and
