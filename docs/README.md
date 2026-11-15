@@ -65,9 +65,9 @@ For the complete design and trust requirements, read
 
 1. Choose **Full** or **Lite** using the decision above.
 2. Choose an installation method:
-   - [Setup script — English](install/install-setup-script.md) / [Español](install/instalar-setup-script.md)
-   - [Manual Docker Compose — English](install/install-manual-compose.md) / [Español](install/instalar-compose-manual.md)
-   - [NixOS — English](install/install-nixos.md) / [Español](install/instalar-nixos.md)
+   - [Setup script — English](install/install-setup-script.md) / [Spanish](install/instalar-setup-script.md)
+   - [Manual Docker Compose — English](install/install-manual-compose.md) / [Spanish](install/instalar-compose-manual.md)
+   - [NixOS — English](install/install-nixos.md) / [Spanish](install/instalar-nixos.md)
 3. Apply the [configuration reference](reference/configuration.md).
 4. Verify the base stack using [operations and health](reference/operations-and-health.md).
 

@@ -12,9 +12,9 @@ table of contents.
 - [Trusted proxy real-IP configuration](openresty/real_ip.d/README.md)
 - Installation
   - [Setup script (EN)](docs/install/install-setup-script.md)
-  - [Script de configuración (ES)](docs/install/instalar-setup-script.md)
+  - [Setup script (ES)](docs/install/instalar-setup-script.md)
   - [Manual Docker Compose (EN)](docs/install/install-manual-compose.md)
-  - [Docker Compose manual (ES)](docs/install/instalar-compose-manual.md)
+  - [Manual Docker Compose (ES)](docs/install/instalar-compose-manual.md)
   - [NixOS (EN)](docs/install/install-nixos.md)
   - [NixOS (ES)](docs/install/instalar-nixos.md)
   - [Certbot / ACME](certbot/README.md)
@@ -36,9 +36,9 @@ table of contents.
 - [Institutional reservation workflow](docs/workflows/institutional-reservation-workflow.md)
 - [Check-in, lab access, and session workflow](docs/workflows/institutional-check-in-access-sessions.md)
 - [eduGAIN federation (EN)](docs/edugain/edugain-federation.md)
-- [Federación eduGAIN (ES)](docs/edugain/edugain-federacion.md)
+- [eduGAIN federation (ES)](docs/edugain/edugain-federacion.md)
 - [First lab session tutorial (EN)](docs/tutorials/tutorial-first-lab-session.md)
-- [Tutorial de primera sesión (ES)](docs/tutorials/tutorial-primera-sesion-laboratorio.md)
+- [First lab session tutorial (ES)](docs/tutorials/tutorial-primera-sesion-laboratorio.md)
 
 ## Digital twins
 
@@ -55,6 +55,7 @@ table of contents.
 ## Operations and verification
 
 - [Operations and health](docs/reference/operations-and-health.md)
+- [Lab Station session policy matrix](docs/workflows/lab-station-session-policy-matrix.md)
 - [Ops Worker](ops-worker/README.md)
 - [OpenResty Lua unit tests](openresty/tests/README.md)
 - [Integration tests](tests/integration/README.md)

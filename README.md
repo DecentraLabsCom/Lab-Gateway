@@ -114,9 +114,9 @@ curl -k https://localhost/health
 The setup and manual-installation guides explain the required values, wallet
 setup, TLS, Lite mode, and verification:
 
-- [Setup script — English](docs/install/install-setup-script.md) / [Español](docs/install/instalar-setup-script.md)
-- [Manual Docker Compose — English](docs/install/install-manual-compose.md) / [Español](docs/install/instalar-compose-manual.md)
-- [NixOS compose-managed host — English](docs/install/install-nixos.md) / [Español](docs/install/instalar-nixos.md)
+- [Setup script — English](docs/install/install-setup-script.md) / [Spanish](docs/install/instalar-setup-script.md)
+- [Manual Docker Compose — English](docs/install/install-manual-compose.md) / [Spanish](docs/install/instalar-compose-manual.md)
+- [NixOS compose-managed host — English](docs/install/install-nixos.md) / [Spanish](docs/install/instalar-nixos.md)
 
 ## Services and optional profiles
 
