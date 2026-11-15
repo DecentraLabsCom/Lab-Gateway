@@ -356,12 +356,21 @@
             const remoteLabSession = typeof sessionSummary.labUserRemoteActive === 'boolean'
                 ? sessionSummary.labUserRemoteActive
                 : status.labUserRemoteActive;
-            const reportedLocalSession = typeof status.localSessionActive === 'boolean'
+            const nestedLocalSession = typeof sessionSummary.localSessionActive === 'boolean'
+                ? sessionSummary.localSessionActive
+                : data.normalized?.sessions?.localSessionActive;
+            const legacyLocalSession = typeof status.localSessionActive === 'boolean'
                 ? status.localSessionActive
-                : typeof status.sessions?.localSessionActive === 'boolean'
-                    ? status.sessions.localSessionActive
-                    : data.normalized?.sessions?.localSessionActive;
-            const localSession = sessionSummary.queryOk === false ? undefined : reportedLocalSession;
+                : undefined;
+            const inconsistentLocalSession = typeof nestedLocalSession === 'boolean'
+                && typeof legacyLocalSession === 'boolean'
+                && nestedLocalSession !== legacyLocalSession;
+            const reportedLocalSession = typeof nestedLocalSession === 'boolean'
+                ? nestedLocalSession
+                : legacyLocalSession;
+            const localSession = sessionSummary.queryOk === false || inconsistentLocalSession
+                ? undefined
+                : reportedLocalSession;
             const activeSessionDisplay = getActiveSessionDisplay(status, localSession);
             const activeSession = activeSessionDisplay.active;
             const localMode = typeof status.localModeEnabled === 'boolean'

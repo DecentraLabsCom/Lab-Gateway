@@ -182,6 +182,19 @@ def perform_command_step(
         success = exit_code < 2
         outcome = "success" if exit_code == 0 else "warning" if exit_code == 1 else "failure"
         message = "Station command {} (exit code {})".format(outcome, exit_code)
+        if success and dispatcher_request is not None:
+            metadata = result.get("metadata")
+            lease = metadata.get("lease") if isinstance(metadata, Mapping) else None
+            expected_lease_state = "active" if command == "prepare-session" else "released"
+            if not isinstance(lease, Mapping) or lease.get("state") != expected_lease_state:
+                exit_code = 2
+                success = False
+                outcome = "failure"
+                message = "Station reported a successful command without a {} lease".format(expected_lease_state)
+                result = dict(result)
+                result["exitCode"] = exit_code
+                result["outcome"] = outcome
+                result["error"] = message
     except Exception:
         logger.exception("Lab Station command failed for %s", host.get("name"))
         message = dispatcher_request_error or "Lab Station returned an invalid command result"

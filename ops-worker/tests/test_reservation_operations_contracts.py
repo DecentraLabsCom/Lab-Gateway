@@ -117,16 +117,30 @@ def test_station_start_resolves_v2_lease_context_from_authoritative_provider():
     host = {"name": "lab-ws-01", "management": {"transport": "ssh"}}
     deps["resolve_host_by_lab"] = lambda _lab_id: host
     resolver = Mock(return_value={"requestId": "prepare-id", "context": {"kind": "reservation"}})
+    authoritative_reservation = {
+        "transaction_hash": "0xabc123",
+        "lab_id": "42",
+        "start_time": "2026-10-08T10:00:00Z",
+        "end_time": "2026-10-08T11:00:00Z",
+        "status": "CONFIRMED",
+    }
 
     response, status = handle_reservation_start(
         {"reservationId": "0xabc123", "labId": "42", "wake": False},
         **deps,
         resolve_station_lease_context=resolver,
+        authoritative_reservation=authoritative_reservation,
     )
 
     assert status == 200
     assert response["success"] is True
-    resolver.assert_called_once_with("0xabc123", "42", host, "prepare-session")
+    resolver.assert_called_once_with(
+        "0xabc123",
+        "42",
+        host,
+        "prepare-session",
+        authoritative_reservation=authoritative_reservation,
+    )
     assert deps["perform_command_step"].call_args.kwargs["dispatcher_request"]["requestId"] == "prepare-id"
 
 
@@ -136,16 +150,30 @@ def test_station_end_resolves_generation_scoped_release_context():
     host = {"name": "lab-ws-01", "management": {"transport": "ssh"}}
     deps["resolve_host_by_lab"] = lambda _lab_id: host
     resolver = Mock(return_value={"requestId": "release-id", "context": {"generation": 3}})
+    authoritative_reservation = {
+        "transaction_hash": "0xabc123",
+        "lab_id": "42",
+        "start_time": "2026-10-08T10:00:00Z",
+        "end_time": "2026-10-08T11:00:00Z",
+        "status": "ACTIVE",
+    }
 
     response, status = handle_reservation_end(
         {"reservationId": "0xabc123", "labId": "42"},
         **deps,
         resolve_station_lease_context=resolver,
+        authoritative_reservation=authoritative_reservation,
     )
 
     assert status == 200
     assert response["success"] is True
-    resolver.assert_called_once_with("0xabc123", "42", host, "release-session")
+    resolver.assert_called_once_with(
+        "0xabc123",
+        "42",
+        host,
+        "release-session",
+        authoritative_reservation=authoritative_reservation,
+    )
     assert deps["perform_command_step"].call_args.kwargs["dispatcher_request"]["context"]["generation"] == 3
 
 

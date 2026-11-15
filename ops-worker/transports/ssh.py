@@ -167,6 +167,24 @@ class SshTransport:
                 or response.get("outcome") != expected_outcome
             ):
                 raise StationUnreachable("Station dispatcher returned an inconsistent result")
+            if exit_code < 2 and envelope.get("schemaVersion") == 2 and envelope.get("operation") == "execute":
+                lease = response["metadata"].get("lease")
+                context = envelope.get("context")
+                expected_state = "active" if envelope.get("command") == "prepare-session" else "released"
+                expected_generation = context.get("generation") if isinstance(context, Mapping) else None
+                if envelope.get("command") == "prepare-session":
+                    expected_generation = None
+                if (
+                    not isinstance(context, Mapping)
+                    or not isinstance(lease, Mapping)
+                    or lease.get("leaseId") != context.get("leaseId")
+                    or type(lease.get("generation")) is not int
+                    or lease["generation"] < 1
+                    or (expected_generation is not None and lease["generation"] != expected_generation)
+                    or lease.get("expiresAt") != context.get("expiresAt")
+                    or lease.get("state") != expected_state
+                ):
+                    raise StationUnreachable("Station dispatcher returned an invalid lease result")
             response.setdefault("transport", "ssh")
             return response
         except (socket.timeout, TimeoutError) as exc:
@@ -266,6 +284,11 @@ class SshTransport:
             or result.get("outcome") != expected_outcome
         ):
             raise StationUnreachable("Station returned an invalid stored result")
+        if exit_code < 2:
+            lease = result["metadata"].get("lease")
+            expected_state = "active" if command == "prepare-session" else "released"
+            if not isinstance(lease, Mapping) or lease.get("state") != expected_state:
+                raise StationUnreachable("Station returned an invalid stored lease result")
 
     def execute(
         self,

@@ -177,6 +177,70 @@ def test_resolver_reads_reservation_window_and_prepare_generation_from_gateway_d
     assert prepare["context"]["expiresAt"] == release["context"]["expiresAt"]
 
 
+def test_resolver_uses_scheduler_authoritative_reservation_without_local_mirror(db_engine):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    authoritative_reservation = {
+        "transaction_hash": "0xremote123",
+        "lab_id": "42",
+        "start_time": now,
+        "end_time": now + timedelta(hours=1),
+        "status": "ACTIVE",
+    }
+    with db_engine.begin() as conn:
+        conn.execute(text("DROP TABLE lab_reservations"))
+        conn.execute(text(
+            "INSERT INTO reservation_operations (reservation_id,lab_id,host,action,status,success,payload,created_at) "
+            "VALUES ('0xremote123','42','station-1','prepare','completed',1,:payload,:created)"
+        ), {
+            "payload": json.dumps({"metadata": {"lease": {"generation": 6}}}),
+            "created": now,
+        })
+
+    prepare = resolve_station_dispatch_request(
+        engine=db_engine,
+        sql_text=text,
+        reservation_id="0xremote123",
+        lab_id="42",
+        host_name="station-1",
+        command="prepare-session",
+        authoritative_reservation=authoritative_reservation,
+    )
+    release = resolve_station_dispatch_request(
+        engine=db_engine,
+        sql_text=text,
+        reservation_id="0xremote123",
+        lab_id="42",
+        host_name="station-1",
+        command="release-session",
+        authoritative_reservation=authoritative_reservation,
+    )
+
+    assert prepare["context"]["reservationKey"] == "0xremote123"
+    assert prepare["context"]["generation"] == 0
+    assert release["context"]["generation"] == 6
+    assert prepare["context"]["expiresAt"] == release["context"]["expiresAt"]
+
+
+def test_resolver_rejects_scheduler_snapshot_for_a_different_reservation(db_engine):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with pytest.raises(StationLeaseContextError, match="does not match"):
+        resolve_station_dispatch_request(
+            engine=db_engine,
+            sql_text=text,
+            reservation_id="0xrequested",
+            lab_id="42",
+            host_name="station-1",
+            command="prepare-session",
+            authoritative_reservation={
+                "transaction_hash": "0xother",
+                "lab_id": "42",
+                "start_time": now,
+                "end_time": now + timedelta(hours=1),
+                "status": "CONFIRMED",
+            },
+        )
+
+
 def test_resolver_uses_gateway_token_expiry_and_durable_demo_release_event(db_engine):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     with db_engine.begin() as conn:

@@ -28,8 +28,8 @@ class ReservationOrchestrator:
         http_get: Callable[..., Any],
         sql_text: Callable[[str], Any],
         bindparam: Callable[..., Any],
-        dispatch_start: Callable[[Dict[str, Any]], Any],
-        dispatch_end: Callable[[Dict[str, Any]], Any],
+        dispatch_start: Callable[..., Any],
+        dispatch_end: Callable[..., Any],
         resolve_host_by_lab: Callable[[str], Optional[Mapping[str, Any]]],
         record_operation: Callable[..., Any],
         logger: Any,
@@ -307,7 +307,10 @@ class ReservationOrchestrator:
             "host": host_name,
             "labId": lab_id,
         }
-        response, status_code = self.dispatch_start(payload)
+        dispatch_kwargs = (
+            {"authoritative_reservation": dict(row)} if self.projection_url else {}
+        )
+        response, status_code = self.dispatch_start(payload, **dispatch_kwargs)
         success = bool(response.get("success")) and status_code == 200
         message = None if success else response.get("error") or "Reservation start failed"
         self._record_scheduler_op(
@@ -339,7 +342,10 @@ class ReservationOrchestrator:
             "host": host_name,
             "labId": lab_id,
         }
-        response, status_code = self.dispatch_end(payload)
+        dispatch_kwargs = (
+            {"authoritative_reservation": dict(row)} if self.projection_url else {}
+        )
+        response, status_code = self.dispatch_end(payload, **dispatch_kwargs)
         success = bool(response.get("success")) and status_code == 200
         message = None if success else response.get("error") or "Reservation end failed"
         self._record_scheduler_op(

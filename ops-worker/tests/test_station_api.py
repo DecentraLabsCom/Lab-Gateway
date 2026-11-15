@@ -13,7 +13,11 @@ def _status_result():
         "stdout": json.dumps({
             "profile": "dedicated",
             "localModeEnabled": False,
-            "sessions": {"queryOk": True, "localSessionActive": False},
+            "sessions": {
+                "queryOk": True,
+                "localSessionActive": False,
+                "labUserRemoteActive": False,
+            },
         }),
     }
 
@@ -95,6 +99,39 @@ def test_station_command_returns_not_found_and_preserves_warning_exit_status(sta
     handlers["run_station_command"] = _command_handler({"exitCode": 2, "outcome": "failure"})
     failure = client.post("/api/station/command", json={"host": "linux-1", "command": "prepare-session"})
     assert failure.status_code == 409
+
+
+def test_manual_prepare_explains_remote_labuser_refusal_before_dispatch(station_api):
+    client, handlers = station_api
+    calls = []
+
+    def run_station_command(_host, command, _args, **kwargs):
+        calls.append(command)
+        if command == "status-json" and "request_id" not in kwargs:
+            return {
+                "exitCode": 0,
+                "stdout": json.dumps({
+                    "profile": "hybrid",
+                    "localModeEnabled": False,
+                    "sessions": {
+                        "queryOk": True,
+                        "localSessionActive": False,
+                        "labUserRemoteActive": True,
+                    },
+                }),
+            }
+        return {"exitCode": 0}
+
+    handlers["run_station_command"] = run_station_command
+    response = client.post(
+        "/api/station/command",
+        json={"host": "linux-1", "command": "prepare-session", "args": []},
+    )
+
+    assert response.status_code == 409
+    assert response.json["code"] == "STATION_REMOTE_SESSION_ACTIVE"
+    assert "Downloads" in response.json["error"]
+    assert calls == ["status-json"]
 
 
 @pytest.mark.parametrize(

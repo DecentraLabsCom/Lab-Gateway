@@ -142,6 +142,42 @@ test('keeps profile-inapplicable operations visible and disabled with their reas
   assert.match(fmuOnly, /data-action="toggle-local-mode" title="Local mode is only available on hybrid stations" disabled>Enable Local<\/button>/);
 });
 
+test('dedicated Prepare is blocked by a physical console session for any account', () => {
+  const renderer = loadRenderers().createController(dependencies());
+  const html = renderer.renderHostRowMarkup('station-dedicated-local', {
+    heartbeat: {
+      status: {
+        profile: 'dedicated',
+        localModeEnabled: false,
+        localSessionActive: true,
+        sessions: {
+          queryOk: true,
+          localSessionActive: true,
+          active: [{ kind: 'labuser-local', user: 'LABUSER', active: true }],
+        },
+      },
+    },
+  }, {});
+
+  assert.match(html, /data-action="prepare" title="An unexpected interactive session blocks dedicated preparation" disabled>Prepare<\/button>/);
+});
+
+test('dedicated Prepare fails closed when status session flags disagree', () => {
+  const renderer = loadRenderers().createController(dependencies());
+  const html = renderer.renderHostRowMarkup('station-dedicated-inconsistent', {
+    heartbeat: {
+      status: {
+        profile: 'dedicated',
+        localModeEnabled: false,
+        localSessionActive: false,
+        sessions: { queryOk: true, localSessionActive: true },
+      },
+    },
+  }, {});
+
+  assert.match(html, /data-action="prepare" title="Refresh Station status to verify active sessions" disabled>Prepare<\/button>/);
+});
+
 test('host row renderer links and releases the single FMU token target', () => {
   const module = loadRenderers();
   const renderer = module.createController(dependencies());

@@ -129,3 +129,60 @@ def test_command_rejects_result_without_integer_exit_code_as_protocol_failure():
     assert step["details"]["outcome"] == "failure"
     record_operation.assert_called_once()
     notify_failure.assert_called_once()
+
+
+def test_contextual_prepare_warning_requires_an_active_lease():
+    record_operation = _record_operation()
+    notify_failure = Mock()
+
+    success, step = perform_command_step(
+        {"name": "lab-linux-01", "platform": "linux"},
+        "reservation-1",
+        "42",
+        "prepare",
+        "prepare-session",
+        [],
+        run_labstation_command=Mock(return_value={
+            "exitCode": 1,
+            "outcome": "warning",
+            "metadata": {"lease": {"state": "recovery-required"}},
+        }),
+        record_operation=record_operation,
+        notify_failure=notify_failure,
+        current_epoch=lambda: 100.0,
+        logger=Mock(),
+        dispatcher_request={"requestId": "prepare-1"},
+    )
+
+    assert success is False
+    assert step["status"] == "failed"
+    assert step["details"]["exitCode"] == 2
+    assert step["details"]["outcome"] == "failure"
+    assert step["details"]["metadata"]["lease"]["state"] == "recovery-required"
+    notify_failure.assert_called_once()
+
+
+def test_contextual_release_warning_is_success_only_after_remote_lease_is_released():
+    success, step = perform_command_step(
+        {"name": "lab-linux-01", "platform": "linux"},
+        "reservation-1",
+        "42",
+        "release",
+        "release-session",
+        [],
+        run_labstation_command=Mock(return_value={
+            "exitCode": 1,
+            "outcome": "warning",
+            "metadata": {"lease": {"state": "released"}},
+        }),
+        record_operation=_record_operation(),
+        notify_failure=Mock(),
+        current_epoch=lambda: 100.0,
+        logger=Mock(),
+        dispatcher_request={"requestId": "release-1"},
+    )
+
+    assert success is True
+    assert step["status"] == "warning"
+    assert step["details"]["exitCode"] == 1
+    assert step["details"]["metadata"]["lease"]["state"] == "released"

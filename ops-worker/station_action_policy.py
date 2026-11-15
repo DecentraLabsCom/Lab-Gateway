@@ -5,6 +5,12 @@ from collections.abc import Callable, Mapping
 from typing import Any, Dict, List
 
 
+_MANUAL_PREPARE_REMOTE_SESSION_MESSAGE = (
+    "Manual Prepare deletes LABUSER temporary files, Downloads, and lab scratch data and may interrupt open apps. "
+    "An active remote LABUSER session was detected, so no cleanup ran. Run Release or log off the session before retrying."
+)
+
+
 class StationActionPolicyError(ValueError):
     """A Station action conflicts with its reported profile or state."""
 
@@ -117,8 +123,33 @@ def validate_operator_station_action(
                 "STATION_SESSION_STATE_UNKNOWN",
                 "Station session inventory is unavailable; prepare was not sent",
             )
+        remote_labuser_session = sessions.get("labUserRemoteActive", status.get("labUserRemoteActive"))
+        if remote_labuser_session is not False:
+            code = (
+                "STATION_REMOTE_SESSION_ACTIVE"
+                if remote_labuser_session is True
+                else "STATION_SESSION_STATE_UNKNOWN"
+            )
+            message = (
+                _MANUAL_PREPARE_REMOTE_SESSION_MESSAGE
+                if remote_labuser_session is True
+                else "Remote LABUSER session state is unknown; prepare was not sent"
+            )
+            raise StationActionPolicyError(code, message)
         if profile == "dedicated":
-            local_session = status.get("localSessionActive", sessions.get("localSessionActive"))
+            local_session = sessions.get("localSessionActive")
+            legacy_local_session = status.get("localSessionActive")
+            if (
+                isinstance(local_session, bool)
+                and isinstance(legacy_local_session, bool)
+                and local_session != legacy_local_session
+            ):
+                raise StationActionPolicyError(
+                    "STATION_SESSION_STATE_UNKNOWN",
+                    "Station status reports inconsistent local session state; refresh status before preparing",
+                )
+            if not isinstance(local_session, bool):
+                local_session = legacy_local_session
             if local_session is not False:
                 code = "STATION_LOCAL_SESSION_ACTIVE" if local_session is True else "STATION_SESSION_STATE_UNKNOWN"
                 message = (

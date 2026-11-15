@@ -49,6 +49,18 @@ def test_reservation_lifecycle_runtime_forwards_start_and_end_callbacks():
     assert calls[1][2]["find_host"]("station") == {"name": "station"}
 
 
+def test_reservation_lifecycle_runtime_forwards_trusted_reservation_snapshot():
+    context, _hosts, calls = _context()
+    runtime = create_reservation_lifecycle_runtime(context)
+    reservation = {"transaction_hash": "reservation-1", "lab_id": "lab-1"}
+
+    runtime.handle_reservation_start({}, authoritative_reservation=reservation)
+    runtime.handle_reservation_end({}, authoritative_reservation=reservation)
+
+    assert calls[0][2]["authoritative_reservation"] is reservation
+    assert calls[1][2]["authoritative_reservation"] is reservation
+
+
 def test_reservation_lifecycle_runtime_resolves_mutable_host_at_call_time():
     hosts = {"station": "first"}
     context, _hosts, _calls = _context(

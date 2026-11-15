@@ -56,6 +56,27 @@ def test_command_result_normalization_preserves_the_station_exit_contract(exit_c
     assert result["transport"] == "ssh"
 
 
+def test_successful_contextual_results_reject_recovery_required_leases_on_winrm_and_ssh():
+    result = {
+        "id": "operation-1",
+        "command": "prepare-session",
+        "completedAt": datetime.now(timezone.utc).isoformat(),
+        "success": True,
+        "exitCode": 1,
+        "outcome": "warning",
+        "message": "station prepared with warnings",
+        "stdout": "",
+        "stderr": "",
+        "durationMs": 1,
+        "metadata": {"lease": {"state": "recovery-required"}},
+    }
+
+    with pytest.raises(StationUnreachable, match="invalid stored lease result"):
+        StationTransportRuntime._validate_winrm_stored_result(result, "operation-1", "prepare-session")
+    with pytest.raises(StationUnreachable, match="invalid stored lease result"):
+        SshTransport._validate_correlated_result(result, "operation-1", "prepare-session")
+
+
 @pytest.mark.parametrize(
     ("command", "args"),
     [

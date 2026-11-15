@@ -120,16 +120,74 @@ def test_dispatch_start_resolves_the_current_host_from_the_lab_id():
     orchestrator = _orchestrator()
     orchestrator.resolve_host_by_lab = resolver
     orchestrator.dispatch_start = dispatch
+    orchestrator.projection_url = "https://provider.example/reservations/projection"
 
-    orchestrator._dispatch_start({
+    reservation = {
         "transaction_hash": "reservation-1",
         "lab_id": "lab-1",
         "status": None,
-    })
+    }
+    orchestrator._dispatch_start(reservation)
 
     resolver.assert_called_once_with("lab-1")
-    dispatch.assert_called_once_with({
-        "reservationId": "reservation-1",
-        "host": "station-current",
-        "labId": "lab-1",
-    })
+    dispatch.assert_called_once_with(
+        {
+            "reservationId": "reservation-1",
+            "host": "station-current",
+            "labId": "lab-1",
+        },
+        authoritative_reservation=reservation,
+    )
+
+
+def test_local_dispatch_keeps_current_gateway_reservation_lookup():
+    resolver = Mock(return_value={"name": "station-current"})
+    dispatch = Mock(return_value=({"success": True}, 200))
+    orchestrator = _orchestrator()
+    orchestrator.resolve_host_by_lab = resolver
+    orchestrator.dispatch_start = dispatch
+    reservation = {
+        "transaction_hash": "reservation-1",
+        "lab_id": "lab-1",
+        "start_time": datetime(2026, 9, 14, 12, tzinfo=timezone.utc),
+        "end_time": datetime(2026, 9, 14, 13, tzinfo=timezone.utc),
+        "status": "CONFIRMED",
+    }
+
+    orchestrator._dispatch_start(reservation)
+
+    dispatch.assert_called_once_with(
+        {
+            "reservationId": "reservation-1",
+            "host": "station-current",
+            "labId": "lab-1",
+        }
+    )
+
+
+def test_dispatch_end_passes_the_selected_reservation_to_the_lifecycle_handler():
+    resolver = Mock(return_value={"name": "station-current"})
+    dispatch = Mock(return_value=({"success": True}, 200))
+    orchestrator = _orchestrator()
+    orchestrator.resolve_host_by_lab = resolver
+    orchestrator.dispatch_end = dispatch
+    orchestrator.projection_url = "https://provider.example/reservations/projection"
+    reservation = {
+        "transaction_hash": "reservation-2",
+        "lab_id": "lab-2",
+        "start_time": datetime(2026, 9, 14, 11, tzinfo=timezone.utc),
+        "end_time": datetime(2026, 9, 14, 12, tzinfo=timezone.utc),
+        "status": "ACTIVE",
+    }
+
+    orchestrator._dispatch_end(reservation)
+
+    resolver.assert_called_once_with("lab-2")
+    dispatch.assert_called_once_with(
+        {
+            "reservationId": "reservation-2",
+            "host": "station-current",
+            "labId": "lab-2",
+        },
+        authoritative_reservation=reservation,
+    )

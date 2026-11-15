@@ -16,6 +16,7 @@ def handle_reservation_start(
     perform_command_step: Callable[..., Tuple[bool, Dict[str, Any]]],
     normalize_args: Callable[[Any, Optional[List[str]]], List[str]],
     resolve_station_lease_context: Optional[Callable[..., Dict[str, Any]]] = None,
+    authoritative_reservation: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], int]:
     reservation_id = get_mandatory_field(payload, "reservationId", "reservation_id")
     host_name = get_mandatory_field(payload, "host", "hostName")
@@ -92,11 +93,17 @@ def handle_reservation_start(
             try:
                 if resolve_station_lease_context is None:
                     raise ValueError("resolver unavailable")
+                lease_context_kwargs = (
+                    {"authoritative_reservation": authoritative_reservation}
+                    if authoritative_reservation is not None
+                    else {}
+                )
                 dispatcher_request = resolve_station_lease_context(
                     reservation_id,
                     lab_id,
                     host,
                     "prepare-session",
+                    **lease_context_kwargs,
                 )
             except Exception:
                 dispatcher_request_error = "authoritative reservation lease context is unavailable"
@@ -135,6 +142,7 @@ def handle_reservation_end(
     perform_command_step: Callable[..., Tuple[bool, Dict[str, Any]]],
     normalize_args: Callable[[Any, Optional[List[str]]], List[str]],
     resolve_station_lease_context: Optional[Callable[..., Dict[str, Any]]] = None,
+    authoritative_reservation: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], int]:
     reservation_id = get_mandatory_field(payload, "reservationId", "reservation_id")
     host_name = get_mandatory_field(payload, "host", "hostName")
@@ -182,11 +190,17 @@ def handle_reservation_end(
             try:
                 if resolve_station_lease_context is None:
                     raise ValueError("resolver unavailable")
+                lease_context_kwargs = (
+                    {"authoritative_reservation": authoritative_reservation}
+                    if authoritative_reservation is not None
+                    else {}
+                )
                 dispatcher_request = resolve_station_lease_context(
                     reservation_id,
                     lab_id,
                     host,
                     "release-session",
+                    **lease_context_kwargs,
                 )
             except Exception:
                 dispatcher_request_error = "authoritative reservation lease context is unavailable"

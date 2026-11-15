@@ -389,8 +389,8 @@ _requires_ops_internal_auth: Callable[[str], bool]
 _fetch_latest_heartbeat: Callable[[Any, str], Optional[Dict[str, Any]]]
 normalize_match_key: Callable[[Optional[Any]], str]
 normalize_winrm_trust_ref: Callable[[Any], str]
-handle_reservation_start: Callable[[Dict[str, Any]], Tuple[Dict[str, Any], int]]
-handle_reservation_end: Callable[[Dict[str, Any]], Tuple[Dict[str, Any], int]]
+handle_reservation_start: Callable[..., Tuple[Dict[str, Any], int]]
+handle_reservation_end: Callable[..., Tuple[Dict[str, Any], int]]
 _execute_reservation_power_phase: Callable[
     [str, Optional[str], Mapping[str, Any], str, Dict[str, Any]],
     Dict[str, Any],
@@ -1461,6 +1461,8 @@ def resolve_station_lease_context(
     lab_id: Optional[str],
     host: Mapping[str, Any],
     command: str,
+    *,
+    authoritative_reservation: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     management_value = host.get("management")
     if isinstance(management_value, Mapping):
@@ -1471,6 +1473,9 @@ def resolve_station_lease_context(
     if transport not in {"ssh", "winrm"}:
         raise ValueError("dispatcher v2 lease requests require a supported station transport")
     lead = int(os.getenv("OPS_RESERVATION_START_LEAD", "120"))
+    resolver_kwargs = {}
+    if authoritative_reservation is not None:
+        resolver_kwargs["authoritative_reservation"] = authoritative_reservation
     return resolve_station_dispatch_request(
         engine=DB_ENGINE,
         sql_text=text,
@@ -1479,6 +1484,7 @@ def resolve_station_lease_context(
         host_name=str(host.get("name") or ""),
         command=command,
         start_lead_seconds=lead,
+        **resolver_kwargs,
     )
 
 
@@ -1782,8 +1788,16 @@ _RESERVATION_RUNTIME_CONTEXT = ReservationRuntimeContext(
     get_http_get=lambda: LiveCallable(globals(), 'requests.get', requests.get),
     get_sql_text=lambda: text,
     get_bindparam=lambda: bindparam,
-    get_dispatch_start=lambda: lambda payload: handle_reservation_start(payload),
-    get_dispatch_end=lambda: lambda payload: handle_reservation_end(payload),
+    get_dispatch_start=lambda: lambda payload, authoritative_reservation=None: (
+        handle_reservation_start(payload, authoritative_reservation=authoritative_reservation)
+        if authoritative_reservation is not None
+        else handle_reservation_start(payload)
+    ),
+    get_dispatch_end=lambda: lambda payload, authoritative_reservation=None: (
+        handle_reservation_end(payload, authoritative_reservation=authoritative_reservation)
+        if authoritative_reservation is not None
+        else handle_reservation_end(payload)
+    ),
     get_resolve_host_by_lab=lambda: resolve_host_by_lab,
     get_record_operation=lambda: lambda *args, **kwargs: record_reservation_operation(
         *args,

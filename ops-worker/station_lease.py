@@ -175,13 +175,16 @@ def resolve_station_dispatch_request(
     host_name: str,
     command: str,
     start_lead_seconds: int = 120,
+    authoritative_reservation: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Resolve a v2 envelope from reservation/token rows and recorded prepare."""
+    """Resolve a v2 envelope from trusted reservation/token data and recorded prepare."""
     if not engine:
         raise StationLeaseContextError("Gateway reservation database is unavailable")
     try:
         with engine.connect() as conn:
             if reservation_id.startswith("demo:"):
+                if authoritative_reservation is not None:
+                    raise StationLeaseContextError("demo leases cannot use reservation projection data")
                 jti = reservation_id.removeprefix("demo:")
                 if not jti:
                     raise StationLeaseContextError("demo token identity is invalid")
@@ -225,17 +228,27 @@ def resolve_station_dispatch_request(
                     start_lead_seconds=start_lead_seconds,
                 )
 
-            row = conn.execute(
-                sql_text(
-                    """
-                    SELECT lab_id, start_time, end_time, status, updated_at
-                    FROM lab_reservations WHERE transaction_hash = :reservation_id LIMIT 1
-                    """
-                ),
-                {"reservation_id": reservation_id},
-            ).mappings().first()
-            if row is None:
-                raise StationLeaseContextError("reservation does not exist in Gateway records")
+            if authoritative_reservation is not None:
+                if not isinstance(authoritative_reservation, Mapping):
+                    raise StationLeaseContextError("authoritative reservation data is invalid")
+                snapshot_id = str(authoritative_reservation.get("transaction_hash") or "").strip()
+                if snapshot_id != str(reservation_id):
+                    raise StationLeaseContextError(
+                        "authoritative reservation does not match the requested reservation"
+                    )
+                row = authoritative_reservation
+            else:
+                row = conn.execute(
+                    sql_text(
+                        """
+                        SELECT lab_id, start_time, end_time, status, updated_at
+                        FROM lab_reservations WHERE transaction_hash = :reservation_id LIMIT 1
+                        """
+                    ),
+                    {"reservation_id": reservation_id},
+                ).mappings().first()
+                if row is None:
+                    raise StationLeaseContextError("reservation does not exist in Gateway records")
             generation = _prepared_generation(conn, sql_text, reservation_id, lab_id) if command == "release-session" else None
             state = str(row.get("status") or "").upper()
             release_issued_at = row.get("updated_at") if command == "release-session" and state in _TERMINAL_RESERVATION_STATES else None

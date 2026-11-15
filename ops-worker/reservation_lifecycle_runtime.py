@@ -1,6 +1,6 @@
 """Composition adapter for reservation lifecycle operations."""
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from reservation_lifecycle_context import ReservationLifecycleContext
 
@@ -14,7 +14,15 @@ class ReservationLifecycleRuntime:
     def _find_host(self, host_name: Any) -> Any:
         return self._context.get_hosts().get(host_name)
 
-    def handle_reservation_start(self, payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    def handle_reservation_start(
+        self,
+        payload: Dict[str, Any],
+        *,
+        authoritative_reservation: Optional[Mapping[str, Any]] = None,
+    ) -> Tuple[Dict[str, Any], int]:
+        kwargs = {}
+        if authoritative_reservation is not None:
+            kwargs["authoritative_reservation"] = authoritative_reservation
         return self._context.handle_reservation_start_impl(
             payload,
             find_host=self._find_host,
@@ -26,9 +34,18 @@ class ReservationLifecycleRuntime:
             perform_command_step=self._context.get_perform_command_step(),
             normalize_args=self._context.get_normalize_args(),
             resolve_station_lease_context=self._context.get_resolve_station_lease(),
+            **kwargs,
         )
 
-    def handle_reservation_end(self, payload: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    def handle_reservation_end(
+        self,
+        payload: Dict[str, Any],
+        *,
+        authoritative_reservation: Optional[Mapping[str, Any]] = None,
+    ) -> Tuple[Dict[str, Any], int]:
+        kwargs = {}
+        if authoritative_reservation is not None:
+            kwargs["authoritative_reservation"] = authoritative_reservation
         return self._context.handle_reservation_end_impl(
             payload,
             find_host=self._find_host,
@@ -39,6 +56,7 @@ class ReservationLifecycleRuntime:
             perform_command_step=self._context.get_perform_command_step(),
             normalize_args=self._context.get_normalize_args(),
             resolve_station_lease_context=self._context.get_resolve_station_lease(),
+            **kwargs,
         )
 
 

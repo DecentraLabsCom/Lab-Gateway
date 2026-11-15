@@ -251,6 +251,11 @@ class StationTransportRuntime:
             or result.get("outcome") != expected_outcome
         ):
             raise StationUnreachable("Station returned an invalid stored result", "winrm")
+        if exit_code < 2:
+            lease = result["metadata"].get("lease")
+            expected_state = "active" if command == "prepare-session" else "released"
+            if not isinstance(lease, Mapping) or lease.get("state") != expected_state:
+                raise StationUnreachable("Station returned an invalid stored lease result", "winrm")
 
     @staticmethod
     def _normalize_winrm_stored_result(
@@ -380,10 +385,8 @@ class StationTransportRuntime:
                 or lease["generation"] < 1
                 or (expected_generation is not None and lease["generation"] != expected_generation)
                 or lease.get("expiresAt") != envelope["context"].get("expiresAt")
-                or lease.get("state") not in (
-                    {"active", "recovery-required"}
-                    if envelope["command"] == "prepare-session"
-                    else {"released", "recovery-required"}
+                or lease.get("state") != (
+                    "active" if envelope["command"] == "prepare-session" else "released"
                 )
             ):
                 raise StationUnreachable("Station dispatcher returned an invalid lease result")

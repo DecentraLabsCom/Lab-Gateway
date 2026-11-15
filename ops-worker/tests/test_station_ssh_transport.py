@@ -230,10 +230,18 @@ def test_real_ssh_negotiates_v2_and_sends_stable_lease_envelope(monkeypatch):
             stdout = "prepared"
             exit_code, outcome = 0, "success"
             command = "prepare-session"
+        metadata = {}
+        if envelope.get("operation") == "execute" and command == "prepare-session":
+            metadata = {"lease": {
+                "leaseId": envelope["context"]["leaseId"],
+                "generation": 1,
+                "state": "active",
+                "expiresAt": envelope["context"]["expiresAt"],
+            }}
         return {
             "id": envelope["id"], "command": command, "completedAt": "2026-10-08T10:00:00Z",
             "success": exit_code < 2, "exitCode": exit_code, "outcome": outcome,
-            "message": "completed", "stdout": stdout, "stderr": "", "durationMs": 3, "metadata": {},
+            "message": "completed", "stdout": stdout, "stderr": "", "durationMs": 3, "metadata": metadata,
         }
 
     transport, host, thread, received, errors = _run_server(
@@ -298,7 +306,7 @@ def test_v2_timeout_reconciles_stored_result_without_reissuing_lifecycle(monkeyp
                 stored_result = {
                     "id": operation_id, "command": "prepare-session", "completedAt": "2026-10-08T10:00:03Z",
                     "success": True, "exitCode": 0, "outcome": "success", "message": "prepared",
-                    "stdout": "prepared", "stderr": "", "durationMs": 3000, "metadata": {"lease": {"generation": 1}},
+                    "stdout": "prepared", "stderr": "", "durationMs": 3000, "metadata": {"lease": {"generation": 1, "state": "active"}},
                 }
                 stdout = json.dumps({"operationId": operation_id, "state": "completed", "result": stored_result})
                 metadata = {"operationId": operation_id, "state": "completed"}

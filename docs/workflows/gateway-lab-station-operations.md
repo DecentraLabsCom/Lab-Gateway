@@ -183,6 +183,14 @@ its durable `reservation_operations` journal, so it does not need a local
 copy of the provider's reservation table. Consequently, these local states
 are operational only:
 
+When the Lite scheduler dispatches Prepare or Release, it carries the matching
+reservation row from that authenticated projection into lease construction.
+This avoids a second lookup in the absent local `lab_reservations` table. The
+local `reservation_operations` journal remains the source for idempotency and
+for the successful Prepare generation required by Release. Full-mode manual
+lifecycle calls without a scheduler snapshot continue to resolve reservation
+data from the Gateway's local projection.
+
 ```mermaid
 stateDiagram-v2
     [*] --> CONFIRMED: local or remote reservation projection
@@ -200,19 +208,27 @@ The start path is normally:
 3. Run `prepare-session` for a `dedicated` or `hybrid` physical Station. It
    refuses `fmu-only`, active or unknown local mode, and an unexpected local
    console session on a dedicated Station. Hybrid eviction follows the same
-   policy on Windows and Linux: warn and wait before evicting an eligible local
-   session when enabled, otherwise fail safely. Prepare also clears bounded
+   policy on Windows and Linux: when enabled, show each eligible local session a
+   graphical confirmation before eviction. The configured grace deadline starts
+   with the first prompt, so time spent confirming counts against it and any
+   remaining time allows voluntary sign-out. A decline, timeout, suppressed or
+   unavailable prompt fails Prepare before closing any local session that is
+   still active; a session that signs out during its prompt is already released.
+   When eviction is disabled Prepare also fails safely.
+   Prepare also clears bounded
    user working data and FMU temporary state before opening the reservation.
 4. Record every attempt in `reservation_operations` and move the local projection to `ACTIVE` only after success.
 
-The end path normally runs `release-session` without rebooting and can request a shutdown or hibernation action. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
+The end path normally runs `release-session` without rebooting and can request a shutdown or hibernation action. On physical Stations, Release closes the managed remote LABUSER/Tiny Desk session, then restarts an installed FMU Executor to terminate all of its sessions and clears its temporary state. The instructor's console login remains, but this service-wide FMU cleanup can interrupt FMU work launched there. Incomplete FMU cleanup fails Release, leaves a reservation lease `recovery-required`, and prevents a requested reboot. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
 
 Each Station checks the lease's `expiresAt` locally as a fail-safe. Linux
 checks from `labstationd`; Windows checks from the setup-managed
 `LabStation\BackgroundService` task on each service-loop iteration (normally
-every five seconds). Windows uses the same durable lease journal as WinRM
-dispatch. If expiry cleanup fails, the lease remains closed to new work for
-operator reconciliation.
+every five seconds). Both platforms persist expiry Release attempts in the
+lease journal. They retry only a completed failure marked `retryable` before
+session or FMU cleanup starts, using a fresh operation ID for each attempt.
+Partial cleanup failures and interrupted operations with unknown outcomes stay
+`recovery-required` and closed to new work for operator reconciliation.
 
 Dispatcher v2 uses the same durable operation-status protocol over SSH and
 WinRM. Gateway queries `operation.status` before dispatch, retains the original
@@ -225,6 +241,14 @@ profile rules. `Release` closes only the managed remote lab-user session and
 application; it does not sign out the hybrid instructor. The operator path is
 available only when no reservation or demo lease is active. `Enable Local` is
 hybrid-only; clearing an already active flag remains possible for cleanup.
+Before manual `Prepare`, the Gateway requires a fresh session inventory and
+refuses with `STATION_REMOTE_SESSION_ACTIVE` when `LABUSER` is connected
+remotely. The response explains that Prepare clears LABUSER temporary files,
+Downloads, and lab scratch data and may interrupt open apps, and recommends
+Release or logging off before retrying. Windows and Linux Stations repeat this
+check immediately before cleanup, so a session that appears after the Gateway
+preflight also prevents cleanup. Reservation-bound Prepare keeps its existing
+lease flow.
 
 ## Wake Ops
 
@@ -264,7 +288,7 @@ for the dispatcher request.
 | Command | Use in the gateway lifecycle |
 | --- | --- |
 | `prepare-session` | Applies the shared dedicated/hybrid local-session policy, clears bounded user working data and FMU temporary state, and prepares the lab user before a reservation. |
-| `release-session` | Cleans up the lab user after the reservation without rebooting by default; an explicit request can include a controlled reboot. |
+| `release-session` | Ends the remote lab-user session, terminates installed FMU Executor sessions and clears temporary state; an explicit request can include a controlled reboot after cleanup succeeds. |
 | `status-json <path>` | Writes a fresh status report for inspection or heartbeat collection. |
 | `power shutdown` / `power hibernate` | Performs a controlled power action. Every Gateway-managed shutdown, on Windows or Linux, requires the Station to advertise the idle-guard capability, local mode to be off, and a complete session inventory with no active user sessions. The Gateway checks before dispatch and the Station checks again after the optional delay. |
 | `recovery reboot-if-needed` | Performs a safeguard reboot only when station diagnostics justify it, unless explicitly forced. |
