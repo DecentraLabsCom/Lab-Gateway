@@ -147,7 +147,10 @@
       "required": ["active", "localSessionActive"],
       "properties": {
         "active": { "type": "array", "items": { "$ref": "#/$defs/session" } },
-        "localSessionActive": { "type": "boolean" },
+        "localSessionActive": {
+          "type": "boolean",
+          "description": "True when any interactive physical-console or seat session exists, regardless of account; excludes remote RDP/Tiny Desk sessions."
+        },
         "remoteSessionActive": { "type": "boolean" },
         "queryOk": { "type": "boolean" }
       },

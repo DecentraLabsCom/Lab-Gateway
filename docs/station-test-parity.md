@@ -2,7 +2,7 @@
 
 Lab Gateway owns the canonical Station Contract v3 schemas and fixtures under
 `contracts/station/v3/`. The portable Windows/Linux scenario matrix is
-`docs/station-test-parity.json`; version 2 defines shared expectations and
+`docs/station-test-parity.json`; version 3 defines shared expectations and
 links every behavior scenario to a native test in each Station repository.
 
 Lab Station and Lab Station Linux vendor the same matrix at

@@ -40,7 +40,7 @@
       },
       "additionalProperties": true
     },
-    "sessions": { "type": "object", "required": ["active", "localSessionActive"], "properties": { "active": { "type": "array", "items": { "$ref": "#/$defs/session" } }, "localSessionActive": { "type": "boolean" } }, "additionalProperties": true },
+    "sessions": { "type": "object", "required": ["active", "localSessionActive"], "properties": { "active": { "type": "array", "items": { "$ref": "#/$defs/session" } }, "localSessionActive": { "type": "boolean", "description": "True when any interactive physical-console or seat session exists, regardless of account; excludes remote RDP/Tiny Desk sessions." } }, "additionalProperties": true },
     "operations": { "type": "object", "additionalProperties": true },
     "localModeEnabled": { "type": "boolean" },
     "status": { "type": "object", "additionalProperties": true }
