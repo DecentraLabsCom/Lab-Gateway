@@ -34,6 +34,11 @@ class ReservationLifecycleRuntime:
             perform_command_step=self._context.get_perform_command_step(),
             normalize_args=self._context.get_normalize_args(),
             resolve_station_lease_context=self._context.get_resolve_station_lease(),
+            authorize_remote_session_handoff=(
+                self._context.get_authorize_remote_session_handoff()
+                if self._context.get_authorize_remote_session_handoff is not None
+                else None
+            ),
             **kwargs,
         )
 
@@ -42,10 +47,16 @@ class ReservationLifecycleRuntime:
         payload: Dict[str, Any],
         *,
         authoritative_reservation: Optional[Mapping[str, Any]] = None,
+        reconciliation_attempt: Optional[str] = None,
+        reconciliation_only: bool = False,
     ) -> Tuple[Dict[str, Any], int]:
         kwargs = {}
         if authoritative_reservation is not None:
             kwargs["authoritative_reservation"] = authoritative_reservation
+        if reconciliation_attempt is not None:
+            kwargs["reconciliation_attempt"] = reconciliation_attempt
+        if reconciliation_only:
+            kwargs["reconciliation_only"] = True
         return self._context.handle_reservation_end_impl(
             payload,
             find_host=self._find_host,

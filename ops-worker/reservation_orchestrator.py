@@ -2,7 +2,9 @@
 
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta
+import json
 from typing import Any, Dict, List, Optional, Protocol, Tuple
+from uuid import uuid4
 
 from sqlalchemy.engine import Connection
 
@@ -108,7 +110,7 @@ class ReservationOrchestrator:
         for row in end_rows:
             self._dispatch_end(dict(row))
 
-    def _fetch_remote_candidates(self, now: datetime) -> List[Dict[str, Any]]:
+    def _fetch_remote_candidates(self, now: datetime, *, strict: bool = False) -> List[Dict[str, Any]]:
         if not self.projection_gateway_id or not self.projection_token:
             raise RuntimeError("Reservation projection credentials are not configured")
         window_lower = now - timedelta(seconds=self.lookback)
@@ -135,19 +137,29 @@ class ReservationOrchestrator:
         reservations = body.get("reservations")
         if not isinstance(reservations, list):
             raise RuntimeError("Reservation projection response has an invalid reservations field")
+        if strict and len(reservations) >= max_batch:
+            raise RuntimeError("Reservation projection may be truncated; reservation state is not complete")
 
         rows: List[Dict[str, Any]] = []
         for item in reservations:
             if not isinstance(item, dict):
+                if strict:
+                    raise RuntimeError("Reservation projection contains a malformed reservation")
                 continue
             transaction_hash = str(item.get("transactionHash") or item.get("transaction_hash") or "").strip()
             lab_id = str(item.get("labId") or item.get("lab_id") or "").strip()
             status = str(item.get("status") or "").strip().upper()
             start_time = self.parse_reservation_datetime(item.get("startTime") or item.get("start_time"))
             end_time = self.parse_reservation_datetime(item.get("endTime") or item.get("end_time"))
-            if not transaction_hash or not lab_id or status not in {"CONFIRMED", "ACTIVE"}:
+            if status not in {"CONFIRMED", "ACTIVE"}:
+                continue
+            if not transaction_hash or not lab_id:
+                if strict:
+                    raise RuntimeError("Active reservation projection is missing its identity or lab")
                 continue
             if start_time is None or end_time is None:
+                if strict:
+                    raise RuntimeError("Active reservation projection has invalid time bounds")
                 self.logger.warning("Ignoring remote reservation %s with invalid time window", transaction_hash)
                 continue
             rows.append({
@@ -345,6 +357,10 @@ class ReservationOrchestrator:
         dispatch_kwargs = (
             {"authoritative_reservation": dict(row)} if self.projection_url else {}
         )
+        previous_release_succeeded = self._last_end_release_succeeded(reservation_id)
+        if previous_release_succeeded is not None:
+            dispatch_kwargs["reconciliation_attempt"] = uuid4().hex
+            dispatch_kwargs["reconciliation_only"] = not previous_release_succeeded
         response, status_code = self.dispatch_end(payload, **dispatch_kwargs)
         success = bool(response.get("success")) and status_code == 200
         message = None if success else response.get("error") or "Reservation end failed"
@@ -360,6 +376,43 @@ class ReservationOrchestrator:
         )
         if success:
             self._update_status(reservation_id, row.get("status"), "COMPLETED")
+
+    def _last_end_release_succeeded(self, reservation_id: str) -> Optional[bool]:
+        if not self.engine:
+            return None
+        try:
+            with self.engine.connect() as conn:
+                row = conn.execute(
+                    self.sql_text(
+                        """
+                        SELECT success, payload
+                        FROM reservation_operations
+                        WHERE reservation_id = :reservation_id
+                          AND action = 'scheduler:end'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {"reservation_id": reservation_id},
+                ).mappings().first()
+            if not row or bool(row.get("success")):
+                return None
+            payload = row.get("payload")
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            if not isinstance(payload, Mapping):
+                return None
+            response = payload.get("response")
+            steps = response.get("steps") if isinstance(response, Mapping) else None
+            if not isinstance(steps, list):
+                return None
+            release_steps = [step for step in steps if isinstance(step, Mapping) and step.get("action") == "release"]
+            if not release_steps:
+                return None
+            return bool(release_steps[-1].get("success"))
+        except Exception as exc:
+            self.logger.warning("Unable to inspect prior reservation end result for %s: %s", reservation_id, exc)
+            return None
 
     def _record_scheduler_op(
         self,

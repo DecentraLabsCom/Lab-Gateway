@@ -3,6 +3,8 @@
 from collections.abc import Callable, Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
+from station_action_policy import StationActionPolicyError
+
 
 def handle_reservation_start(
     payload: Dict[str, Any],
@@ -16,6 +18,7 @@ def handle_reservation_start(
     perform_command_step: Callable[..., Tuple[bool, Dict[str, Any]]],
     normalize_args: Callable[[Any, Optional[List[str]]], List[str]],
     resolve_station_lease_context: Optional[Callable[..., Dict[str, Any]]] = None,
+    authorize_remote_session_handoff: Optional[Callable[..., List[str]]] = None,
     authoritative_reservation: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], int]:
     reservation_id = get_mandatory_field(payload, "reservationId", "reservation_id")
@@ -85,11 +88,47 @@ def handle_reservation_start(
             payload.get("prepareArgs"),
             [f"--guard-grace={guard_grace}"],
         )
+        if any(str(arg).split("=", 1)[0] == "--unreserved-remote-labuser-sessions" for arg in prepare_args):
+            return {"error": "remote-session handoff authorization is Gateway-managed"}, 400
+        if authorize_remote_session_handoff is not None:
+            try:
+                authorized_args = authorize_remote_session_handoff(
+                    host,
+                    None,
+                    str(reservation_id),
+                    authoritative_reservation=authoritative_reservation,
+                )
+                if not isinstance(authorized_args, list) or any(not isinstance(arg, str) for arg in authorized_args):
+                    raise StationActionPolicyError(
+                        "STATION_RESERVATION_STATE_UNKNOWN",
+                        "Remote-session handoff authorization is invalid",
+                    )
+                prepare_args.extend(authorized_args)
+            except StationActionPolicyError as exc:
+                steps.append({
+                    "action": "prepare",
+                    "success": False,
+                    "status": "failed",
+                    "message": str(exc),
+                    "details": {"code": exc.code},
+                })
+                success = False
+                status_code = 409
+            except Exception:
+                steps.append({
+                    "action": "prepare",
+                    "success": False,
+                    "status": "failed",
+                    "message": "Remote-session reservation state could not be verified",
+                    "details": {"code": "STATION_RESERVATION_STATE_UNKNOWN"},
+                })
+                success = False
+                status_code = 409
         management_value = host.get("management")
         management = management_value if isinstance(management_value, Mapping) else {}
         dispatcher_request = None
         dispatcher_request_error = None
-        if str(management.get("transport") or host.get("management_transport") or "winrm").lower() in {"ssh", "winrm"}:
+        if success and str(management.get("transport") or host.get("management_transport") or "winrm").lower() in {"ssh", "winrm"}:
             try:
                 if resolve_station_lease_context is None:
                     raise ValueError("resolver unavailable")
@@ -108,18 +147,19 @@ def handle_reservation_start(
             except Exception:
                 dispatcher_request_error = "authoritative reservation lease context is unavailable"
         step_args = (host, reservation_id, lab_id, "prepare", "prepare-session", prepare_args)
-        if dispatcher_request is not None or dispatcher_request_error:
-            ok, step = perform_command_step(
-                *step_args,
-                dispatcher_request=dispatcher_request,
-                dispatcher_request_error=dispatcher_request_error,
-            )
-        else:
-            ok, step = perform_command_step(*step_args)
-        steps.append(step)
-        if not ok:
-            success = False
-            status_code = 502
+        if success:
+            if dispatcher_request is not None or dispatcher_request_error:
+                ok, step = perform_command_step(
+                    *step_args,
+                    dispatcher_request=dispatcher_request,
+                    dispatcher_request_error=dispatcher_request_error,
+                )
+            else:
+                ok, step = perform_command_step(*step_args)
+            steps.append(step)
+            if not ok:
+                success = False
+                status_code = 502
 
     response = {
         "success": success,
@@ -143,6 +183,8 @@ def handle_reservation_end(
     normalize_args: Callable[[Any, Optional[List[str]]], List[str]],
     resolve_station_lease_context: Optional[Callable[..., Dict[str, Any]]] = None,
     authoritative_reservation: Optional[Mapping[str, Any]] = None,
+    reconciliation_attempt: Optional[str] = None,
+    reconciliation_only: bool = False,
 ) -> Tuple[Dict[str, Any], int]:
     reservation_id = get_mandatory_field(payload, "reservationId", "reservation_id")
     host_name = get_mandatory_field(payload, "host", "hostName")
@@ -167,7 +209,7 @@ def handle_reservation_end(
     success = True
     status_code = 200
 
-    if lab_id:
+    if lab_id and not reconciliation_only:
         power_result = execute_power_phase(
             reservation_id,
             lab_id,
@@ -182,6 +224,8 @@ def handle_reservation_end(
 
     if success and release_enabled:
         release_args = normalize_args(payload.get("releaseArgs"), [])
+        if reconciliation_only and "--protect-local-sessions" not in release_args:
+            release_args.append("--protect-local-sessions")
         management_value = host.get("management")
         management = management_value if isinstance(management_value, Mapping) else {}
         dispatcher_request = None
@@ -195,6 +239,8 @@ def handle_reservation_end(
                     if authoritative_reservation is not None
                     else {}
                 )
+                if reconciliation_attempt is not None:
+                    lease_context_kwargs["reconciliation_attempt"] = reconciliation_attempt
                 dispatcher_request = resolve_station_lease_context(
                     reservation_id,
                     lab_id,
@@ -218,7 +264,7 @@ def handle_reservation_end(
             success = False
             status_code = 502
 
-    if success and power_cfg:
+    if success and power_cfg and not reconciliation_only:
         mode = power_cfg.get("mode", "shutdown")
         extra_args = normalize_args(power_cfg.get("args"), [])
         args = [mode] + extra_args

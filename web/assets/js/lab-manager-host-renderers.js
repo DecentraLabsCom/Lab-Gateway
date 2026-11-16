@@ -376,20 +376,20 @@
             const localMode = typeof status.localModeEnabled === 'boolean'
                 ? status.localModeEnabled : heartbeat.localModeEnabled;
             const hasPhysicalProfile = profile === 'dedicated' || profile === 'hybrid';
-            const prepareBlockedByLocalMode = localMode !== false;
-            const prepareBlockedByDedicatedSession = profile === 'dedicated' && localSession !== false;
-            const prepareBlocked = prepareBlockedByLocalMode || !sessionInventoryKnown || prepareBlockedByDedicatedSession;
-            const prepareTitle = localMode === true
+            const prepareBlockedByLocalMode = profile === 'hybrid' && localMode !== false;
+            const prepareBlockedByRemoteSession = remoteLabSession !== false;
+            const prepareBlocked = prepareBlockedByLocalMode || !sessionInventoryKnown || prepareBlockedByRemoteSession;
+            const prepareTitle = profile === 'hybrid' && localMode === true
                 ? 'Local mode is active; disable it before preparing'
-                : localMode !== false
+                : profile === 'hybrid' && localMode !== false
                     ? 'Refresh Station status to verify local mode'
                     : !sessionInventoryKnown
                         ? 'Refresh Station status to verify active sessions'
-                    : profile === 'dedicated' && localSession === true
-                        ? 'An unexpected interactive session blocks dedicated preparation'
-                        : profile === 'dedicated' && localSession !== false
-                            ? 'Refresh Station status to verify active sessions'
-                            : 'Prepare physical lab session';
+                        : remoteLabSession === true
+                            ? 'An active remote LABUSER session is using the Station'
+                            : remoteLabSession !== false
+                                ? 'Refresh Station status to verify the remote LABUSER session'
+                                : 'Prepare physical lab session';
             const profileActionsMarkup = profile === 'fmu-only'
                 ? '<button class="mini-btn primary" data-action="prepare" title="Physical session actions are unavailable for the FMU-only profile" disabled>Prepare</button>'
                     + '<button class="mini-btn" data-action="release" title="Physical session actions are unavailable for the FMU-only profile" disabled>Release</button>'

@@ -28,6 +28,7 @@ class ReservationLifecycleContext:
     get_normalize_args: Callable[
         [], Callable[[Any, Optional[List[str]]], List[str]]
     ]
+    get_authorize_remote_session_handoff: Optional[Callable[[], Callable[..., List[str]]]] = None
 
 
 __all__ = ["ReservationLifecycleContext"]

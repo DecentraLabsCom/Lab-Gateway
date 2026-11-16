@@ -312,13 +312,20 @@ For each host, operators can:
 `dedicated` and `hybrid` profiles; `fmu-only` stations do not expose them. The
 controls stay disabled until the Station profile is known, and the API checks
 the live Station status again before sending an operator action. `Prepare`
-stops when local mode is active or unknown, or when session inventory is
-unavailable. On a dedicated station, an unexpected interactive user session
-blocks preparation. On a hybrid station,
-the Station's session-eviction policy controls whether a warned local session
-can be closed; if eviction is disabled, preparation fails safely. `Release`
-closes the managed remote lab-user session and application without rebooting,
-and is rejected while a reservation or demo lease is active.
+stops when session inventory is unavailable or Gateway cannot prove that an
+existing remote LABUSER session is unreserved. When the mapped labs have no
+active or imminent reservation, that session follows the profile's normal
+handoff. On a dedicated station, every active local session
+receives a warning and grace period, then is logged off without an
+accept/decline prompt. If the Station cannot send the warning, Prepare fails
+before closing a local session. Dedicated does not support local mode. On a
+hybrid station, Prepare stops when local mode is active or unknown. When local
+mode is off, the Station's session-eviction policy controls whether each warned
+local session must confirm before it can be closed; if eviction is disabled,
+preparation fails safely. A matching reservation `Release` closes that lease's
+managed remote lab-user session and application without rebooting. An
+administrative `Release` is rejected while a reservation or demo lease or any
+remote LABUSER session is active.
 
 `Enable Local` is available only for `hybrid`, after confirming session
 inventory and that no remote lab-user session or reservation is active. It

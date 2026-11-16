@@ -101,10 +101,29 @@ def validate_station_command(command: str, args: List[str]) -> None:
                 "--guard-grace", "--guard-message", "--guard-silent", "--guard-notify",
                 "--no-guard", "--user", "--message", "--grace", "--silent",
                 "--no-notify", "--reboot", "--reboot-timeout", "--reservation-key",
-                "--operation-id",
+                "--operation-id", "--unreserved-remote-labuser-sessions",
             }
             for value in args
         )
+        if allowed:
+            handoff_options = [
+                value for value in args
+                if value.split("=", 1)[0] == "--unreserved-remote-labuser-sessions"
+            ]
+            if handoff_options:
+                if command != "prepare-session" or len(handoff_options) != 1:
+                    allowed = False
+                else:
+                    _, separator, raw_ids = handoff_options[0].partition("=")
+                    session_ids = raw_ids.split(",") if separator else []
+                    allowed = (
+                        1 <= len(session_ids) <= 32
+                        and len(session_ids) == len(set(session_ids))
+                        and all(
+                            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}", session_id) is not None
+                            for session_id in session_ids
+                        )
+                    )
         if allowed and command == "session guard":
             for value in args:
                 key, separator, raw = value.partition("=")

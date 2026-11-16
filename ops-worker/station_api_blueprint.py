@@ -1,7 +1,7 @@
 """Management API for SSH credential enrollment and neutral station commands."""
 
 from collections.abc import Callable, Mapping
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from flask import Blueprint, jsonify, request
@@ -22,6 +22,7 @@ def create_station_api_blueprint(
     ssh_trust_status: Callable[[Mapping[str, Any]], Dict[str, Any]],
     delete_ssh_trust: Callable[[Mapping[str, Any]], bool],
     probe_station: Callable[[Mapping[str, Any]], Dict[str, Any]],
+    authorize_remote_session_handoff: Optional[Callable[..., List[str]]] = None,
 ) -> Blueprint:
     bp = Blueprint("station_api", __name__)
 
@@ -44,13 +45,14 @@ def create_station_api_blueprint(
         if not isinstance(args, list) or any(not isinstance(item, str) for item in args):
             return jsonify({"error": "args must be a string array"}), 400
         try:
-            validate_operator_station_action(
+            authorized_args = validate_operator_station_action(
                 host,
                 station_command,
                 args,
                 run_station_command=run_station_command,
+                authorize_remote_session_handoff=authorize_remote_session_handoff,
             )
-            result = run_station_command(host, station_command, args, request_id=str(uuid4()))
+            result = run_station_command(host, station_command, authorized_args, request_id=str(uuid4()))
             return jsonify(result), 200 if int(result.get("exitCode", 2)) < 2 else 409
         except StationActionPolicyError as exc:
             return jsonify({"error": str(exc), "code": exc.code}), 409

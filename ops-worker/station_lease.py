@@ -9,6 +9,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_RECONCILIATION_ATTEMPT = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _TERMINAL_RESERVATION_STATES = {"CANCELLED", "CANCELED", "COMPLETED", "ENDED", "REVOKED"}
 
 
@@ -42,6 +43,7 @@ def build_station_dispatch_request(
     reservation: Mapping[str, Any],
     prepare_generation: Optional[int] = None,
     release_issued_at: Optional[datetime] = None,
+    reconciliation_attempt: Optional[str] = None,
     start_lead_seconds: int = 120,
     timeout_seconds: Optional[int] = None,
 ) -> Dict[str, Any]:
@@ -73,7 +75,12 @@ def build_station_dispatch_request(
 
     execute_before = issued_at + timedelta(minutes=5)
     lease_id = str(uuid5(NAMESPACE_URL, f"decentralabs:station-lease:{host_name}:{reservation_id}"))
-    request_id = str(uuid5(NAMESPACE_URL, f"decentralabs:station-operation:{lease_id}:{command}:{generation}"))
+    operation_key = f"decentralabs:station-operation:{lease_id}:{command}:{generation}"
+    if reconciliation_attempt is not None:
+        if command != "release-session" or not _RECONCILIATION_ATTEMPT.fullmatch(str(reconciliation_attempt)):
+            raise StationLeaseContextError("Release reconciliation attempt is invalid")
+        operation_key += f":reconcile:{reconciliation_attempt}"
+    request_id = str(uuid5(NAMESPACE_URL, operation_key))
     lease = {
         "kind": "reservation",
         "labId": str(lab_id),
@@ -102,6 +109,7 @@ def build_demo_dispatch_request(
     expires_at: datetime,
     prepare_generation: Optional[int] = None,
     release_issued_at: Optional[datetime] = None,
+    reconciliation_attempt: Optional[str] = None,
     start_lead_seconds: int = 120,
 ) -> Dict[str, Any]:
     """Build demo context from the token revocation record and durable event time."""
@@ -131,7 +139,12 @@ def build_demo_dispatch_request(
         "notBefore": _format(not_before),
         "expiresAt": _format(expiry),
     }
-    request_id = str(uuid5(NAMESPACE_URL, f"decentralabs:station-operation:{demo_id}:{command}:{generation}"))
+    operation_key = f"decentralabs:station-operation:{demo_id}:{command}:{generation}"
+    if reconciliation_attempt is not None:
+        if command != "release-session" or not _RECONCILIATION_ATTEMPT.fullmatch(str(reconciliation_attempt)):
+            raise StationLeaseContextError("Release reconciliation attempt is invalid")
+        operation_key += f":reconcile:{reconciliation_attempt}"
+    request_id = str(uuid5(NAMESPACE_URL, operation_key))
     return {
         "requestId": request_id,
         "issuedAt": _format(issue),
@@ -176,6 +189,7 @@ def resolve_station_dispatch_request(
     command: str,
     start_lead_seconds: int = 120,
     authoritative_reservation: Optional[Mapping[str, Any]] = None,
+    reconciliation_attempt: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Resolve a v2 envelope from trusted reservation/token data and recorded prepare."""
     if not engine:
@@ -216,6 +230,8 @@ def resolve_station_dispatch_request(
                     if event is None:
                         raise StationLeaseContextError("demo release event is not recorded")
                     release_issue = event[0]
+                if reconciliation_attempt is not None:
+                    release_issue = datetime.now(timezone.utc)
                 return build_demo_dispatch_request(
                     demo_id=reservation_id,
                     lab_id=lab_id,
@@ -225,6 +241,7 @@ def resolve_station_dispatch_request(
                     expires_at=token[0],
                     prepare_generation=generation,
                     release_issued_at=release_issue,
+                    reconciliation_attempt=reconciliation_attempt,
                     start_lead_seconds=start_lead_seconds,
                 )
 
@@ -252,6 +269,8 @@ def resolve_station_dispatch_request(
             generation = _prepared_generation(conn, sql_text, reservation_id, lab_id) if command == "release-session" else None
             state = str(row.get("status") or "").upper()
             release_issued_at = row.get("updated_at") if command == "release-session" and state in _TERMINAL_RESERVATION_STATES else None
+            if reconciliation_attempt is not None:
+                release_issued_at = datetime.now(timezone.utc)
             return build_station_dispatch_request(
                 reservation_id=reservation_id,
                 lab_id=lab_id,
@@ -260,6 +279,7 @@ def resolve_station_dispatch_request(
                 reservation=row,
                 prepare_generation=generation,
                 release_issued_at=release_issued_at,
+                reconciliation_attempt=reconciliation_attempt,
                 start_lead_seconds=start_lead_seconds,
             )
     except StationLeaseContextError:

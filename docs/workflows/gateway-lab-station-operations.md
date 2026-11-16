@@ -206,35 +206,63 @@ The start path is normally:
 1. Resolve `labId` from the provider catalog, then follow its `accessKey` to the current Guacamole connection and unique registered host.
 2. Send Wake-on-LAN when requested and wait for reachability.
 3. Run `prepare-session` for a `dedicated` or `hybrid` physical Station. It
-   refuses `fmu-only`, active or unknown local mode, and an unexpected local
-   console session on a dedicated Station. Hybrid eviction follows the same
-   policy on Windows and Linux: when enabled, show each eligible local session a
-   graphical confirmation before eviction. The configured grace deadline starts
-   with the first prompt, so time spent confirming counts against it and any
-   remaining time allows voluntary sign-out. A decline, timeout, suppressed or
-   unavailable prompt fails Prepare before closing any local session that is
-   still active; a session that signs out during its prompt is already released.
-   When eviction is disabled Prepare also fails safely.
-   Prepare also clears bounded
-   user working data and FMU temporary state before opening the reservation.
+   refuses `fmu-only` or an unavailable session inventory. If a remote LABUSER
+   session exists, Gateway checks the authoritative reservation projection for
+   every lab mapped to the Station. An administrative Prepare is blocked by any
+   active/imminent mapped-lab reservation or unknown reservation state. For a
+   reservation-bound Prepare, the incoming reservation may be the only
+   reservation that is active or imminent; another active/imminent reservation,
+   unknown state, or access-session evidence for the incoming reservation blocks
+   the handoff. Otherwise,
+   it passes the exact observed session IDs to the Station's normal
+   profile-specific handoff. Hybrid also refuses active or unknown local mode and
+   uses its configured confirmation policy: when eviction is enabled, each
+   eligible local session must confirm a graphical prompt before eviction. The
+   grace deadline starts with the first prompt, so time spent confirming counts
+   against it and any remaining time allows voluntary sign-out. A decline,
+   timeout, suppressed or unavailable prompt fails Hybrid Prepare before it
+   closes a local session that remains active. Dedicated cannot enable local
+   mode; it warns every local session, waits the configured grace period, then
+   logs off every remaining local session without an accept/decline prompt.
+   If any warning cannot be sent, Prepare fails before logoff. This applies to
+   LABUSER and other local accounts on both Windows and Linux.
+   Prepare also clears bounded user working data and FMU temporary state before
+   opening the reservation. Remote sessions under accounts other than managed
+   `LABUSER`/`labuser` are not currently included in the handoff; shared FMU
+   Executor cleanup may affect their work. See the [session policy
+   matrix](lab-station-session-policy-matrix.md).
 4. Record every attempt in `reservation_operations` and move the local projection to `ACTIVE` only after success.
 
-The end path normally runs `release-session` without rebooting and can request a shutdown or hibernation action. On physical Stations, Release closes the managed remote LABUSER/Tiny Desk session, then restarts an installed FMU Executor to terminate all of its sessions and clears its temporary state. The local console session remains, but this service-wide FMU cleanup can interrupt FMU work launched there. Incomplete FMU cleanup fails Release, leaves a reservation lease `recovery-required`, and prevents a requested reboot. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
+The end path normally runs the reservation's matching `release-session` without rebooting and can request a shutdown or hibernation action. A matching lease-bound Release closes that reservation's managed remote LABUSER/Tiny Desk session, then restarts an installed FMU Executor and clears its temporary state. Administrative Release is rejected while a lease or any remote LABUSER session is active; without a lease the Station cannot prove whether that remote session is reserved, so it remains protected. The local console session remains, but this service-wide FMU cleanup can interrupt FMU work launched there. Incomplete FMU cleanup fails Release, leaves a reservation lease `recovery-required`, and prevents a requested reboot. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
 
 Each Station checks the lease's `expiresAt` locally as a fail-safe. Linux
 checks from `labstationd`; Windows checks from the setup-managed
 `LabStation\BackgroundService` task on each service-loop iteration (normally
 every five seconds). Both platforms persist expiry Release attempts in the
-lease journal. They retry only a completed failure marked `retryable` before
-session or FMU cleanup starts, using a fresh operation ID for each attempt.
-Partial cleanup failures and interrupted operations with unknown outcomes stay
-`recovery-required` and closed to new work for operator reconciliation.
+lease journal. A `recovery-required` lease remains closed to new work, and the
+Station issues a fresh lease-bound Release attempt every 60 seconds until
+cleanup succeeds. Recovery can begin after lease expiry, or sooner when a
+lease-bound Release itself failed into `recovery-required`; a failed Prepare
+does not trigger Release while its reservation is still active. The agent never
+reuses an uncertain operation ID. Before each attempt it requires a valid
+lease identity, local mode off, and a known session inventory. Hybrid defers
+while any local user session is active; either profile defers for an active
+non-LABUSER session. Dedicated may proceed past a local LABUSER session because
+remote reservation service has priority. The remaining remote LABUSER session
+is the cleanup target. Unknown or corrupted lease identity remains blocked for
+operator repair.
 
 Dispatcher v2 uses the same durable operation-status protocol over SSH and
 WinRM. Gateway queries `operation.status` before dispatch, retains the original
 operation ID on retries, and queries again after an uncertain transport
-result. A `recovery-required` result is surfaced for operator reconciliation
-without automatically repeating the session side effect.
+result within one dispatch. For a scheduled reservation end whose Release
+failed, the orchestrator waits `OPS_RESERVATION_RETRY_COOLDOWN`, sends a new
+lease-bound Release ID, skips already completed `pre_end` steps, and then runs
+`post_end` after Release succeeds. The reconciliation Release carries the
+same local-session guard as the Station watchdog, including a second session
+check before FMU cleanup. This lets the Gateway confirm completion after either
+Station's local reconciler has recovered the lease, while each Station still
+protects its own session state when Gateway connectivity is unavailable.
 
 Lab Manager's operator `Prepare`/`Release` controls follow the same physical
 profile rules. `Release` closes only the managed remote lab-user session and
@@ -242,13 +270,15 @@ application; it does not sign out the local console user. The operator path is
 available only when no reservation or demo lease is active. `Enable Local` is
 hybrid-only; clearing an already active flag remains possible for cleanup.
 Before manual `Prepare`, the Gateway requires a fresh session inventory and
-refuses with `STATION_REMOTE_SESSION_ACTIVE` when `LABUSER` is connected
-remotely. The response explains that Prepare clears LABUSER temporary files,
-Downloads, and lab scratch data and may interrupt open apps, and recommends
-Release or logging off before retrying. Windows and Linux Stations repeat this
-check immediately before cleanup, so a session that appears after the Gateway
-preflight also prevents cleanup. Reservation-bound Prepare keeps its existing
-lease flow.
+authoritative proof that a remote `LABUSER` session has no active/imminent
+reservation on any mapped lab. If reservation state is unknown or a mapped-lab
+reservation is active, it refuses before sending Prepare. When the session is
+proven unreserved, it passes the exact session IDs to the Station, which applies
+the profile's handoff and rechecks the inventory before cleanup. The response
+explains that Prepare clears LABUSER temporary files, Downloads, and lab scratch
+data and may interrupt open apps. Reservation-bound Prepare may proceed when its
+own reservation is the only active/imminent reservation and has no existing
+access-session evidence; another active reservation or unknown state blocks it.
 
 ## Wake Ops
 
@@ -287,8 +317,8 @@ for the dispatcher request.
 
 | Command | Use in the gateway lifecycle |
 | --- | --- |
-| `prepare-session` | Applies the shared dedicated/hybrid local-session policy, clears bounded user working data and FMU temporary state, and prepares the lab user before a reservation. |
-| `release-session` | Ends the remote lab-user session, terminates installed FMU Executor sessions and clears temporary state; an explicit request can include a controlled reboot after cleanup succeeds. |
+| `prepare-session` | Dedicated warns and automatically hands off every eligible local session after the grace period; Hybrid uses local mode and its confirmation policy. For a remote LABUSER session, administrative Prepare requires no active/imminent mapped-lab reservation. Reservation-bound Prepare may hand off a residual session when its incoming reservation is the only active/imminent mapped-lab reservation and has no prior access-session evidence; another reservation or unknown state protects the session. |
+| `release-session` | A matching reservation context ends that lease's remote lab-user session, terminates installed FMU Executor sessions and clears temporary state. Administrative Release is blocked while a remote LABUSER session exists; an explicit matching request can include a controlled reboot after cleanup succeeds. |
 | `status-json <path>` | Writes a fresh status report for inspection or heartbeat collection. |
 | `power shutdown` / `power hibernate` | Performs a controlled power action. Every Gateway-managed shutdown, on Windows or Linux, requires the Station to advertise the idle-guard capability, local mode to be off, and a complete session inventory with no active user sessions. The Gateway checks before dispatch and the Station checks again after the optional delay. |
 | `recovery reboot-if-needed` | Performs a safeguard reboot only when station diagnostics justify it, unless explicitly forced. |

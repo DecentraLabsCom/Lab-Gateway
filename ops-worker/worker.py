@@ -11,7 +11,7 @@ import os
 import socket
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional, Pattern, Sequence, Set, Tuple, cast
 
 from cryptography.fernet import Fernet
@@ -288,6 +288,7 @@ from reservation_operations import (
 from reservation_lifecycle_runtime import create_reservation_lifecycle_runtime
 from reservation_lifecycle_context import ReservationLifecycleContext
 from station_lease import resolve_station_dispatch_request
+from station_action_policy import StationActionPolicyError, _station_status
 from reservation_execution_runtime import create_reservation_execution_runtime
 from reservation_execution_context import ReservationExecutionContext
 from reservation_steps import (
@@ -1463,6 +1464,7 @@ def resolve_station_lease_context(
     command: str,
     *,
     authoritative_reservation: Optional[Mapping[str, Any]] = None,
+    reconciliation_attempt: Optional[str] = None,
 ) -> Dict[str, Any]:
     management_value = host.get("management")
     if isinstance(management_value, Mapping):
@@ -1476,6 +1478,8 @@ def resolve_station_lease_context(
     resolver_kwargs = {}
     if authoritative_reservation is not None:
         resolver_kwargs["authoritative_reservation"] = authoritative_reservation
+    if reconciliation_attempt is not None:
+        resolver_kwargs["reconciliation_attempt"] = reconciliation_attempt
     return resolve_station_dispatch_request(
         engine=DB_ENGINE,
         sql_text=text,
@@ -1486,6 +1490,265 @@ def resolve_station_lease_context(
         start_lead_seconds=lead,
         **resolver_kwargs,
     )
+
+
+def _active_reservation_ids_for_station(
+    host: Mapping[str, Any],
+    now: datetime,
+    *,
+    authoritative_reservation: Optional[Mapping[str, Any]] = None,
+) -> Set[str]:
+    """Read the current authoritative reservation projection for a Station's labs."""
+    lab_ids = [str(value).strip() for value in resolve_lab_ids_for_host(host) if str(value).strip()]
+    if not lab_ids:
+        raise StationActionPolicyError(
+            "STATION_RESERVATION_STATE_UNKNOWN",
+            "Station laboratory mapping is unavailable; remote-session handoff was not authorized",
+        )
+
+    automator = RESERVATION_AUTOMATOR
+    lead_seconds = max(
+        0,
+        min(
+            int(getattr(automator, "start_lead", os.getenv("OPS_RESERVATION_START_LEAD", "120"))),
+            300,
+        ),
+    )
+    deadline = now + timedelta(seconds=lead_seconds)
+    if str(getattr(automator, "projection_url", "") or "").strip():
+        try:
+            rows = automator._fetch_remote_candidates(now, strict=True)
+            active_ids = set()
+            for row in rows:
+                if str(row.get("lab_id") or "").strip() not in lab_ids:
+                    continue
+                if str(row.get("status") or "").upper() not in {"CONFIRMED", "ACTIVE"}:
+                    continue
+                start_time = automator.as_utc_datetime(row.get("start_time"))
+                end_time = automator.as_utc_datetime(row.get("end_time"))
+                if start_time is None or end_time is None:
+                    raise ValueError("active reservation has invalid time bounds")
+                if end_time < now or start_time > deadline:
+                    continue
+                reservation_id = str(row.get("transaction_hash") or "").strip()
+                if not reservation_id:
+                    raise ValueError("active reservation has no identity")
+                active_ids.add(reservation_id)
+        except Exception as exc:
+            raise StationActionPolicyError(
+                "STATION_RESERVATION_STATE_UNKNOWN",
+                "Authoritative reservation projection is unavailable; remote-session handoff was not authorized",
+            ) from exc
+    else:
+        if not DB_ENGINE:
+            raise StationActionPolicyError(
+                "STATION_RESERVATION_STATE_UNKNOWN",
+                "Gateway reservation database is unavailable; remote-session handoff was not authorized",
+            )
+        query = text(
+            """
+            SELECT transaction_hash
+            FROM lab_reservations
+            WHERE lab_id IN :lab_ids
+              AND status IN ('CONFIRMED', 'ACTIVE')
+              AND end_time >= :now
+              AND start_time <= :deadline
+            """
+        ).bindparams(bindparam("lab_ids", expanding=True))
+        try:
+            with DB_ENGINE.connect() as conn:
+                rows = conn.execute(
+                    query,
+                    {"lab_ids": lab_ids, "now": now, "deadline": deadline},
+                ).all()
+            active_ids = set()
+            for row in rows:
+                reservation_id = str(row[0] or "").strip()
+                if not reservation_id:
+                    raise ValueError("active reservation has no identity")
+                active_ids.add(reservation_id)
+        except Exception as exc:
+            raise StationActionPolicyError(
+                "STATION_RESERVATION_STATE_UNKNOWN",
+                "Gateway reservation projection is unavailable; remote-session handoff was not authorized",
+            ) from exc
+
+    if authoritative_reservation is not None:
+        reservation_id = str(authoritative_reservation.get("transaction_hash") or "").strip()
+        reservation_lab = str(authoritative_reservation.get("lab_id") or "").strip()
+        reservation_status = str(authoritative_reservation.get("status") or "").upper()
+        start_time = to_utc(authoritative_reservation.get("start_time"))
+        end_time = to_utc(authoritative_reservation.get("end_time"))
+        if (
+            not reservation_id
+            or (reservation_lab in lab_ids and reservation_status in {"CONFIRMED", "ACTIVE"}
+                and (start_time is None or end_time is None))
+        ):
+            raise StationActionPolicyError(
+                "STATION_RESERVATION_STATE_UNKNOWN",
+                "Authoritative reservation details are incomplete; remote-session handoff was not authorized",
+            )
+        if (
+            reservation_id
+            and reservation_lab in lab_ids
+            and reservation_status in {"CONFIRMED", "ACTIVE"}
+            and start_time is not None
+            and end_time is not None
+            and start_time <= deadline
+            and end_time >= now
+        ):
+            active_ids.add(reservation_id)
+
+    return active_ids
+
+
+def _reservation_has_existing_session_evidence(reservation_id: str, now: datetime) -> bool:
+    """A prior successful Prepare or unexpired access token means the target may already be in use."""
+    if not DB_ENGINE:
+        raise StationActionPolicyError(
+            "STATION_RESERVATION_STATE_UNKNOWN",
+            "Gateway access-session records are unavailable; remote-session handoff was not authorized",
+        )
+    try:
+        with DB_ENGINE.connect() as conn:
+            token = conn.execute(
+                text(
+                    """
+                    SELECT 1 FROM guacamole_token_revocation_queue
+                    WHERE reservation_key = :reservation_id AND expires_at > :now
+                    LIMIT 1
+                    """
+                ),
+                {"reservation_id": reservation_id, "now": now},
+            ).first()
+            prepared = conn.execute(
+                text(
+                    """
+                    SELECT 1 FROM reservation_operations
+                    WHERE reservation_id = :reservation_id
+                      AND action = 'prepare' AND success = 1
+                    LIMIT 1
+                    """
+                ),
+                {"reservation_id": reservation_id},
+            ).first()
+    except Exception as exc:
+        raise StationActionPolicyError(
+            "STATION_RESERVATION_STATE_UNKNOWN",
+            "Gateway access-session records are unavailable; remote-session handoff was not authorized",
+        ) from exc
+    return token is not None or prepared is not None
+
+
+def authorize_remote_session_handoff(
+    host: Mapping[str, Any],
+    status: Optional[Mapping[str, Any]] = None,
+    reservation_id: Optional[str] = None,
+    *,
+    authoritative_reservation: Optional[Mapping[str, Any]] = None,
+) -> List[str]:
+    """Authorize handoff only for the exact remote LABUSER sessions observed by the Gateway."""
+    if status is None:
+        status = _station_status(host, run_station_command)
+    sessions_value = status.get("sessions")
+    sessions = sessions_value if isinstance(sessions_value, Mapping) else {}
+    if sessions.get("queryOk") is not True:
+        raise StationActionPolicyError(
+            "STATION_SESSION_STATE_UNKNOWN",
+            "Station session inventory is unavailable; remote-session handoff was not authorized",
+        )
+    remote_active = sessions.get("labUserRemoteActive", status.get("labUserRemoteActive"))
+    if not isinstance(remote_active, bool):
+        raise StationActionPolicyError(
+            "STATION_SESSION_STATE_UNKNOWN",
+            "Station remote LABUSER session state is unavailable; handoff was not authorized",
+        )
+    remote_ids_value = sessions.get("remoteLabUserSessionIds")
+    if remote_ids_value is None:
+        if remote_active:
+            raise StationActionPolicyError(
+                "STATION_SESSION_STATE_UNKNOWN",
+                "Station did not report remote LABUSER session identities; handoff was not authorized",
+            )
+        return []
+    if not isinstance(remote_ids_value, list):
+        raise StationActionPolicyError(
+            "STATION_SESSION_STATE_UNKNOWN",
+            "Station remote LABUSER session inventory is invalid; handoff was not authorized",
+        )
+    if remote_active and not remote_ids_value:
+        raise StationActionPolicyError(
+            "STATION_SESSION_STATE_UNKNOWN",
+            "Station reports a remote LABUSER session without its identity; handoff was not authorized",
+        )
+    if not remote_active and remote_ids_value:
+        raise StationActionPolicyError(
+            "STATION_SESSION_STATE_UNKNOWN",
+            "Station remote LABUSER session state conflicts with its session IDs; handoff was not authorized",
+        )
+    remote_ids: List[str] = []
+    for value in remote_ids_value:
+        if not isinstance(value, str):
+            raise StationActionPolicyError(
+                "STATION_SESSION_STATE_UNKNOWN",
+                "Station remote LABUSER session identity is invalid; handoff was not authorized",
+            )
+        session_id = value.strip()
+        if not session_id or len(session_id) > 64 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", session_id):
+            raise StationActionPolicyError(
+                "STATION_SESSION_STATE_UNKNOWN",
+                "Station remote LABUSER session identity is invalid; handoff was not authorized",
+            )
+        remote_ids.append(session_id)
+    if len(remote_ids) != len(set(remote_ids)) or len(remote_ids) > 32:
+        raise StationActionPolicyError(
+            "STATION_SESSION_STATE_UNKNOWN",
+            "Station remote LABUSER session inventory is ambiguous; handoff was not authorized",
+        )
+    if not remote_ids:
+        return []
+    option = "--unreserved-remote-labuser-sessions=" + ",".join(remote_ids)
+    if len(option) > 256:
+        raise StationActionPolicyError(
+            "STATION_SESSION_STATE_UNKNOWN",
+            "Station remote LABUSER session inventory is too large to authorize safely",
+        )
+
+    now = datetime.now(timezone.utc)
+    active_reservations = _active_reservation_ids_for_station(
+        host,
+        now,
+        authoritative_reservation=authoritative_reservation,
+    )
+    if reservation_id:
+        target_id = str(reservation_id).strip()
+        if authoritative_reservation is not None and str(
+            authoritative_reservation.get("transaction_hash") or ""
+        ).strip() != target_id:
+            raise StationActionPolicyError(
+                "STATION_RESERVATION_STATE_UNKNOWN",
+                "Prepare reservation identity is inconsistent; remote-session handoff was not authorized",
+            )
+        has_existing_session = _reservation_has_existing_session_evidence(target_id, now)
+        if has_existing_session:
+            raise StationActionPolicyError(
+                "STATION_REMOTE_SESSION_ACTIVE",
+                "A remote LABUSER session may belong to an active reservation; prepare was not sent",
+            )
+        if target_id not in active_reservations:
+            raise StationActionPolicyError(
+                "STATION_RESERVATION_STATE_UNKNOWN",
+                "The Prepare reservation is not active in the authoritative projection; remote-session handoff was not authorized",
+            )
+        protected = active_reservations - {target_id}
+    else:
+        protected = active_reservations
+    if protected:
+        raise StationActionPolicyError(
+            "STATION_REMOTE_SESSION_ACTIVE",
+            "A remote LABUSER session may belong to another active reservation; prepare was not sent",
+        )
+    return [option]
 
 
 _RESERVATION_LIFECYCLE_CONTEXT = ReservationLifecycleContext(
@@ -1500,6 +1763,7 @@ _RESERVATION_LIFECYCLE_CONTEXT = ReservationLifecycleContext(
     get_perform_command_step=lambda: perform_command_step,
     get_normalize_args=lambda: normalize_args,
     get_resolve_station_lease=lambda: resolve_station_lease_context,
+    get_authorize_remote_session_handoff=lambda: authorize_remote_session_handoff,
 )
 _RESERVATION_LIFECYCLE_RUNTIME = create_reservation_lifecycle_runtime(
     _RESERVATION_LIFECYCLE_CONTEXT
@@ -1793,10 +2057,19 @@ _RESERVATION_RUNTIME_CONTEXT = ReservationRuntimeContext(
         if authoritative_reservation is not None
         else handle_reservation_start(payload)
     ),
-    get_dispatch_end=lambda: lambda payload, authoritative_reservation=None: (
-        handle_reservation_end(payload, authoritative_reservation=authoritative_reservation)
+    get_dispatch_end=lambda: lambda payload, authoritative_reservation=None, reconciliation_attempt=None, reconciliation_only=False: (
+        handle_reservation_end(
+            payload,
+            authoritative_reservation=authoritative_reservation,
+            reconciliation_attempt=reconciliation_attempt,
+            reconciliation_only=reconciliation_only,
+        )
         if authoritative_reservation is not None
-        else handle_reservation_end(payload)
+        else handle_reservation_end(
+            payload,
+            reconciliation_attempt=reconciliation_attempt,
+            reconciliation_only=reconciliation_only,
+        )
     ),
     get_resolve_host_by_lab=lambda: resolve_host_by_lab,
     get_record_operation=lambda: lambda *args, **kwargs: record_reservation_operation(
@@ -1912,6 +2185,7 @@ reload_hosts = _HOST_RELOAD_RUNTIME.reload_hosts
 _WORKER_BLUEPRINT_PROVIDERS = {
     "ALLOWED_WINRM_COMMANDS": ALLOWED_WINRM_COMMANDS,
     "DB_ENGINE": DB_ENGINE,
+    "authorize_remote_session_handoff": authorize_remote_session_handoff,
     "ENOUGH_DISCOVERY_SIGNALS": ENOUGH_DISCOVERY_SIGNALS,
     "FMU_STATION_INTERNAL_TOKEN": FMU_STATION_INTERNAL_TOKEN,
     "FMU_STATUS_BACKEND": FMU_STATUS_BACKEND,

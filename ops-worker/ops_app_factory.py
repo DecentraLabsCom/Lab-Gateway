@@ -69,6 +69,7 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
         create_station_api_blueprint(
             find_host=lambda host_name: get("HOSTS").get(host_name) if host_name else None,
             run_station_command=lambda *args, **kwargs: get("run_station_command")(*args, **kwargs),
+            authorize_remote_session_handoff=lambda *args, **kwargs: get("authorize_remote_session_handoff")(*args, **kwargs),
             generate_ssh_credential=lambda *args, **kwargs: get("generate_ssh_credential")(*args, **kwargs),
             public_ssh_credential=lambda *args, **kwargs: get("public_ssh_credential")(*args, **kwargs),
             delete_ssh_credential=lambda *args, **kwargs: get("delete_ssh_credential")(*args, **kwargs),
