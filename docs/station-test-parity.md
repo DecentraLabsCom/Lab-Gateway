@@ -12,3 +12,8 @@ lease-expiry, and operation-status vectors. When the matrix changes, update
 both vendored copies and keep both platform mappings pointing to executable
 tests. Native tests retain OS-specific implementation details while asserting
 the same policy results.
+
+For Prepare, Dedicated warns every active user session, waits through the
+grace period, then logs it off without a confirmation prompt. Hybrid requires
+local mode to be off and, when eviction is enabled, requires each affected
+local user to acknowledge the warning before the grace period and logoff.
