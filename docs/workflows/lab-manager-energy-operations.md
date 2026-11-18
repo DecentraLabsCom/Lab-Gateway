@@ -9,7 +9,7 @@ are the labels currently shown in Lab Manager.
 
 | Element | Lab Manager section | Current persistence |
 | --- | --- | --- |
-| APC/SNMP/NETIO credentials | `Energy Credentials` | Encrypted local JSON store at `OPS_POWER_CREDENTIALS_PATH`. Only references and types are returned. |
+| APC/SNMP/NETIO credentials | `Energy Credentials` | Encrypted local JSON store at `OPS_POWER_CREDENTIALS_PATH`. The UI receives references, types, and safe non-secret settings; secret values remain encrypted and are never returned. |
 | Controllers and Gateway metadata | `Power Controllers` | Local JSON catalog at `OPS_POWER_CONFIG`; physical outputs are read from the device. |
 | Device output names and supported timing configuration | `Power Controllers` | Read from the physical controller; supported APC changes are written back to the device. |
 | Laboratory policies | `Lab Power Control` → `Lab power policy` | The same local JSON catalog. |
@@ -76,11 +76,14 @@ In `Energy` → `Energy Credentials`:
 
 4. Click `Save Credential`.
 
-The reference may appear in the catalog and UI; communities, passwords, and
-tokens must not. The API returns metadata only. Selecting an existing
-reference starts a rotation: enter the replacement secret and click
-`Save Credential` again. The controller keeps the same reference and the
-runtime is reloaded when possible.
+The reference and non-secret settings such as usernames, SNMP versions,
+authentication/privacy protocols, and context names may appear in the catalog
+and UI. Communities, passwords, authentication passphrases, privacy
+passphrases, and tokens must not be returned. Selecting an existing reference
+loads its non-secret settings into the editor while leaving secret inputs
+blank. To rotate it, enter replacement secret values and click `Save
+Credential`. The controller keeps the same reference and the runtime is
+reloaded when possible.
 
 ### 2. Register the controller and synchronize its outputs
 

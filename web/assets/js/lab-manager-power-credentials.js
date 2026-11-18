@@ -66,6 +66,9 @@
         }
 
         function populateForm(credential) {
+            const metadata = credential?.metadata && typeof credential.metadata === 'object'
+                ? credential.metadata
+                : {};
             if (fields.ref) {
                 fields.ref.value = credential.credentialRef || '';
                 fields.ref.disabled = true;
@@ -84,10 +87,12 @@
             ].forEach(field => {
                 if (field) field.value = '';
             });
-            if (fields.authProtocol) fields.authProtocol.value = 'NONE';
-            if (fields.privProtocol) fields.privProtocol.value = 'NONE';
+            if (fields.username) fields.username.value = metadata.username || '';
+            if (fields.authProtocol) fields.authProtocol.value = metadata.authProtocol || 'NONE';
+            if (fields.privProtocol) fields.privProtocol.value = metadata.privProtocol || 'NONE';
+            if (fields.contextName) fields.contextName.value = metadata.contextName || '';
             updateFields();
-            if (fields.editorHint) fields.editorHint.textContent = 'Enter replacement secret values to rotate this credential. The current values are never loaded.';
+            if (fields.editorHint) fields.editorHint.textContent = 'Non-secret settings are loaded. Enter replacement secret values to rotate this credential; current secrets are never loaded.';
         }
 
         function renderOptions() {

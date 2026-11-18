@@ -32,7 +32,11 @@ def test_power_credentials_api_lists_metadata_and_never_returns_secrets(client, 
     assert response.status_code == 200
     assert response.json == {
         "success": True,
-        "credentials": [{"credentialRef": "netio-lab-01", "type": "netio-http-basic"}],
+        "credentials": [{
+            "credentialRef": "netio-lab-01",
+            "type": "netio-http-basic",
+            "metadata": {"username": "netio"},
+        }],
     }
     assert "super-secret" not in response.get_data(as_text=True)
 

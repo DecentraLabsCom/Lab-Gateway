@@ -31,15 +31,15 @@
             return ['apc-powernet-snmp', 'netio-json'].includes(fields.driver?.value || '');
         }
 
-        function updateDriverFields() {
+        function updateDriverFields({ preservePort = false } = {}) {
             const driver = fields.driver?.value || 'mock';
             powerControllerEditorDirty = true;
             const isNetio = driver === 'netio-json';
             const isApc = driver === 'apc-powernet-snmp';
             const currentPort = String(fields.port?.value || '');
-            if (fields.port && driver === 'netio-json' && lastPowerControllerDriver !== 'netio-json' && currentPort === '161') {
+            if (!preservePort && fields.port && driver === 'netio-json' && lastPowerControllerDriver !== 'netio-json' && currentPort === '161') {
                 fields.port.value = fields.netioHttps?.checked === true ? '443' : '80';
-            } else if (fields.port && driver !== 'netio-json' && lastPowerControllerDriver === 'netio-json' && ['80', '443'].includes(currentPort)) {
+            } else if (!preservePort && fields.port && driver !== 'netio-json' && lastPowerControllerDriver === 'netio-json' && ['80', '443'].includes(currentPort)) {
                 fields.port.value = '161';
             }
             lastPowerControllerDriver = driver;
@@ -150,14 +150,14 @@
             const defaultPort = controller.driver === 'netio-json'
                 ? (config.useHttps === true ? '443' : '80')
                 : '161';
-            if (fields.port) fields.port.value = controller.port || defaultPort;
+            if (fields.port) fields.port.value = controller.port ?? defaultPort;
             if (fields.netioPath) fields.netioPath.value = config.path || '/netio.json';
             if (fields.netioHttps) fields.netioHttps.checked = config.useHttps === true;
             if (fields.netioVerifyTls) fields.netioVerifyTls.checked = config.verifyTls !== false;
-            if (fields.profile) fields.profile.value = config.profile || 'auto';
-            if (fields.timeoutSeconds) fields.timeoutSeconds.value = config.timeoutSeconds || '2';
+            if (fields.profile) fields.profile.value = config.profile ?? 'auto';
+            if (fields.timeoutSeconds) fields.timeoutSeconds.value = config.timeoutSeconds ?? '2';
             if (fields.retries) fields.retries.value = config.retries ?? '1';
-            updateDriverFields();
+            updateDriverFields({ preservePort: true });
             renderCredentialOptions();
             powerControllerOutletDrafts = Array.isArray(controller.outlets)
                 ? controller.outlets.map(createPowerControllerOutletDraft)

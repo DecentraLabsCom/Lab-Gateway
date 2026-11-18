@@ -34,7 +34,10 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="replace an existing credential with the same reference",
     )
-    commands.add_parser("list", help="list references and types, never secret payloads")
+    commands.add_parser(
+        "list",
+        help="list references, types, and safe metadata; never secret payloads",
+    )
     return parser
 
 

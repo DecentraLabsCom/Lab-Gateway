@@ -288,7 +288,7 @@ off or unavailable Station from an internal worker failure.
 - `PUT /api/power/controllers/{controllerId}`
   - Validates and updates one provider-local controller and its Gateway safety metadata. An optional `deviceConfiguration` block is sent to a driver that supports physical writes before the local catalog is persisted.
 - `GET /api/power/credentials`
-  - Returns only provider-local credential references and types; decrypted values never leave the worker.
+  - Returns provider-local credential references, types, and safe non-secret metadata; secret values never leave the worker.
 - `POST /api/power/credentials`
   - Creates or explicitly rotates one encrypted APC/SNMP/NETIO credential. The request accepts secret values only over the protected Lab Manager path and the response contains metadata only.
 - `GET /api/power/policies`

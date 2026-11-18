@@ -202,18 +202,57 @@ class PowerCredentialStore:
                 raise PowerCredentialError("power credential payload is invalid")
             return dict(value)
 
-    def list(self) -> list[Dict[str, str]]:
-        """Return credential metadata only; encrypted payloads never leave the store."""
+    @staticmethod
+    def _public_metadata(credential_type: str, value: Mapping[str, Any]) -> Dict[str, str]:
+        """Select non-secret credential fields safe to return to Lab Manager."""
+        kind = str(credential_type or "").strip().lower()
+        metadata: Dict[str, str] = {}
+
+        if kind in {"netio-http-basic", "snmpv3"}:
+            username = str(value.get("username") or value.get("securityName") or "").strip()
+            if username:
+                metadata["username"] = username
+
+        if kind in {"snmpv1", "snmpv2c"}:
+            metadata["version"] = str(
+                value.get("version") or kind.removeprefix("snmp")
+            ).strip().lower()
+
+        if kind == "snmpv3":
+            metadata["authProtocol"] = str(
+                value.get("authProtocol") or "NONE"
+            ).strip().upper()
+            metadata["privProtocol"] = str(
+                value.get("privProtocol") or "NONE"
+            ).strip().upper()
+            metadata["contextName"] = str(value.get("contextName") or "").strip()
+
+        return metadata
+
+    def list(self) -> list[Dict[str, Any]]:
+        """Return references, types, and safe metadata without returning secrets."""
         with self._lock:
             data = self._read_store(allow_missing=True)
+            if not data["credentials"]:
+                return []
             result = []
+            fernet = self._fernet_instance()
             for reference, entry in data["credentials"].items():
                 if not isinstance(entry, Mapping) or not str(entry.get("token") or "").strip():
                     raise PowerCredentialError("power credential store is invalid")
+                credential_type = str(entry.get("type") or "unknown")
+                try:
+                    raw = fernet.decrypt(str(entry["token"]).encode("ascii"))
+                    value = json.loads(raw.decode("utf-8"))
+                except (InvalidToken, ValueError, TypeError, json.JSONDecodeError) as exc:
+                    raise PowerCredentialError("power credential metadata is unavailable") from exc
+                if not isinstance(value, Mapping):
+                    raise PowerCredentialError("power credential metadata is unavailable")
                 result.append(
                     {
                         "credentialRef": str(reference),
-                        "type": str(entry.get("type") or "unknown"),
+                        "type": credential_type,
+                        "metadata": self._public_metadata(credential_type, value),
                     }
                 )
             return sorted(result, key=lambda item: item["credentialRef"])
