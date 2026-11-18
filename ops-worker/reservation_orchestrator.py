@@ -52,9 +52,8 @@ class ReservationOrchestrator:
         self.now = now
         self.get_env = get_env
         self.enabled = parse_bool(get_env("OPS_RESERVATION_AUTOMATION", False), False)
-        self.scan_interval = int(get_env("OPS_RESERVATION_SCAN_INTERVAL", "30"))
+        self.scan_interval = int(get_env("OPS_RESERVATION_SCAN_INTERVAL", "10"))
         self.start_lead = int(get_env("OPS_RESERVATION_START_LEAD", "120"))
-        self.end_delay = int(get_env("OPS_RESERVATION_END_DELAY", "60"))
         self.lookback = int(get_env("OPS_RESERVATION_LOOKBACK", "21600"))
         self.retry_cooldown = int(get_env("OPS_RESERVATION_RETRY_COOLDOWN", "60"))
         self.projection_url = str(get_env("RESERVATION_PROJECTION_URL", "") or "").strip().rstrip("/")
@@ -82,10 +81,9 @@ class ReservationOrchestrator:
             replace_existing=True,
         )
         self.logger.info(
-            "Reservation orchestrator enabled (scan=%ss, lead=%ss, end_delay=%ss)",
+            "Reservation orchestrator enabled (scan=%ss, lead=%ss, end dispatch at scheduled end)",
             self.scan_interval,
             self.start_lead,
-            self.end_delay,
         )
         return 1
 
@@ -205,7 +203,7 @@ class ReservationOrchestrator:
 
         window_upper = now + timedelta(seconds=self.start_lead)
         window_lower = now - timedelta(seconds=self.lookback)
-        ready_time = now - timedelta(seconds=self.end_delay)
+        ready_time = now
         start_rows: List[Mapping[str, Any]] = []
         end_rows: List[Mapping[str, Any]] = []
         for row in rows:
@@ -271,7 +269,7 @@ class ReservationOrchestrator:
         if conn.dialect.name == "mysql":
             conn.execute(self.sql_text("SET SESSION innodb_lock_wait_timeout = 20"))
         
-        ready_time = now - timedelta(seconds=self.end_delay)
+        ready_time = now
         window_lower = now - timedelta(seconds=self.lookback)
         retry_cutoff = now - timedelta(seconds=self.retry_cooldown)
         max_batch = int(self.get_env("OPS_RESERVATION_MAX_BATCH", "200"))

@@ -345,9 +345,8 @@ outside reservations and planned local use.
 Reservation automation knobs:
 
 - `OPS_RESERVATION_AUTOMATION` (compose default: `true`)
-- `OPS_RESERVATION_SCAN_INTERVAL` (default `30`)
+- `OPS_RESERVATION_SCAN_INTERVAL` (default `10`)
 - `OPS_RESERVATION_START_LEAD` (default `120`)
-- `OPS_RESERVATION_END_DELAY` (default `60`)
 - `OPS_RESERVATION_LOOKBACK` (default `21600`)
 - `OPS_RESERVATION_RETRY_COOLDOWN` (default `60`)
 

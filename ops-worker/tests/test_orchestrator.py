@@ -81,7 +81,6 @@ def test_orchestrator_scan_once_dispatches_candidates(db_engine, monkeypatch):
     monkeypatch.setenv("OPS_RESERVATION_AUTOMATION", "true")
     monkeypatch.setenv("OPS_RESERVATION_SCAN_INTERVAL", "30")
     monkeypatch.setenv("OPS_RESERVATION_START_LEAD", "120")
-    monkeypatch.setenv("OPS_RESERVATION_END_DELAY", "60")
     monkeypatch.setenv("OPS_RESERVATION_LOOKBACK", "21600")
     monkeypatch.setenv("OPS_RESERVATION_RETRY_COOLDOWN", "1")
 
@@ -151,7 +150,6 @@ def test_orchestrator_scan_once_dispatches_candidates(db_engine, monkeypatch):
 def test_orchestrator_scan_once_uses_authenticated_remote_projection(db_engine, monkeypatch):
     monkeypatch.setenv("OPS_RESERVATION_AUTOMATION", "true")
     monkeypatch.setenv("OPS_RESERVATION_START_LEAD", "120")
-    monkeypatch.setenv("OPS_RESERVATION_END_DELAY", "60")
     monkeypatch.setenv("OPS_RESERVATION_LOOKBACK", "21600")
     monkeypatch.setenv("OPS_RESERVATION_RETRY_COOLDOWN", "60")
     monkeypatch.setenv("RESERVATION_PROJECTION_URL", "https://full.example/reservations/projection")

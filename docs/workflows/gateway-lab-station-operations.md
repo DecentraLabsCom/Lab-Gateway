@@ -170,10 +170,13 @@ The ops worker can be invoked directly by Lab Manager or by its scheduler. The s
 
 ```env
 OPS_RESERVATION_AUTOMATION=true
-OPS_RESERVATION_SCAN_INTERVAL=30
+OPS_RESERVATION_SCAN_INTERVAL=10
 OPS_RESERVATION_START_LEAD=120
-OPS_RESERVATION_END_DELAY=60
 ```
+
+Reservation end operations become eligible at the scheduled end time and run
+on the next orchestrator scan (10 seconds by default); there is no additional
+post-end delay.
 
 In Full mode it consumes the local `lab_reservations` projection, not the
 contract directly. In Lite mode it polls the authenticated

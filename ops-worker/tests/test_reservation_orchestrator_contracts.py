@@ -25,7 +25,6 @@ def _orchestrator(http_get=None, **env):
         "OPS_RESERVATION_AUTOMATION": "false",
         "OPS_RESERVATION_SCAN_INTERVAL": "30",
         "OPS_RESERVATION_START_LEAD": "120",
-        "OPS_RESERVATION_END_DELAY": "60",
         "OPS_RESERVATION_LOOKBACK": "21600",
         "OPS_RESERVATION_RETRY_COOLDOWN": "60",
         "OPS_RESERVATION_MAX_BATCH": "200",
