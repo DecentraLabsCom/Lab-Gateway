@@ -40,7 +40,14 @@
                 <div class="power-policy-step-header">
                     <div class="power-policy-step-title">
                         <button class="mini-btn power-policy-drag-handle" type="button" draggable="true" data-step-drag-handle aria-label="Drag to reorder Step ${index + 1}" title="Drag to reorder">
-                            <i class="fas fa-grip-vertical" aria-hidden="true"></i>
+                            <svg class="power-policy-drag-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                                <circle cx="5" cy="3" r="1.25" fill="currentColor"></circle>
+                                <circle cx="11" cy="3" r="1.25" fill="currentColor"></circle>
+                                <circle cx="5" cy="8" r="1.25" fill="currentColor"></circle>
+                                <circle cx="11" cy="8" r="1.25" fill="currentColor"></circle>
+                                <circle cx="5" cy="13" r="1.25" fill="currentColor"></circle>
+                                <circle cx="11" cy="13" r="1.25" fill="currentColor"></circle>
+                            </svg>
                         </button>
                         <strong>Step ${index + 1}</strong>
                     </div>
