@@ -78,7 +78,8 @@ local function run_exchange(opts)
         iss = "https://gateway.example/auth",
         aud = "https://gateway.example/guacamole",
         resourceType = "lab",
-        reservationKey = "0xabc"
+        reservationKey = "0xabc",
+        labId = "lab-1"
     }
 
     local cache = ngx_factory.new_shared_dict({ public_key = "public-key" })
@@ -185,6 +186,7 @@ local function assert_no_guacamole_mappings(cache)
     runner.assert.equals(nil, cache:get("exp:dlabs-res-user"))
     runner.assert.equals(nil, cache:get("guac_enforcement_exp:dlabs-res-user"))
     runner.assert.equals(nil, cache:get("reservation:jti-1234567890123456"))
+    runner.assert.equals(nil, cache:get("lab:jti-1234567890123456"))
 end
 
 runner.describe("Access-code Guacamole exchange", function()
@@ -196,13 +198,14 @@ runner.describe("Access-code Guacamole exchange", function()
         runner.assert.equals(1000, cache:get("exp:dlabs-res-user"))
         runner.assert.equals(1000, cache:get("guac_enforcement_exp:dlabs-res-user"))
         runner.assert.equals("0xabc", cache:get("reservation:jti-1234567890123456"))
+        runner.assert.equals("lab-1", cache:get("lab:jti-1234567890123456"))
         runner.assert.equals("http", events[1].kind)
         runner.assert.equals("cache", events[2].kind)
         runner.assert.equals("cache", events[3].kind)
         runner.assert.equals("cache", events[4].kind)
         runner.assert.equals("cache", events[5].kind)
-        runner.assert.equals("http", events[6].kind)
-        runner.assert.equals("https://gateway.example/auth/access-code/redeem/commit", events[6].url)
+        runner.assert.equals("http", events[7].kind)
+        runner.assert.equals("https://gateway.example/auth/access-code/redeem/commit", events[7].url)
     end)
 
     runner.it("releases the handle without committing when a mapping cannot be stored", function()
@@ -228,7 +231,8 @@ runner.describe("Access-code Guacamole exchange", function()
             exp = 1000,
             iss = "https://gateway.example/auth",
             aud = "https://gateway.example/guacamole",
-            resourceType = "lab"
+            resourceType = "lab",
+            labId = "lab-1"
         }
         local ngx, cache, events = run_exchange({ claims = claims })
 
@@ -250,8 +254,8 @@ runner.describe("Access-code Guacamole exchange", function()
 
         runner.assert.equals(503, ngx.status)
         assert_no_guacamole_mappings(cache)
-        runner.assert.equals("https://gateway.example/auth/access-code/redeem/commit", events[6].url)
-        runner.assert.equals("https://gateway.example/auth/access-code/redeem/release", events[7].url)
+        runner.assert.equals("https://gateway.example/auth/access-code/redeem/commit", events[7].url)
+        runner.assert.equals("https://gateway.example/auth/access-code/redeem/release", events[8].url)
     end)
 end)
 

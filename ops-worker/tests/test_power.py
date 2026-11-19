@@ -967,6 +967,20 @@ def test_reservation_start_runs_pre_start_power_before_host_operations(db_engine
     monkeypatch.setattr(worker, "resolve_host_by_lab", lambda _lab_id: worker.HOSTS.get("lab-ws-01"))
     monkeypatch.setattr(
         worker,
+        "run_station_command",
+        lambda *_args, **_kwargs: {
+            "exitCode": 0,
+            "stdout": json.dumps({
+                "sessions": {
+                    "queryOk": True,
+                    "labUserRemoteActive": False,
+                    "remoteLabUserSessionIds": [],
+                }
+            }),
+        },
+    )
+    monkeypatch.setattr(
+        worker,
         "perform_wake_step",
         lambda *args, **kwargs: (events.append("wake") or (True, {"action": "wake", "success": True})),
     )

@@ -43,6 +43,7 @@ EXPECTED_ROUTE_METHODS = {
     "/api/reservations/end": {"POST"},
     "/api/reservations/start": {"POST"},
     "/api/reservations/timeline": {"GET"},
+    "/api/reservation-connections/event": {"POST"},
     "/api/winrm": {"POST"},
     "/api/wol": {"POST"},
     "/api/wake-ops/<host_name>": {"GET", "PUT"},

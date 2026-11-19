@@ -542,6 +542,9 @@ def _build_manager(*, get_session_model_metadata=None, get_effective_policy_for_
     async def _fake_confirm(**_kwargs):
         return True
 
+    async def _fake_record_reservation_connection_event(_payload):
+        return True
+
     return StationRealtimeWsProxyManager(
         logger=application.logger,
         station_backend=StationFmuBackend(
@@ -556,6 +559,7 @@ def _build_manager(*, get_session_model_metadata=None, get_effective_policy_for_
         redeem_session_ticket=_fake_redeem,
         issue_session_ticket=_fake_issue,
         confirm_session_started=_fake_confirm,
+        record_reservation_connection_event=_fake_record_reservation_connection_event,
         get_session_model_metadata=get_session_model_metadata,
         get_effective_policy_for_metadata=get_effective_policy_for_metadata,
         ws_cleanup_seconds=60,
@@ -832,6 +836,79 @@ def test_station_ws_session_create_redeems_ticket_and_forwards_context(monkeypat
         "reservation_key": "res-1",
         "request_id": "req-create",
     }]
+
+
+def test_station_ws_reservation_connection_records_connected_then_disconnected(monkeypatch):
+    manager = _build_manager()
+    fake_station = _FakeStationConnection()
+    lifecycle_events = []
+
+    async def _fake_connect(_headers):
+        return fake_station
+
+    async def _record_lifecycle_event(payload):
+        lifecycle_events.append(dict(payload))
+        return True
+
+    monkeypatch.setattr(manager, "_connect_station", _fake_connect)
+    manager.record_reservation_connection_event = _record_lifecycle_event
+    monkeypatch.setattr(application._runner_runtime, "realtime_manager", manager)
+
+    with client.websocket_connect("/api/v1/fmu/sessions") as ws:
+        ws.send_text(json.dumps({
+            "type": "session.create",
+            "requestId": "lifecycle-create",
+            "labId": "1",
+            "reservationKey": "res-1",
+            "sessionTicket": "st_valid",
+        }))
+        created = ws.receive_json()
+        assert created["type"] == "session.created"
+
+    assert [event["event"] for event in lifecycle_events] == ["connected", "disconnected"]
+    assert [event["sequence"] for event in lifecycle_events] == [1, 2]
+    assert lifecycle_events[0]["eventId"] == f"{lifecycle_events[0]['connectionId']}:1"
+    assert lifecycle_events[1]["eventId"] == f"{lifecycle_events[0]['connectionId']}:2"
+    assert lifecycle_events[0]["connectionId"] == lifecycle_events[1]["connectionId"]
+    for event in lifecycle_events:
+        assert event["reservationId"] == "res-1"
+        assert event["labId"] == "1"
+        assert event["source"] == "fmu"
+
+
+def test_station_ws_demo_session_does_not_emit_reservation_lifecycle_events(monkeypatch):
+    manager = _build_manager()
+    fake_station = _FakeStationConnection()
+    lifecycle_events = []
+
+    async def _fake_connect(_headers):
+        return fake_station
+
+    async def _redeem_demo_session(**_kwargs):
+        claims = _claims()
+        claims["reservationKey"] = "demo:preview-1"
+        return claims
+
+    async def _record_lifecycle_event(payload):
+        lifecycle_events.append(dict(payload))
+        return True
+
+    monkeypatch.setattr(manager, "_connect_station", _fake_connect)
+    manager.redeem_session_ticket = _redeem_demo_session
+    manager.record_reservation_connection_event = _record_lifecycle_event
+    monkeypatch.setattr(application._runner_runtime, "realtime_manager", manager)
+
+    with client.websocket_connect("/api/v1/fmu/sessions") as ws:
+        ws.send_text(json.dumps({
+            "type": "session.create",
+            "requestId": "unreserved-create",
+            "labId": "1",
+            "sessionTicket": "st_valid",
+        }))
+        created = ws.receive_json()
+        assert created["type"] == "session.created", created
+
+    assert lifecycle_events == []
 
 
 def test_station_ws_attach_after_public_disconnect_opens_a_new_station_channel(monkeypatch):

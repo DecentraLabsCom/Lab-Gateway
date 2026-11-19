@@ -1,6 +1,7 @@
 local runner = require "tests.helpers.runner"
 local ngx_factory = require "tests.helpers.ngx_stub"
 local handler = require "modules.log_handler"
+local reservation_connection_signal = require "modules.reservation_connection_signal"
 
 local function base_env(overrides)
     overrides = overrides or {}
@@ -35,6 +36,43 @@ runner.describe("Log handler", function()
         ngx.var.status = "101"
         handler.run(ngx)
         runner.assert.equals(nil, ngx.shared.cache._data["has_pending_closures"])
+    end)
+
+    runner.it("records the reservation disconnect when the Guacamole tunnel closes", function()
+        local ngx = base_env()
+        ngx.var.status = "101"
+        ngx.ctx.reservation_connection = {
+            reservationId = "reservation-1",
+            labId = "lab-1",
+            source = "guacamole",
+            connectionId = "guac-connection-1",
+            eventId = "guac-connection-1:2",
+            sequence = 2,
+        }
+        local captured
+        local original_record = reservation_connection_signal.record
+        ---@diagnostic disable-next-line: duplicate-set-field
+        reservation_connection_signal.record = function(_, payload)
+            captured = payload
+            return true, { success = true }, 200
+        end
+        local ok, err = xpcall(function()
+            handler.run(ngx)
+            runner.assert.equals(1, #ngx._timer_calls.at)
+            ngx._timer_calls.at[1].callback(true)
+            runner.assert.equals(nil, captured, "premature timer must not report a disconnect")
+            ngx._timer_calls.at[1].callback(false)
+        end, debug.traceback)
+        reservation_connection_signal.record = original_record
+        if not ok then error(err, 0) end
+
+        runner.assert.equals("disconnected", captured.event)
+        runner.assert.equals("guacamole", captured.source)
+        runner.assert.equals("reservation-1", captured.reservationId)
+        runner.assert.equals("lab-1", captured.labId)
+        runner.assert.equals("guac-connection-1", captured.connectionId)
+        runner.assert.equals("guac-connection-1:2", captured.eventId)
+        runner.assert.equals(2, captured.sequence)
     end)
 
     runner.it("releases the physical demo lifecycle when the tunnel closes", function()

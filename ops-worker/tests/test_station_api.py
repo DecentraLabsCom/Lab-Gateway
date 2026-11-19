@@ -101,7 +101,7 @@ def test_station_command_returns_not_found_and_preserves_warning_exit_status(sta
     assert failure.status_code == 409
 
 
-def test_manual_prepare_explains_remote_labuser_refusal_before_dispatch(station_api):
+def test_manual_prepare_fails_closed_when_remote_labuser_identity_is_missing(station_api):
     client, handlers = station_api
     calls = []
 
@@ -129,8 +129,8 @@ def test_manual_prepare_explains_remote_labuser_refusal_before_dispatch(station_
     )
 
     assert response.status_code == 409
-    assert response.json["code"] == "STATION_REMOTE_SESSION_ACTIVE"
-    assert "Downloads" in response.json["error"]
+    assert response.json["code"] == "STATION_SESSION_STATE_UNKNOWN"
+    assert "identity is unavailable" in response.json["error"]
     assert calls == ["status-json"]
 
 

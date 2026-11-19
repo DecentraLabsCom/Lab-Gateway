@@ -13,7 +13,7 @@ def _run_with_status(status):
     return run_station_command
 
 
-def test_dedicated_prepare_blocks_any_local_console_account_including_labuser():
+def test_dedicated_prepare_does_not_confuse_local_labuser_with_remote_labuser():
     status = {
         "profile": "dedicated",
         "localModeEnabled": False,
@@ -26,15 +26,12 @@ def test_dedicated_prepare_blocks_any_local_console_account_including_labuser():
         },
     }
 
-    with pytest.raises(StationActionPolicyError) as error:
-        validate_operator_station_action(
-            {"name": "station-1"},
-            "prepare-session",
-            [],
-            run_station_command=_run_with_status(status),
-        )
-
-    assert error.value.code == "STATION_LOCAL_SESSION_ACTIVE"
+    assert validate_operator_station_action(
+        {"name": "station-1"},
+        "prepare-session",
+        [],
+        run_station_command=_run_with_status(status),
+    ) == []
 
 
 def test_dedicated_prepare_does_not_treat_another_users_rdp_session_as_local():
@@ -78,7 +75,7 @@ def test_dedicated_prepare_fails_closed_when_legacy_and_nested_local_state_disag
     assert error.value.code == "STATION_SESSION_STATE_UNKNOWN"
 
 
-def test_prepare_refuses_active_remote_labuser_and_explains_workspace_cleanup():
+def test_prepare_fails_closed_when_active_remote_labuser_identity_is_missing():
     status = {
         "profile": "hybrid",
         "localModeEnabled": False,
@@ -97,9 +94,8 @@ def test_prepare_refuses_active_remote_labuser_and_explains_workspace_cleanup():
             run_station_command=_run_with_status(status),
         )
 
-    assert error.value.code == "STATION_REMOTE_SESSION_ACTIVE"
-    assert "Downloads" in str(error.value)
-    assert "no cleanup ran" in str(error.value)
+    assert error.value.code == "STATION_SESSION_STATE_UNKNOWN"
+    assert "identity is unavailable" in str(error.value)
 
 
 def test_prepare_fails_closed_when_remote_labuser_state_is_missing():

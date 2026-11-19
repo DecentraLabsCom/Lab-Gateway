@@ -11,7 +11,8 @@ local function register_reservation_tunnel(ngx, reservation_id, lab_id)
     end
 
     local request_id = tostring(ngx.var.request_id or "")
-    if not request_id:match("^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$") then
+    if #request_id < 1 or #request_id > 128
+        or not request_id:match("^[A-Za-z0-9][A-Za-z0-9_.:-]*$") then
         ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
         ngx.header["Content-Type"] = "text/plain"
         ngx.say("Reservation session is unavailable")

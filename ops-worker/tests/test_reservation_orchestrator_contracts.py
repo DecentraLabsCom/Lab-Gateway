@@ -190,3 +190,41 @@ def test_dispatch_end_passes_the_selected_reservation_to_the_lifecycle_handler()
         },
         authoritative_reservation=reservation,
     )
+
+
+def test_station_close_fallback_waits_five_minutes_and_requires_fresh_idle_station_state():
+    disconnected_at = datetime(2026, 9, 14, 12, 0, 0)
+    orchestrator = _orchestrator(
+        OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS="300",
+    )
+    orchestrator.now = lambda: disconnected_at + timedelta(seconds=299)
+    row = {"_lifecycle_disconnected_at": disconnected_at}
+
+    assert orchestrator.disconnect_close_fallback == 300
+    assert orchestrator._disconnect_close_fallback_due(row) is False
+
+    orchestrator.now = lambda: disconnected_at + timedelta(seconds=300)
+    assert orchestrator._disconnect_close_fallback_due(row) is True
+
+    fresh_idle_status = {
+        "timestamp": disconnected_at + timedelta(seconds=300),
+        "localModeEnabled": False,
+        "sessions": {
+            "queryOk": True,
+            "remoteClientStateKnown": True,
+            "remoteClientConnected": False,
+            "localSessionActive": False,
+        },
+    }
+    assert orchestrator._station_disconnect_close_fallback_at(row, fresh_idle_status) == (
+        disconnected_at + timedelta(seconds=300)
+    )
+
+    connected_status = {
+        **fresh_idle_status,
+        "sessions": {
+            **fresh_idle_status["sessions"],
+            "remoteClientConnected": True,
+        },
+    }
+    assert orchestrator._station_disconnect_close_fallback_at(row, connected_status) is None

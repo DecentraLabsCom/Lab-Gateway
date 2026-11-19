@@ -71,7 +71,27 @@ def test_reservation_start_heartbeat_timeline_e2e(db_engine, client, monkeypatch
     monkeypatch.setattr(
         worker,
         "run_labstation_command",
-        lambda *args, **kwargs: {"exit_code": 0, "stdout": "prepared", "stderr": "", "duration_ms": 42},
+        lambda *args, **kwargs: {
+            "exit_code": 0,
+            "stdout": "prepared",
+            "stderr": "",
+            "duration_ms": 42,
+            "metadata": {"lease": {"state": "active"}},
+        },
+    )
+    monkeypatch.setattr(
+        worker,
+        "run_station_command",
+        lambda *args, **kwargs: {
+            "exitCode": 0,
+            "stdout": json.dumps({
+                "sessions": {
+                    "queryOk": True,
+                    "labUserRemoteActive": False,
+                    "remoteLabUserSessionIds": [],
+                }
+            }),
+        },
     )
 
     heartbeat = {
@@ -245,6 +265,20 @@ def test_demo_lifecycle_prepares_connects_and_releases_without_onchain_reservati
     monkeypatch.setattr(worker, "resolve_lab_ids_for_host", lambda _host: ["42"])
     monkeypatch.setattr(worker, "DEMO_LAB_ID", "42")
     monkeypatch.setattr(worker, "wol_and_wait", lambda *args, **kwargs: (True, 1))
+    monkeypatch.setattr(
+        worker,
+        "run_station_command",
+        lambda *args, **kwargs: {
+            "exitCode": 0,
+            "stdout": json.dumps({
+                "sessions": {
+                    "queryOk": True,
+                    "labUserRemoteActive": False,
+                    "remoteLabUserSessionIds": [],
+                }
+            }),
+        },
+    )
     dispatches = []
 
     def fake_station_command(*args, **kwargs):

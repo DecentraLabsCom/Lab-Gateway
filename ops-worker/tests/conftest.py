@@ -152,6 +152,33 @@ def db_engine():
     )
 
     Table(
+        "reservation_session_lifecycle",
+        metadata,
+        Column("reservation_id", String(128), primary_key=True),
+        Column("lab_id", String(128), nullable=False),
+        Column("state", String(16), nullable=False, default="ACTIVE"),
+        Column("disconnected_at", DateTime),
+        Column("cycle_id", String(32)),
+        Column("updated_at", DateTime, nullable=False),
+    )
+
+    Table(
+        "reservation_session_connections",
+        metadata,
+        Column("reservation_id", String(128), primary_key=True),
+        Column("lab_id", String(128), nullable=False),
+        Column("source", String(16), primary_key=True),
+        Column("connection_id", String(128), primary_key=True),
+        Column("state", String(16), nullable=False),
+        Column("sequence", Integer, nullable=False),
+        Column("event_id", String(128), nullable=False),
+        Column("cycle_id", String(32)),
+        Column("connected_at", DateTime),
+        Column("disconnected_at", DateTime),
+        Column("updated_at", DateTime, nullable=False),
+    )
+
+    Table(
         "wake_ops_schedules",
         metadata,
         Column("host", String(128), primary_key=True),

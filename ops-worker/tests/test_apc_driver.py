@@ -434,7 +434,9 @@ def test_power_credentials_can_be_provisioned_without_exposing_token(tmp_path):
 
     assert stored == {"credentialRef": "pdu-1", "type": "snmpv2c"}
     assert store.get("pdu-1") == {"version": "v2c", "community": "private"}
-    assert store.list() == [{"credentialRef": "pdu-1", "type": "snmpv2c"}]
+    assert store.list() == [
+        {"credentialRef": "pdu-1", "type": "snmpv2c", "metadata": {"version": "v2c"}}
+    ]
     assert "private" not in (tmp_path / "power-credentials.json").read_text(encoding="utf-8")
 
 
@@ -462,7 +464,7 @@ def test_power_credentials_cli_reads_secret_from_stdin_and_prints_metadata(
     monkeypatch.setattr(power_credentials.sys, "stdin", io.StringIO(""))
     assert power_credentials.main(["list"]) == 0
     assert json.loads(capsys.readouterr().out) == [
-        {"credentialRef": "pdu-1", "type": "snmpv2c"}
+        {"credentialRef": "pdu-1", "type": "snmpv2c", "metadata": {"version": "v2c"}}
     ]
 
 
