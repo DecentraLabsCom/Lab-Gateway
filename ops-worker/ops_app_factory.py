@@ -32,6 +32,7 @@ from winrm_trust_blueprint import create_winrm_trust_blueprint
 from winrm_trust_mutation_blueprint import create_winrm_trust_mutation_blueprint
 from winrm_trust_preview_blueprint import create_winrm_trust_preview_blueprint
 from station_api_blueprint import create_station_api_blueprint
+from reservation_connection_blueprint import create_reservation_connection_blueprint
 
 
 def create_app(
@@ -473,5 +474,10 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
                 payload
             ),
             enqueue_observation=lambda payload: get("enqueue_session_observation")(payload),
+        )
+    )
+    app.register_blueprint(
+        create_reservation_connection_blueprint(
+            record_event=lambda payload: get("record_reservation_connection_event")(payload),
         )
     )

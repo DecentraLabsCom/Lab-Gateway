@@ -84,6 +84,7 @@ def execute_reservation_power_phase(
             phase,
             actor=str(payload.get("actor") or "reservation-orchestrator"),
             local_mode=host_local_mode(host),
+            execution_id=(str(payload.get("powerExecutionId") or "").strip() or None),
         )
     except (power_validation_error_type, KeyError, PermissionError) as exc:
         logger.warning("Power policy phase failed: %s", type(exc).__name__)

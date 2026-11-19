@@ -9,6 +9,7 @@ import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, Protocol, cast
+from uuid import uuid4
 
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
@@ -151,9 +152,13 @@ class StationWebSocketConnection:
                 response_bytes -= response_sizes.pop(oldest)
 
         pending_creates: dict[str, dict] = {}
+        pending_attaches: dict[str, dict] = {}
         current_session_id: Optional[str] = None
         station_ws: Optional[_StationWebSocket] = None
         station_reader_task: Optional[asyncio.Task] = None
+        connection_id = uuid4().hex
+        lifecycle_claims: Optional[dict] = None
+        connection_registered = False
 
         authorization = websocket.headers.get("authorization", "")
         claims: Optional[dict] = None
@@ -173,6 +178,57 @@ class StationWebSocketConnection:
                     # The peer may already have closed the socket.
                     pass
                 station_ws = None
+
+        async def _record_connection_event(claims_for_event: dict, event: str, sequence: int) -> bool:
+            callback = self.manager.record_reservation_connection_event
+            if callback is None:
+                return False
+            reservation_id = str(claims_for_event.get("reservationKey") or "").strip()
+            lab_id = self.manager.get_claim_lab_id(claims_for_event)
+            if not reservation_id or not lab_id:
+                return False
+            try:
+                return await callback({
+                    "reservationId": reservation_id,
+                    "labId": str(lab_id),
+                    "source": "fmu",
+                    "connectionId": connection_id,
+                    "eventId": f"{connection_id}:{sequence}",
+                    "event": event,
+                    "sequence": sequence,
+                }) is True
+            except Exception as exc:
+                self.manager.logger.warning(
+                    "FMU reservation lifecycle signal failed event=%s error=%s",
+                    event,
+                    type(exc).__name__,
+                )
+                return False
+
+        async def _register_reservation_connection(claims_for_event: dict) -> bool:
+            nonlocal lifecycle_claims, connection_registered
+            if internal or connection_registered:
+                return True
+            reservation_id = str(claims_for_event.get("reservationKey") or "").strip()
+            lab_id = self.manager.get_claim_lab_id(claims_for_event)
+            subject = str(claims_for_event.get("sub") or "").strip().lower()
+            if (
+                not reservation_id
+                or reservation_id.lower().startswith(("demo:", "local-preview-"))
+                or subject == "local-preview"
+            ):
+                # Demo, local-preview, and otherwise unreserved FMU sessions
+                # are outside the reservation disconnect lifecycle.
+                return True
+            if not lab_id:
+                return False
+            if not await _record_connection_event(claims_for_event, "connected", 1):
+                # The request may have reached Ops even when its response was lost.
+                await _record_connection_event(claims_for_event, "failed", 2)
+                raise HTTPException(status_code=503, detail="Reservation session lifecycle is unavailable")
+            lifecycle_claims = dict(claims_for_event)
+            connection_registered = True
+            return True
 
         async def _close_expired_session(session_id: str, *, request_id: Optional[str] = None):
             async with self.manager._sessions_lock:
@@ -276,6 +332,28 @@ class StationWebSocketConnection:
                                         cache_response(request_id, payload)
                                     await self.manager._send_json(websocket, send_lock, payload)
                                     continue
+                            try:
+                                await _register_reservation_connection(session_claims)
+                            except HTTPException:
+                                try:
+                                    await connection.send(json.dumps({
+                                        "type": "session.terminate",
+                                        "requestId": f"lifecycle-failed-{request_id}",
+                                        "sessionId": session_id,
+                                    }))
+                                except Exception:
+                                    pass
+                                payload = self.manager.error_payload(
+                                    code="RESERVATION_SESSION_UNAVAILABLE",
+                                    message="Reservation session is temporarily unavailable",
+                                    request_id=request_id,
+                                    retryable=True,
+                                    session_id=session_id,
+                                )
+                                if request_id:
+                                    cache_response(request_id, payload)
+                                await self.manager._send_json(websocket, send_lock, payload)
+                                continue
                             exp = self.manager.coerce_epoch_seconds(payload.get("expiresAt"))
                             if exp is None:
                                 exp = self.manager.coerce_epoch_seconds(session_claims.get("exp"))
@@ -301,6 +379,29 @@ class StationWebSocketConnection:
                         session_id = str(payload.get("sessionId") or "").strip()
                         if session_id:
                             current_session_id = session_id
+                        attach_claims = pending_attaches.pop(request_id, None)
+                        if attach_claims:
+                            try:
+                                await _register_reservation_connection(attach_claims)
+                            except HTTPException:
+                                await self.manager._send_json(
+                                    websocket,
+                                    send_lock,
+                                    self.manager.error_payload(
+                                        code="RESERVATION_SESSION_UNAVAILABLE",
+                                        message="Reservation session is temporarily unavailable",
+                                        request_id=request_id,
+                                        retryable=True,
+                                        session_id=session_id or None,
+                                    ),
+                                )
+                                try:
+                                    await websocket.close(code=1011)
+                                except Exception:
+                                    pass
+                                return
+                    elif msg_type == "error":
+                        pending_attaches.pop(request_id, None)
                     elif msg_type == "session.closed":
                         session_id = str(payload.get("sessionId") or "").strip()
                         if session_id:
@@ -730,9 +831,11 @@ class StationWebSocketConnection:
                     try:
                         await _ensure_station()
                         forward_message = self.manager.station_backend.build_internal_session_message(message=message, claims=claims)
+                        pending_attaches[request_id] = claims
                         await _send_station(json.dumps(forward_message))
                         continue
                     except HTTPException as exc:
+                        pending_attaches.pop(request_id, None)
                         response = self.manager.error_payload(
                             code="INTERNAL_ERROR",
                             message=_public_http_detail(exc, "Station realtime channel unavailable"),
@@ -818,3 +921,9 @@ class StationWebSocketConnection:
             return
         finally:
             await _close_station()
+            if connection_registered and lifecycle_claims is not None:
+                if not await _record_connection_event(lifecycle_claims, "disconnected", 2):
+                    self.manager.logger.warning(
+                        "FMU reservation disconnect signal was not recorded reservation=%s",
+                        str(lifecycle_claims.get("reservationKey") or "")[:32],
+                    )

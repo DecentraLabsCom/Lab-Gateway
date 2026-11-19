@@ -172,11 +172,55 @@ The ops worker can be invoked directly by Lab Manager or by its scheduler. The s
 OPS_RESERVATION_AUTOMATION=true
 OPS_RESERVATION_SCAN_INTERVAL=10
 OPS_RESERVATION_START_LEAD=120
+OPS_RESERVATION_DISCONNECT_GRACE_SECONDS=120
+OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS=300
 ```
 
 Reservation end operations become eligible at the scheduled end time and run
 on the next orchestrator scan (10 seconds by default); there is no additional
 post-end delay.
+
+OpenResty reports reservation-bound Guacamole WebSocket connections, and
+`fmu-runner` reports reservation-bound FMU session attachments, to the
+authenticated Ops Worker. Manual/admin Guacamole sessions, demos, and local FMU
+previews keep their separate lifecycle. When all tracked connections for a
+reservation close, the Gateway starts the disconnect grace period. A successful
+reconnect within 120 seconds cancels it and preserves the current Station or FMU
+session lifecycle without replaying energy phases. For a physical Guacamole
+session, Lab Station closes its controlled applications after the same
+120-second grace and publishes a reservation-bound result in `status-json`.
+The Gateway waits for that result, or a fresh Station status with a successful
+session query and no remote LABUSER session, before running `pre_end`,
+`release-session`, and `post_end`. If that result is missing, an intermediate
+fallback can start the end sequence after 300 seconds total from the latest
+disconnect. It requires a Station status no older than 30 seconds and
+timestamped after that disconnect, a successful session query, known
+remote-client state with no remote client connected, no active local session,
+local mode off, and no tracked active reservation connection at the atomic end
+claim. A reconnect resets the deadline. If the Station is unavailable,
+any required safety state is unknown or indicates active use,
+disconnect-triggered release waits for the scheduled reservation end, which
+remains the final fallback. Windows RDP and Linux XRDP retain a 180-second disconnected-session
+limit. FMU-only lifecycles do not need a Station close result.
+
+Station cleanup does not run energy policies. On Windows, AppControl closes the
+managed applications and the later `release-session` logs off the remaining
+disconnected RDP session. On Linux, Station terminates the Tiny Desk session
+after its orderly application-close path; the later `release-session` treats
+that already-ended session as complete. Ops Worker alone sequences the energy
+phases, using the lifecycle cycle ID to keep retries and reconnect cycles
+separate.
+
+A reconnect after the grace expires is recorded even if the release sequence
+is still running. If it arrives after Station has closed the applications and
+remains connected before Ops Worker claims `ENDING`, the worker starts a fresh `pre_start`,
+`prepare-session`, and `post_start` cycle without starting the end phases. If
+the end sequence is already running, the reconnect remains pending and that
+start cycle runs after `release-session` completes. The Prepare request and
+energy steps use distinct cycle identities so the Station can create a new
+lease generation and the power policy can execute again. The scheduled end
+still handles the final boundary and no-show reservations that never create a
+tracked connection.
 
 In Full mode it consumes the local `lab_reservations` projection, not the
 contract directly. In Lite mode it polls the authenticated

@@ -1,5 +1,63 @@
 local _M = {}
 local demo_guard = require "modules.demo_guard"
+local reservation_connection_signal = require "modules.reservation_connection_signal"
+
+local function register_reservation_tunnel(ngx, reservation_id, lab_id)
+    if ngx.var.uri ~= "/guacamole/websocket-tunnel"
+        or string.lower(tostring(ngx.var.http_upgrade or "")) ~= "websocket"
+        or not reservation_id or reservation_id == ""
+        or not lab_id or lab_id == "" then
+        return
+    end
+
+    local request_id = tostring(ngx.var.request_id or "")
+    if not request_id:match("^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$") then
+        ngx.status = ngx.HTTP_SERVICE_UNAVAILABLE
+        ngx.header["Content-Type"] = "text/plain"
+        ngx.say("Reservation session is unavailable")
+        return ngx.exit(ngx.HTTP_SERVICE_UNAVAILABLE)
+    end
+
+    local event = {
+        reservationId = reservation_id,
+        labId = lab_id,
+        source = "guacamole",
+        connectionId = request_id,
+        eventId = request_id .. ":1",
+        event = "connected",
+        sequence = 1,
+    }
+    local recorded, result, status = reservation_connection_signal.record(ngx, event)
+    if not recorded then
+        ngx.log(ngx.WARN, "Reservation tunnel registration failed: ", tostring(result))
+        reservation_connection_signal.record(ngx, {
+            reservationId = reservation_id,
+            labId = lab_id,
+            source = "guacamole",
+            connectionId = request_id,
+            eventId = request_id .. ":2",
+            event = "failed",
+            sequence = 2,
+        })
+        local response_status = status == ngx.HTTP_CONFLICT and ngx.HTTP_CONFLICT
+            or status == ngx.HTTP_FORBIDDEN and ngx.HTTP_FORBIDDEN
+            or ngx.HTTP_SERVICE_UNAVAILABLE
+        ngx.status = response_status
+        ngx.header["Content-Type"] = "text/plain"
+        ngx.say("Reservation session is unavailable")
+        return ngx.exit(response_status)
+    end
+
+    ngx.ctx.reservation_connection = {
+        reservationId = reservation_id,
+        labId = lab_id,
+        source = "guacamole",
+        connectionId = request_id,
+        eventId = request_id .. ":2",
+        event = "disconnected",
+        sequence = 2,
+    }
+end
 
 local function reject(ngx, message)
     ngx.status = ngx.HTTP_UNAUTHORIZED
@@ -118,7 +176,13 @@ function _M.run(ngx_ctx, deps)
     ngx.ctx.jwt_username = username
     ngx.ctx.jwt_jti = jti
     ngx.ctx.jwt_reservation_key = dict:get("reservation:" .. jti)
+    ngx.ctx.jwt_lab_id = dict:get("lab:" .. jti)
     ngx.ctx.jwt_exp = exp
+    register_reservation_tunnel(
+        ngx,
+        ngx.ctx.jwt_reservation_key,
+        ngx.ctx.jwt_lab_id
+    )
 end
 
 return _M

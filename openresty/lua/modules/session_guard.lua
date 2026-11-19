@@ -75,12 +75,17 @@ local function clear_cached_user_token(dict, username, user_token)
         dict:delete("exp:" .. username)
     end
     if user_token then
+        local jti = dict:get("guac_jti:" .. user_token)
         dict:delete(token_reverse_cache_key(user_token))
         dict:delete("guac_jwt_exp:" .. user_token)
         dict:delete("guac_jwt_last_seen:" .. user_token)
         dict:delete("guac_jti:" .. user_token)
         dict:delete("guac_reservation:" .. user_token)
         dict:delete("guac_demo:" .. user_token)
+        if jti and jti ~= "" then
+            dict:delete("reservation:" .. jti)
+            dict:delete("lab:" .. jti)
+        end
     end
 end
 

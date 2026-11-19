@@ -166,6 +166,8 @@ from the root `.env`: `OPS_ALLOWED_COMMANDS`, `OPS_POLL_ENABLED`,
 `OPS_RESERVATION_SCAN_INTERVAL`, `OPS_RESERVATION_START_LEAD`,
 `OPS_RESERVATION_LOOKBACK`,
 `OPS_RESERVATION_RETRY_COOLDOWN`, `OPS_RESERVATION_MAX_BATCH`,
+`OPS_RESERVATION_DISCONNECT_GRACE_SECONDS`,
+`OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS`,
 `OPS_TIMELINE_MAX_OPS`, `OPS_TIMELINE_DEFAULT_LIMIT`,
 `OPS_TIMELINE_PHASE_LOOKBACK`, `NOTIFICATION_SERVICE_ENABLED`,
 `NOTIFICATION_SERVICE_URL`, `NOTIFICATION_SERVICE_RECIPIENTS`,
@@ -176,6 +178,30 @@ from the root `.env`: `OPS_ALLOWED_COMMANDS`, `OPS_POLL_ENABLED`,
 `OPS_POWER_STATUS_CACHE_SECONDS`. Defaults are kept in `.env.example` and in
 the Compose interpolation expressions so the service documentation and the
 deployed container use the same contract.
+
+The disconnect grace defaults to 120 seconds. Reservation-bound Guacamole and
+public FMU connections are tracked; reconnecting during the grace keeps the
+current session. For physical Guacamole sessions, Lab Station reports that its
+managed applications have closed after this grace; the Gateway normally waits
+for that result, or for a fresh successful Station session query showing no
+remote LABUSER session, before running `pre_end`, `release-session`, and
+`post_end`. If that close result is missing, the Gateway has an intermediate
+fallback after 300 seconds total from the latest disconnect (configurable with
+`OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS`, up to 3600 seconds). It
+requires a Station status no older than 30 seconds and timestamped after the
+latest disconnect, a successful session query, known remote-client state with
+no connected remote client, no active local session, local mode off, and no
+tracked active reservation connection when Ops Worker claims the end. A
+reconnect resets the fallback deadline. If any safety state is
+unknown or active, the disconnect-triggered end waits for the scheduled end,
+which remains the final fallback. Windows RDP and Linux XRDP retain their
+180-second disconnected-session limit. FMU-only lifecycles do not need a
+Station close result. A reconnect after the grace expires that remains
+connected before Ops Worker claims `ENDING` starts a new `pre_start`,
+`prepare-session`, and `post_start` cycle after Lab Station has confirmed its
+local close. If end phases are already running, the reconnect stays pending
+until `release-session` completes. No-show reservations continue to use the
+scheduled end path.
 
 Power controller definitions, Gateway safety metadata and encrypted device
 credentials are provider-local files under the persistent `ops-data` mount.

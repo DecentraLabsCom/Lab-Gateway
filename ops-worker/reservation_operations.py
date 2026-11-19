@@ -70,19 +70,6 @@ def handle_reservation_start(
             success = False
             status_code = 502
 
-    if success and lab_id:
-        power_result = execute_power_phase(
-            reservation_id,
-            lab_id,
-            host,
-            "post_start",
-            payload,
-        )
-        steps.extend(power_result.get("steps", []))
-        if not power_result.get("success"):
-            success = False
-            status_code = 502
-
     if success and prepare_enabled:
         prepare_args = normalize_args(
             payload.get("prepareArgs"),
@@ -132,11 +119,15 @@ def handle_reservation_start(
             try:
                 if resolve_station_lease_context is None:
                     raise ValueError("resolver unavailable")
-                lease_context_kwargs = (
-                    {"authoritative_reservation": authoritative_reservation}
-                    if authoritative_reservation is not None
-                    else {}
-                )
+                lease_context_kwargs: Dict[str, Any] = {}
+                if authoritative_reservation is not None:
+                    lease_context_kwargs["authoritative_reservation"] = authoritative_reservation
+                prepare_attempt = str(payload.get("prepareAttempt") or "").strip()
+                if prepare_attempt:
+                    lease_context_kwargs["prepare_attempt"] = prepare_attempt
+                prepare_issued_at = payload.get("prepareIssuedAt")
+                if prepare_issued_at is not None:
+                    lease_context_kwargs["prepare_issued_at"] = prepare_issued_at
                 dispatcher_request = resolve_station_lease_context(
                     reservation_id,
                     lab_id,
@@ -160,6 +151,19 @@ def handle_reservation_start(
             if not ok:
                 success = False
                 status_code = 502
+
+    if success and lab_id:
+        power_result = execute_power_phase(
+            reservation_id,
+            lab_id,
+            host,
+            "post_start",
+            payload,
+        )
+        steps.extend(power_result.get("steps", []))
+        if not power_result.get("success"):
+            success = False
+            status_code = 502
 
     response = {
         "success": success,
@@ -234,13 +238,17 @@ def handle_reservation_end(
             try:
                 if resolve_station_lease_context is None:
                     raise ValueError("resolver unavailable")
-                lease_context_kwargs = (
-                    {"authoritative_reservation": authoritative_reservation}
-                    if authoritative_reservation is not None
-                    else {}
-                )
+                lease_context_kwargs: Dict[str, Any] = {}
+                if authoritative_reservation is not None:
+                    lease_context_kwargs["authoritative_reservation"] = authoritative_reservation
                 if reconciliation_attempt is not None:
                     lease_context_kwargs["reconciliation_attempt"] = reconciliation_attempt
+                release_attempt = str(payload.get("releaseAttempt") or "").strip()
+                if release_attempt:
+                    lease_context_kwargs["release_attempt"] = release_attempt
+                release_issued_at = payload.get("releaseIssuedAt")
+                if release_issued_at is not None:
+                    lease_context_kwargs["release_issued_at"] = release_issued_at
                 dispatcher_request = resolve_station_lease_context(
                     reservation_id,
                     lab_id,

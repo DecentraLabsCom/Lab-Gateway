@@ -53,6 +53,7 @@ class StationRealtimeWsProxyManager:
         redeem_session_ticket=None,
         issue_session_ticket=None,
         confirm_session_started=None,
+        record_reservation_connection_event=None,
         get_effective_policy=None,
         get_session_model_metadata=None,
         get_effective_policy_for_metadata=None,
@@ -70,6 +71,7 @@ class StationRealtimeWsProxyManager:
         self.redeem_session_ticket = redeem_session_ticket
         self.issue_session_ticket = issue_session_ticket
         self.confirm_session_started = confirm_session_started
+        self.record_reservation_connection_event = record_reservation_connection_event
         self.get_effective_policy = get_effective_policy
         self.get_session_model_metadata = get_session_model_metadata
         self.get_effective_policy_for_metadata = get_effective_policy_for_metadata

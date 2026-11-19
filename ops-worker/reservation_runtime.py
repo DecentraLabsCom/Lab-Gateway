@@ -43,6 +43,7 @@ def create_reservation_orchestrator_class(
                 record_operation=context.get_record_operation(),
                 logger=context.get_logger(),
                 now=context.get_now(),
+                read_station_status=(context.get_read_station_status() if context.get_read_station_status else lambda host: {}),
             )
 
     WorkerReservationOrchestrator.__name__ = "ReservationOrchestrator"

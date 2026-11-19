@@ -1,6 +1,7 @@
 local _M = {}
 local demo_guard = require "modules.demo_guard"
 local demo_station = require "modules.demo_station"
+local reservation_connection_signal = require "modules.reservation_connection_signal"
 
 local function is_websocket_tunnel(uri)
     return uri and uri:match("/guacamole/websocket%-tunnel")
@@ -29,6 +30,34 @@ function _M.run(ngx_ctx, deps)
     end
 
     local status = ngx.var.status
+
+    local reservation_event = ngx.ctx and ngx.ctx.reservation_connection
+    if reservation_event then
+        reservation_event = {
+            reservationId = reservation_event.reservationId,
+            labId = reservation_event.labId,
+            source = reservation_event.source,
+            connectionId = reservation_event.connectionId,
+            eventId = reservation_event.eventId,
+            event = tonumber(status) == 101 and "disconnected" or "failed",
+            sequence = 2,
+        }
+        local function finish_reservation_connection(premature)
+            if premature then return end
+            local recorded, result = reservation_connection_signal.record(ngx, reservation_event)
+            if not recorded then
+                ngx.log(ngx.WARN, "Reservation tunnel close signal failed: ", tostring(result))
+            end
+        end
+        if ngx.timer and ngx.timer.at then
+            local ok, err = ngx.timer.at(0, finish_reservation_connection)
+            if not ok then
+                ngx.log(ngx.WARN, "Unable to schedule reservation tunnel close signal: ", tostring(err))
+            end
+        else
+            ngx.log(ngx.WARN, "Reservation tunnel close signal timer is unavailable")
+        end
+    end
 
     -- Demo sessions are keyed by the authenticated JWT, not by the number of
     -- HTTP requests.  Release the JTI when the tunnel handshake had succeeded;

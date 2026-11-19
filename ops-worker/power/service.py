@@ -353,6 +353,7 @@ class PowerRuntime:
         actor: str,
         dry_run: bool = False,
         local_mode: bool = False,
+        execution_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         policy = self.policies.get(str(lab_id))
         if policy is None:
@@ -375,6 +376,7 @@ class PowerRuntime:
             phase,
             actor=actor,
             dry_run=dry_run,
+            execution_id=execution_id,
         )
         self.invalidate_controller_status_cache()
         if not result["success"]:

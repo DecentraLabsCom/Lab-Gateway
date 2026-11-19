@@ -24,6 +24,7 @@ class ReservationRuntimeContext:
     get_record_operation: Callable[[], Callable[..., Any]]
     get_logger: Callable[[], Any]
     get_now: Callable[[], Callable[[], datetime]]
+    get_read_station_status: Optional[Callable[[], Callable[..., Any]]] = None
 
 
 __all__ = ["ReservationRuntimeContext"]

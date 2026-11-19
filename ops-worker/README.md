@@ -267,6 +267,8 @@ off or unavailable Station from an internal worker failure.
   - Body: `{ reservationId, host?, labId?, wake?, wakeOptions?, prepare?, prepareArgs?, guardGrace? }`. When `labId` is supplied it is resolved through the provider catalog and takes precedence over `host`.
 - `POST /api/reservations/end`
   - Body: `{ reservationId, host?, labId?, release?, releaseArgs?, powerAction? }`. When `labId` is supplied it is resolved through the provider catalog and takes precedence over `host`.
+- `POST /api/reservation-connections/event`
+  - Internal-auth-only event from OpenResty or `fmu-runner`; records a reservation-bound connection, disconnection, or failed WebSocket upgrade.
 - `POST /api/demo/start`
   - Body: `{ demoId: "demo:<jti>", labId, expiresAt?, wake?, guardGrace? }`.
     Resolves the host from the configured demo binding, performs Wake-on-LAN
@@ -349,6 +351,36 @@ Reservation automation knobs:
 - `OPS_RESERVATION_START_LEAD` (default `120`)
 - `OPS_RESERVATION_LOOKBACK` (default `21600`)
 - `OPS_RESERVATION_RETRY_COOLDOWN` (default `60`)
+- `OPS_RESERVATION_DISCONNECT_GRACE_SECONDS` (default `120`, bounded to 1–300)
+- `OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS` (default `300`, maximum `3600`; measured from the latest disconnect and never earlier than the disconnect grace)
+
+OpenResty reports reservation-bound Guacamole WebSocket connections, and
+`fmu-runner` reports reservation-bound FMU session attachments, to the
+authenticated Ops Worker. Manual/admin Guacamole sessions, demos, and local FMU
+previews keep their separate lifecycle. When all tracked connections for a
+reservation close, the worker starts the grace period. A successful reconnect
+during it cancels the release without replaying energy phases. For a physical
+Guacamole session, Lab Station closes its controlled applications after the
+same 120-second grace and reports the reservation-bound result through
+`status-json`; the worker waits for that result before `pre_end`,
+`release-session`, and `post_end`, or accepts a fresh successful Station
+session query that confirms no remote LABUSER session remains. If that result is
+missing, a 300-second total disconnect fallback is available before the
+scheduled end. It requires a fresh status with a successful session query,
+no older than 30 seconds and timestamped after the latest disconnect, known
+remote-client state with no remote client connected, no active local session,
+local mode off, and no tracked active reservation connection at the atomic end
+claim. The deadline resets on a later disconnect. If a Station or
+required safety state is unavailable, unknown, or indicates active use, the
+worker waits for the scheduled end, which remains the final fallback. Windows RDP and
+Linux XRDP retain a 180-second disconnected-session safety limit. FMU-only
+lifecycles do not need a Station close result. A reconnect after grace expiry
+is recorded even while release is running. If it arrives after Station closed
+the applications and remains connected before the worker claims `ENDING`, the worker starts a
+new `pre_start`, `prepare-session`, and `post_start` cycle without starting end
+phases. If end is already running, the reconnect stays pending until
+`release-session` completes, then starts that cycle with distinct operation
+identities. The scheduled end remains in place for no-shows and final cleanup.
 
 Lab resolution configuration:
 

@@ -704,6 +704,8 @@ services:
       - OPS_RESERVATION_START_LEAD=${OPS_RESERVATION_START_LEAD:-120}
       - OPS_RESERVATION_LOOKBACK=${OPS_RESERVATION_LOOKBACK:-21600}
       - OPS_RESERVATION_RETRY_COOLDOWN=${OPS_RESERVATION_RETRY_COOLDOWN:-60}
+      - OPS_RESERVATION_DISCONNECT_GRACE_SECONDS=${OPS_RESERVATION_DISCONNECT_GRACE_SECONDS:-120}
+      - OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS=${OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS:-300}
       - OPS_RESERVATION_MAX_BATCH=${OPS_RESERVATION_MAX_BATCH:-200}
       - OPS_STATION_ALLOWED_COMMANDS=${OPS_STATION_ALLOWED_COMMANDS:-prepare-session,release-session,power,session,energy,status-json,recovery,account,service,wol,status,local-mode,identity,energy audit,fmu-executor}
       - OPS_TIMELINE_MAX_OPS=${OPS_TIMELINE_MAX_OPS:-500}
@@ -858,6 +860,9 @@ services:
       - FMU_STATION_BASE_URL=${FMU_STATION_BASE_URL:-}
       - FMU_STATION_INTERNAL_TOKEN_FILE=/run/secrets/fmu_station_internal_token
       - FMU_STATION_REQUEST_TIMEOUT=${FMU_STATION_REQUEST_TIMEOUT:-10}
+      - OPS_INTERNAL_AUTH_TOKEN_FILE=/run/secrets/ops_internal_auth_token
+      - OPS_INTERNAL_AUTH_HEADER=${OPS_INTERNAL_AUTH_HEADER:-X-Ops-Internal-Token}
+      - OPS_RESERVATION_CONNECTION_EVENT_URL=${OPS_RESERVATION_CONNECTION_EVENT_URL:-http://ops-worker:8081/api/reservation-connections/event}
       - FMU_SESSION_OBSERVATION_MAX_ATTEMPTS=${FMU_SESSION_OBSERVATION_MAX_ATTEMPTS:-3}
       - FMU_MAX_SIMULATION_PARAMETERS=${FMU_MAX_SIMULATION_PARAMETERS:-256}
       # Bound scheduled input payloads at the public facade before forwarding
@@ -901,8 +906,11 @@ services:
         condition: service_completed_successfully
       blockchain-services:
         condition: service_healthy
+      ops-worker:
+        condition: service_healthy
     secrets:
       - fmu_station_internal_token
+      - ops_internal_auth_token
       - auth_session_ticket_internal_token
       - session_observer_signing_secret
       - fmu_proxy_signing_key

@@ -153,6 +153,9 @@ _LOCAL_PREVIEW_AASX_REGISTRY: Optional[LocalPreviewAasxRegistry] = None
 FMU_STATION_BASE_URL = CONFIG.fmu_station_base_url
 FMU_STATION_INTERNAL_TOKEN = CONFIG.fmu_station_internal_token
 FMU_STATION_REQUEST_TIMEOUT: float = CONFIG.fmu_station_request_timeout
+OPS_INTERNAL_AUTH_TOKEN = CONFIG.ops_internal_auth_token
+OPS_INTERNAL_AUTH_HEADER = CONFIG.ops_internal_auth_header
+OPS_RESERVATION_CONNECTION_EVENT_URL = CONFIG.ops_reservation_connection_event_url
 FMU_SESSION_OBSERVATION_MAX_ATTEMPTS = CONFIG.fmu_session_observation_max_attempts
 PROXY_DOWNLOAD_RATE_LIMIT_PER_MINUTE = CONFIG.proxy_download_rate_limit_per_minute
 WS_CREATE_RATE_LIMIT_PER_MINUTE = CONFIG.ws_create_rate_limit_per_minute
@@ -913,6 +916,24 @@ async def _post_session_observation(
         return await client.post(url, headers=headers, json=json)
 
 
+async def _record_fmu_reservation_connection_event(payload: dict[str, Any]) -> bool:
+    if not OPS_INTERNAL_AUTH_TOKEN or not OPS_RESERVATION_CONNECTION_EVENT_URL:
+        logger.error("Reservation connection lifecycle is not configured")
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            response = await client.post(
+                OPS_RESERVATION_CONNECTION_EVENT_URL,
+                headers={OPS_INTERNAL_AUTH_HEADER: OPS_INTERNAL_AUTH_TOKEN},
+                json=payload,
+            )
+        body = response.json() if response.content else {}
+        return response.status_code == 200 and isinstance(body, dict) and body.get("success") is True
+    except Exception as exc:
+        logger.warning("FMU reservation connection event could not be recorded: %s", type(exc).__name__)
+        return False
+
+
 def _extract_response_error_text(response: httpx.Response) -> str:
     return _extract_error_text(response)
 
@@ -960,6 +981,7 @@ _runner_runtime.bind_realtime_manager(_build_realtime_manager_impl(
     redeem_session_ticket=_redeem_session_ticket,
     issue_session_ticket=_issue_session_ticket,
     confirm_session_started=_confirm_fmu_session_started,
+    record_reservation_connection_event=_record_fmu_reservation_connection_event,
     get_effective_policy=_simulation_effective_access_policy,
     get_session_model_metadata=_simulation_access_model_metadata,
     get_effective_policy_for_metadata=_simulation_effective_access_policy_for_metadata,

@@ -8,11 +8,12 @@ import hmac
 import ipaddress
 import logging
 import os
+import re
 import socket
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Mapping, Optional, Pattern, Sequence, Set, Tuple, cast
+from typing import Any, Callable, Dict, List, Mapping, Optional, Pattern, Protocol, Sequence, Set, Tuple, cast
 
 from cryptography.fernet import Fernet
 from flask import Response, jsonify, request, stream_with_context
@@ -264,6 +265,7 @@ from guacamole_provision_route import (
     check_guacamole_provisioner_auth as _check_guacamole_provisioner_auth_impl,
 )
 from reservation_runtime import create_reservation_orchestrator_class
+from reservation_connection_lifecycle import _record_connection_event
 from reservation_context import ReservationRuntimeContext
 from winrm_runtime import create_winrm_runtime
 from station_credentials import (
@@ -396,10 +398,19 @@ _execute_reservation_power_phase: Callable[
     [str, Optional[str], Mapping[str, Any], str, Dict[str, Any]],
     Dict[str, Any],
 ]
-perform_wake_step: Callable[
-    [Mapping[str, Any], str, Optional[str], Dict[str, Any]],
-    Tuple[bool, Dict[str, Any]],
-]
+class PerformWakeStep(Protocol):
+    def __call__(
+        self,
+        host: Mapping[str, Any],
+        reservation_id: str,
+        lab_id: Optional[str],
+        options: Dict[str, Any],
+        *,
+        verify_reachable: Optional[Callable[[Mapping[str, Any]], bool]] = None,
+    ) -> Tuple[bool, Dict[str, Any]]: ...
+
+
+perform_wake_step: PerformWakeStep
 normalize_mac: Callable[[Any], str]
 load_guacamole_connections: Callable[
     [], Tuple[List[Dict[str, Any]], Optional[str]]
@@ -1465,6 +1476,10 @@ def resolve_station_lease_context(
     *,
     authoritative_reservation: Optional[Mapping[str, Any]] = None,
     reconciliation_attempt: Optional[str] = None,
+    release_attempt: Optional[str] = None,
+    prepare_attempt: Optional[str] = None,
+    release_issued_at: Optional[Any] = None,
+    prepare_issued_at: Optional[Any] = None,
 ) -> Dict[str, Any]:
     management_value = host.get("management")
     if isinstance(management_value, Mapping):
@@ -1480,6 +1495,14 @@ def resolve_station_lease_context(
         resolver_kwargs["authoritative_reservation"] = authoritative_reservation
     if reconciliation_attempt is not None:
         resolver_kwargs["reconciliation_attempt"] = reconciliation_attempt
+    if release_attempt is not None:
+        resolver_kwargs["release_attempt"] = release_attempt
+    if prepare_attempt is not None:
+        resolver_kwargs["prepare_attempt"] = prepare_attempt
+    if release_issued_at is not None:
+        resolver_kwargs["release_issued_at"] = release_issued_at
+    if prepare_issued_at is not None:
+        resolver_kwargs["prepare_issued_at"] = prepare_issued_at
     return resolve_station_dispatch_request(
         engine=DB_ENGINE,
         sql_text=text,
@@ -2078,6 +2101,7 @@ _RESERVATION_RUNTIME_CONTEXT = ReservationRuntimeContext(
     ),
     get_logger=lambda: logging,
     get_now=lambda: lambda: datetime.now(timezone.utc),
+    get_read_station_status=lambda: lambda host: run_station_command(host, "status-json", []),
 )
 ReservationOrchestrator = create_reservation_orchestrator_class(
     _RESERVATION_RUNTIME_CONTEXT
@@ -2182,6 +2206,20 @@ _HOST_RELOAD_RUNTIME = create_host_reload_runtime(_HOST_RELOAD_CONTEXT)
 reload_hosts = _HOST_RELOAD_RUNTIME.reload_hosts
 
 
+def _record_reservation_connection_event(payload: Any):
+    try:
+        grace_seconds = int(os.getenv("OPS_RESERVATION_DISCONNECT_GRACE_SECONDS", "120"))
+    except (TypeError, ValueError):
+        grace_seconds = 120
+    return _record_connection_event(
+        payload,
+        db_engine=DB_ENGINE,
+        sql_text=text,
+        now=lambda: datetime.now(timezone.utc),
+        grace_seconds=grace_seconds,
+    )
+
+
 _WORKER_BLUEPRINT_PROVIDERS = {
     "ALLOWED_WINRM_COMMANDS": ALLOWED_WINRM_COMMANDS,
     "DB_ENGINE": DB_ENGINE,
@@ -2262,6 +2300,7 @@ _WORKER_BLUEPRINT_PROVIDERS = {
     "provision_guacamole_temporary_user": provision_guacamole_temporary_user,
     "read_fmu_runner_health": read_fmu_runner_health,
     "reload_hosts": reload_hosts,
+    "record_reservation_connection_event": _record_reservation_connection_event,
     "remove_remote_file": remove_remote_file,
     "require_guacamole_provisioner_auth": require_guacamole_provisioner_auth,
     "resolve_guacamole_connection": resolve_guacamole_connection,

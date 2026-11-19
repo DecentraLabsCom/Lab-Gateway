@@ -200,7 +200,8 @@ elseif resource_type ~= "fmu" and resource_type ~= "lab" then
     return local_fail(400, "Unsupported access resource")
 end
 if resource_type == "lab"
-    and (type(claims.reservationKey) ~= "string" or claims.reservationKey == "") then
+    and (type(claims.reservationKey) ~= "string" or claims.reservationKey == ""
+        or claims.labId == nil or tostring(claims.labId) == "") then
     return local_fail(401, "Invalid access credential reservation")
 end
 
@@ -237,7 +238,8 @@ local mapping_state, mapping_error = access_session_mapping.persist(ngx, cache, 
     { key = "username:" .. jti, value = username_lower, ttl = remaining_lifetime },
     { key = "exp:" .. username_lower, value = exp, ttl = remaining_lifetime },
     { key = "guac_enforcement_exp:" .. username_lower, value = exp, ttl = enforcement_lifetime },
-    { key = "reservation:" .. jti, value = claims.reservationKey, ttl = remaining_lifetime }
+    { key = "reservation:" .. jti, value = claims.reservationKey, ttl = remaining_lifetime },
+    { key = "lab:" .. jti, value = tostring(claims.labId), ttl = remaining_lifetime }
 })
 if not mapping_state then
     ngx.log(ngx.ERR, "Guacamole access mapping failed: " .. tostring(mapping_error))

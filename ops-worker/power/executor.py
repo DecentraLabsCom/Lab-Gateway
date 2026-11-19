@@ -57,6 +57,7 @@ class PowerPolicyExecutor:
         *,
         actor: str,
         dry_run: bool = False,
+        execution_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         reservation_id = self._required_identifier(reservation_id, "reservationId", 128)
         actor = self._required_identifier(actor, "actor", 128)
@@ -98,6 +99,7 @@ class PowerPolicyExecutor:
                 phase,
                 policy.policy_id or policy.name,
                 step,
+                execution_id=execution_id,
             )
             with self._lock:
                 existing = self._completed.get(key)
@@ -248,9 +250,13 @@ class PowerPolicyExecutor:
         phase: str,
         policy_id: str,
         step: PowerPolicyStep,
+        *,
+        execution_id: Optional[str] = None,
     ) -> str:
         step_id = step.step_id or str(step.sequence)
         raw_key = f"{reservation_id}:{lab_id}:{phase}:{policy_id}:{step_id}:{step.action}"
+        if execution_id:
+            raw_key += f":{execution_id}"
         if len(raw_key) <= 255:
             return raw_key
         digest = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()

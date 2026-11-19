@@ -10,6 +10,8 @@ from uuid import NAMESPACE_URL, uuid5
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _RECONCILIATION_ATTEMPT = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_PREPARE_ATTEMPT = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_RELEASE_ATTEMPT = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _TERMINAL_RESERVATION_STATES = {"CANCELLED", "CANCELED", "COMPLETED", "ENDED", "REVOKED"}
 
 
@@ -42,8 +44,11 @@ def build_station_dispatch_request(
     command: str,
     reservation: Mapping[str, Any],
     prepare_generation: Optional[int] = None,
-    release_issued_at: Optional[datetime] = None,
+    release_issued_at: Optional[Any] = None,
     reconciliation_attempt: Optional[str] = None,
+    release_attempt: Optional[str] = None,
+    prepare_attempt: Optional[str] = None,
+    prepare_issued_at: Optional[Any] = None,
     start_lead_seconds: int = 120,
     timeout_seconds: Optional[int] = None,
 ) -> Dict[str, Any]:
@@ -64,13 +69,22 @@ def build_station_dispatch_request(
         if status not in {"CONFIRMED", "ACTIVE"}:
             raise StationLeaseContextError("reservation is not active or confirmed")
         lead = max(0, min(int(start_lead_seconds), 300))
-        issued_at = not_before - timedelta(seconds=lead)
+        if prepare_issued_at is not None:
+            issued_at = _utc(prepare_issued_at, "prepare authorization time")
+        elif prepare_attempt is not None:
+            issued_at = datetime.now(timezone.utc)
+        else:
+            issued_at = not_before - timedelta(seconds=lead)
         generation = 0
     else:
         if type(prepare_generation) is not int or prepare_generation < 1:
             raise StationLeaseContextError("a successful prepare generation is unavailable")
-        issued_at = release_issued_at or expires_at
-        issued_at = _utc(issued_at, "release authorization time")
+        if release_issued_at is not None:
+            issued_at = _utc(release_issued_at, "release authorization time")
+        elif release_attempt is not None:
+            issued_at = datetime.now(timezone.utc)
+        else:
+            issued_at = _utc(expires_at, "release authorization time")
         generation = prepare_generation
 
     execute_before = issued_at + timedelta(minutes=5)
@@ -80,6 +94,14 @@ def build_station_dispatch_request(
         if command != "release-session" or not _RECONCILIATION_ATTEMPT.fullmatch(str(reconciliation_attempt)):
             raise StationLeaseContextError("Release reconciliation attempt is invalid")
         operation_key += f":reconcile:{reconciliation_attempt}"
+    if release_attempt is not None:
+        if command != "release-session" or not _RELEASE_ATTEMPT.fullmatch(str(release_attempt)):
+            raise StationLeaseContextError("Release attempt identity is invalid")
+        operation_key += f":attempt:{release_attempt}"
+    if prepare_attempt is not None:
+        if command != "prepare-session" or not _PREPARE_ATTEMPT.fullmatch(str(prepare_attempt)):
+            raise StationLeaseContextError("Prepare attempt identity is invalid")
+        operation_key += f":attempt:{prepare_attempt}"
     request_id = str(uuid5(NAMESPACE_URL, operation_key))
     lease = {
         "kind": "reservation",
@@ -190,6 +212,10 @@ def resolve_station_dispatch_request(
     start_lead_seconds: int = 120,
     authoritative_reservation: Optional[Mapping[str, Any]] = None,
     reconciliation_attempt: Optional[str] = None,
+    release_attempt: Optional[str] = None,
+    prepare_attempt: Optional[str] = None,
+    release_issued_at: Optional[Any] = None,
+    prepare_issued_at: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Resolve a v2 envelope from trusted reservation/token data and recorded prepare."""
     if not engine:
@@ -197,6 +223,8 @@ def resolve_station_dispatch_request(
     try:
         with engine.connect() as conn:
             if reservation_id.startswith("demo:"):
+                if release_attempt is not None:
+                    raise StationLeaseContextError("demo leases cannot use reservation disconnect release attempts")
                 if authoritative_reservation is not None:
                     raise StationLeaseContextError("demo leases cannot use reservation projection data")
                 jti = reservation_id.removeprefix("demo:")
@@ -268,9 +296,11 @@ def resolve_station_dispatch_request(
                     raise StationLeaseContextError("reservation does not exist in Gateway records")
             generation = _prepared_generation(conn, sql_text, reservation_id, lab_id) if command == "release-session" else None
             state = str(row.get("status") or "").upper()
-            release_issued_at = row.get("updated_at") if command == "release-session" and state in _TERMINAL_RESERVATION_STATES else None
+            release_issue = release_issued_at
+            if release_issue is None and command == "release-session" and state in _TERMINAL_RESERVATION_STATES:
+                release_issue = row.get("updated_at")
             if reconciliation_attempt is not None:
-                release_issued_at = datetime.now(timezone.utc)
+                release_issue = datetime.now(timezone.utc)
             return build_station_dispatch_request(
                 reservation_id=reservation_id,
                 lab_id=lab_id,
@@ -278,8 +308,11 @@ def resolve_station_dispatch_request(
                 command=command,
                 reservation=row,
                 prepare_generation=generation,
-                release_issued_at=release_issued_at,
+                release_issued_at=release_issue,
                 reconciliation_attempt=reconciliation_attempt,
+                release_attempt=release_attempt,
+                prepare_attempt=prepare_attempt,
+                prepare_issued_at=prepare_issued_at,
                 start_lead_seconds=start_lead_seconds,
             )
     except StationLeaseContextError:

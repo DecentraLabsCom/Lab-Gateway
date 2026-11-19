@@ -24,12 +24,17 @@ local function clear_mappings(dict, username, token)
         dict:delete("token:" .. username)
     end
     if token and token ~= "" then
+        local jti = dict:get("guac_jti:" .. token)
         dict:delete("guac_token:" .. token)
         dict:delete("guac_jwt_exp:" .. token)
         dict:delete("guac_jwt_last_seen:" .. token)
         dict:delete("guac_jti:" .. token)
         dict:delete("guac_reservation:" .. token)
         dict:delete("guac_demo:" .. token)
+        if jti and jti ~= "" then
+            dict:delete("reservation:" .. jti)
+            dict:delete("lab:" .. jti)
+        end
     end
 end
 

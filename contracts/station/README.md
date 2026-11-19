@@ -44,6 +44,12 @@ Windows RDP sessions. Gateway uses those IDs only after checking the mapped-lab
 reservation projection. The Station rechecks the exact snapshot before each
 handoff stage; an unreported or changed session remains protected.
 
+Station Contract v3 also exposes `sessions.remoteClientConnected` and
+`sessions.remoteClientStateKnown`. These describe whether a remote client is
+currently attached to the physical-lab access service, independently of a
+disconnected desktop session. An unavailable session or connection inventory
+must be treated as unknown.
+
 Both agents expire local mode only from a valid explicit expiry or a recognized
 legacy timestamp. A malformed or marker-only flag stays active until an
 operator clears it; file modification time is not treated as proof of expiry.

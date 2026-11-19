@@ -90,6 +90,9 @@ class FmuRunnerConfig:
     fmu_station_base_url: str
     fmu_station_internal_token: str
     fmu_station_request_timeout: float
+    ops_internal_auth_token: str
+    ops_internal_auth_header: str
+    ops_reservation_connection_event_url: str
     fmu_session_observation_max_attempts: int
     proxy_download_rate_limit_per_minute: int
     ws_create_rate_limit_per_minute: int
@@ -149,6 +152,15 @@ def load_config(environ: Mapping[str, str] | None = None) -> FmuRunnerConfig:
             "FMU_STATION_INTERNAL_TOKEN", environ=values,
         ).strip(),
         fmu_station_request_timeout=float(values.get("FMU_STATION_REQUEST_TIMEOUT", "10")),
+        ops_internal_auth_token=_env_or_secret_file("OPS_INTERNAL_AUTH_TOKEN", environ=values).strip(),
+        ops_internal_auth_header=values.get(
+            "OPS_INTERNAL_AUTH_HEADER",
+            "X-Ops-Internal-Token",
+        ).strip() or "X-Ops-Internal-Token",
+        ops_reservation_connection_event_url=values.get(
+            "OPS_RESERVATION_CONNECTION_EVENT_URL",
+            "http://ops-worker:8081/api/reservation-connections/event",
+        ).strip(),
         fmu_session_observation_max_attempts=max(
             1, int(values.get("FMU_SESSION_OBSERVATION_MAX_ATTEMPTS", "3")),
         ),
