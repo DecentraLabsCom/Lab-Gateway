@@ -109,12 +109,6 @@ body {
     color: var(--success);
     box-shadow: none;
 }
-#wakeOpsModal #wakeOpsManualWake:hover {
-    background: transparent;
-    border-color: #a7ffdf;
-    color: #a7ffdf;
-}
-
 .lm-tabs {
     margin-bottom: 24px;
 }
@@ -631,10 +625,12 @@ body {
     color: #ff8b8b;
     box-shadow: none;
 }
+#wakeOpsModal #wakeOpsManualWake:hover,
 #shutdownOpsModal #shutdownOpsManualShutdown:hover {
+    transform: translateY(-2px);
     background: transparent;
-    border-color: #ffd0d0;
-    color: #ffd0d0;
+    border-color: #a7ffdf;
+    color: #a7ffdf;
     box-shadow: none;
 }
 
