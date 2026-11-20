@@ -81,7 +81,8 @@ ADMIN_ACCESS_TOKEN=change_to_random_token
 # Protect lab manager and ops endpoints
 LAB_MANAGER_TOKEN=change_to_random_token
 
-# Comma-separated origins allowed for CORS (your Marketplace URL)
+# Exact browser origins allowed by Gateway/OpenResty; when listing multiple,
+# include every required Marketplace origin. Empty uses MARKETPLACE_URL + Gateway origin.
 CORS_ALLOWED_ORIGINS=https://www.decentralabs-marketplace.app
 
 # Required by Compose interpolation; use the public FMU origin when FMU is enabled

@@ -196,10 +196,23 @@ INSTITUTIONAL_WALLET_PASSWORD= # dejar vacío — se rellena automáticamente tr
 ALLOWED_ORIGINS=https://tu-dominio.com
 ```
 
-Reinicia el contenedor de blockchain-services para aplicar los cambios:
+El asistente también pregunta por los orígenes CORS de navegador de
+Gateway/OpenResty. Déjalo vacío para permitir `MARKETPLACE_URL` y el propio
+origen del Gateway. Si defines una lista separada por comas, incluye todos los
+dominios Marketplace que deban acceder al Gateway; esta variable es distinta de
+`ALLOWED_ORIGINS` del backend.
+
+Reinicia `blockchain-services` para aplicar la configuración del backend:
 
 ```bash
 docker compose restart blockchain-services
+```
+
+Si después modificas `CORS_ALLOWED_ORIGINS` en el `.env` raíz, recrea OpenResty
+para aplicar el cambio:
+
+```bash
+docker compose up -d --no-deps --force-recreate openresty
 ```
 
 ## Paso 8 - Configurar una conexion de laboratorio en Guacamole

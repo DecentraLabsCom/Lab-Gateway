@@ -1579,6 +1579,13 @@ if [ -n "$sepolia_rpc" ]; then
     update_env_var "$BLOCKCHAIN_ENV_FILE" "ETHEREUM_SEPOLIA_RPC_URL" "$sepolia_rpc"
 fi
 
+cors_allowed_origins_default=$(get_env_default "CORS_ALLOWED_ORIGINS" "$ROOT_ENV_FILE")
+read -p "OpenResty browser CORS origins (comma-separated; blank uses MARKETPLACE_URL; when set, list all required origins) [${cors_allowed_origins_default}]: " cors_allowed_origins
+cors_allowed_origins=${cors_allowed_origins:-$cors_allowed_origins_default}
+if [ -n "$cors_allowed_origins" ]; then
+    update_env_var "$ROOT_ENV_FILE" "CORS_ALLOWED_ORIGINS" "$cors_allowed_origins"
+fi
+
 allowed_origins_default=$(get_env_default "ALLOWED_ORIGINS" "$BLOCKCHAIN_ENV_FILE")
 read -p "Allowed origins for CORS [${allowed_origins_default:-https://www.decentralabs-marketplace.app}]: " allowed_origins
 allowed_origins=${allowed_origins:-${allowed_origins_default:-https://www.decentralabs-marketplace.app}}

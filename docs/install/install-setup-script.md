@@ -193,10 +193,22 @@ INSTITUTIONAL_WALLET_PASSWORD= # leave empty — auto-filled after wallet creati
 ALLOWED_ORIGINS=https://your-domain.com
 ```
 
-Restart the blockchain-services container to apply:
+The setup script also asks for Gateway/OpenResty browser CORS origins. Leave
+that value empty to allow `MARKETPLACE_URL` and the Gateway's own origin. If you
+set a comma-separated list, include every Marketplace domain that should access
+the Gateway; this setting is separate from the backend `ALLOWED_ORIGINS` above.
+
+Restart `blockchain-services` to apply the backend settings above:
 
 ```bash
 docker compose restart blockchain-services
+```
+
+If you edit `CORS_ALLOWED_ORIGINS` in the root `.env` later, recreate OpenResty
+to apply it:
+
+```bash
+docker compose up -d --no-deps --force-recreate openresty
 ```
 
 ## Step 8 - Configure a lab connection in Guacamole

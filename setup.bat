@@ -1063,6 +1063,13 @@ if not "!sepolia_rpc!"=="" (
     call :UpdateEnv "%BLOCKCHAIN_ENV_FILE%" "ETHEREUM_SEPOLIA_RPC_URL" "!sepolia_rpc!"
 )
 
+call :ReadEnvValue "%ROOT_ENV_FILE%" "CORS_ALLOWED_ORIGINS" cors_allowed_origins_default
+set /p "cors_allowed_origins=OpenResty browser CORS origins (comma-separated; blank uses MARKETPLACE_URL; when set, list all required origins) [!cors_allowed_origins_default!]: "
+if "!cors_allowed_origins!"=="" set "cors_allowed_origins=!cors_allowed_origins_default!"
+if not "!cors_allowed_origins!"=="" (
+    call :UpdateEnv "%ROOT_ENV_FILE%" "CORS_ALLOWED_ORIGINS" "!cors_allowed_origins!"
+)
+
 call :ReadEnvValue "%BLOCKCHAIN_ENV_FILE%" "ALLOWED_ORIGINS" origins_default
 if not defined origins_default set "origins_default=https://www.decentralabs-marketplace.app"
 set /p "allowed_origins=Allowed origins for CORS [!origins_default!]: "
