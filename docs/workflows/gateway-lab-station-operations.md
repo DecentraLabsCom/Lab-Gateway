@@ -440,7 +440,7 @@ The start path is normally:
    matrix](lab-station-session-policy-matrix.md).
 4. Record every attempt in `reservation_operations` and move the local projection to `ACTIVE` only after success.
 
-The end path normally runs the reservation's matching `release-session` without rebooting and can request a shutdown or hibernation action. A matching lease-bound Release closes that reservation's managed remote LABUSER/Tiny Desk session, then restarts an installed FMU Executor and clears its temporary state. Administrative Release is rejected while a lease or any remote LABUSER session is active; without a lease the Station cannot prove whether that remote session is reserved, so it remains protected. The local console session remains, but this service-wide FMU cleanup can interrupt FMU work launched there. Incomplete FMU cleanup fails Release, leaves a reservation lease `recovery-required`, and prevents a requested reboot. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
+The end path normally runs the reservation's matching `release-session` without rebooting and can request a shutdown or hibernation action. On a Dedicated station, matching reservation Release logs off active local non-LABUSER console sessions and the managed remote LABUSER/Tiny Desk session, then restarts an installed FMU Executor and clears its temporary state. Administrative Release logs off the local non-LABUSER console sessions when allowed by the existing lease and remote-session protections. A local LABUSER console session remains signed in. Hybrid Release preserves local console sessions. Administrative Release is rejected while a lease or any remote LABUSER session is active; without a lease the Station cannot prove whether that remote session is reserved, so it remains protected. Incomplete session or FMU cleanup fails Release, leaves a reservation lease `recovery-required`, and prevents a requested reboot. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
 
 Each Station checks the lease's `expiresAt` locally as a fail-safe. Linux
 checks from `labstationd`; Windows checks from the setup-managed
@@ -453,10 +453,10 @@ lease-bound Release itself failed into `recovery-required`; a failed Prepare
 does not trigger Release while its reservation is still active. The agent never
 reuses an uncertain operation ID. Before each attempt it requires a valid
 lease identity, local mode off, and a known session inventory. Hybrid defers
-while any local user session is active; either profile defers for an active
-non-LABUSER session. Dedicated may proceed past a local LABUSER session because
-remote reservation service has priority. The remaining remote LABUSER session
-is the cleanup target. Unknown or corrupted lease identity remains blocked for
+while any local user session is active; both profiles defer for remote
+non-LABUSER sessions. Dedicated Release closes active local non-LABUSER console
+sessions and the managed remote LABUSER session. A local LABUSER session may
+remain signed in. Unknown or corrupted lease identity remains blocked for
 operator repair.
 
 Dispatcher v2 uses the same durable operation-status protocol over SSH and
@@ -472,10 +472,12 @@ Station's local reconciler has recovered the lease, while each Station still
 protects its own session state when Gateway connectivity is unavailable.
 
 Lab Manager's operator `Prepare`/`Release` controls follow the same physical
-profile rules. `Release` closes only the managed remote lab-user session and
-application; it does not sign out the local console user. The operator path is
-available only when no reservation or demo lease is active. `Enable Local` is
-hybrid-only; clearing an already active flag remains possible for cleanup.
+profile rules. Dedicated `Release` closes active local non-LABUSER console
+sessions and the managed remote lab-user session; local LABUSER remains signed
+in. Hybrid `Release` preserves the local console user. The operator path is
+available only when no reservation or demo lease is active and no remote
+LABUSER session is active. `Enable Local` is hybrid-only; clearing an already
+active flag remains possible for cleanup.
 Before manual `Prepare`, the Gateway requires a fresh session inventory and
 authoritative proof that a remote `LABUSER` session has no active/imminent
 reservation on any mapped lab. If reservation state is unknown or a mapped-lab

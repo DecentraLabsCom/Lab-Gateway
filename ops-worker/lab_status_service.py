@@ -187,13 +187,47 @@ def session_projection(heartbeat: Mapping[str, Any]) -> Dict[str, Any]:
         return {"known": False, "active": False, "reason": "session_status_unavailable"}
 
     raw_active = sessions.get("active")
+    ignored_dedicated_local_non_labuser = False
     if isinstance(raw_active, list):
-        active = any(
-            isinstance(entry, Mapping)
-            and entry.get("active") is not False
-            and entry.get("kind") not in {"management", "service"}
-            for entry in raw_active
+        profile = str(
+            heartbeat.get("profile")
+            or _nested_status(heartbeat).get("profile")
+            or _nested_status(heartbeat).get("stationProfile")
+            or ""
+        ).strip().casefold()
+        if profile == "server":
+            profile = "dedicated"
+        platform = heartbeat.get("platform")
+        if not isinstance(platform, Mapping):
+            platform = _nested_status(heartbeat).get("platform")
+        platform_os = (
+            str(platform.get("os") or "").strip().casefold()
+            if isinstance(platform, Mapping)
+            else ""
         )
+        ignore_dedicated_local_non_labuser = (
+            profile == "dedicated" and platform_os in {"linux", "windows"}
+        )
+
+        def is_active_session(entry: Any) -> bool:
+            nonlocal ignored_dedicated_local_non_labuser
+            if not isinstance(entry, Mapping):
+                return False
+            if entry.get("active") is False or entry.get("kind") in {"management", "service"}:
+                return False
+            if not ignore_dedicated_local_non_labuser or entry.get("kind") != "local":
+                return True
+            user = entry.get("user")
+            if not isinstance(user, str) or not user.strip():
+                return True
+            account = user.strip().replace("/", "\\").rsplit("\\", 1)[-1]
+            account = account.split("@", 1)[0].strip()
+            if not account or account.casefold() == "labuser":
+                return True
+            ignored_dedicated_local_non_labuser = True
+            return False
+
+        active = any(is_active_session(entry) for entry in raw_active)
     elif isinstance(raw_active, bool):
         active = raw_active
     else:
@@ -212,7 +246,32 @@ def session_projection(heartbeat: Mapping[str, Any]) -> Dict[str, Any]:
         "labUserActive": lab_user_active,
         "remoteSessionActive": remote_active,
         "reason": reason,
+        "ignoredDedicatedLocalNonLabuser": ignored_dedicated_local_non_labuser,
     }
+
+
+def _ready_except_legacy_dedicated_local_session(
+    heartbeat: Mapping[str, Any],
+    session: Mapping[str, Any],
+) -> bool:
+    """Ignore the old Linux readiness issue when it is the only blocker."""
+    if not session.get("ignoredDedicatedLocalNonLabuser"):
+        return False
+    source = heartbeat.get("station")
+    if not isinstance(source, Mapping):
+        source = heartbeat
+    readiness = source.get("readiness")
+    if not isinstance(readiness, Mapping):
+        readiness = _nested_status(source).get("readiness")
+    capability = readiness.get("physicalLab") if isinstance(readiness, Mapping) else None
+    issues = capability.get("issues") if isinstance(capability, Mapping) else None
+    if not isinstance(issues, list) or not issues:
+        return False
+    return all(
+        isinstance(issue, str)
+        and issue.strip().casefold() == "local user session is active on a dedicated station"
+        for issue in issues
+    )
 
 
 def _base_status(
@@ -532,12 +591,15 @@ def project_lab_status(
         })
         return result
 
+    physical_ready = _capability_ready(heartbeat, "physicalLab")
+    if not physical_ready and _ready_except_legacy_dedicated_local_session(heartbeat, session):
+        physical_ready = True
     physical = _fresh_status(
         lab_id,
         observed,
         age_seconds,
         current,
-        ready=_capability_ready(heartbeat, "physicalLab"),
+        ready=physical_ready,
     )
     fmu = _fresh_status(
         lab_id,

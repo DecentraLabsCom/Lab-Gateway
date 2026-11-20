@@ -323,9 +323,12 @@ hybrid station, Prepare stops when local mode is active or unknown. When local
 mode is off, the Station's session-eviction policy controls whether each warned
 local session must confirm before it can be closed; if eviction is disabled,
 preparation fails safely. A matching reservation `Release` closes that lease's
-managed remote lab-user session and application without rebooting. An
-administrative `Release` is rejected while a reservation or demo lease or any
-remote LABUSER session is active.
+managed remote lab-user session and application without rebooting. On Dedicated
+stations it also logs off active local console sessions whose account is not
+LABUSER. The same local handoff applies to administrative `Release`, which is
+rejected while a reservation or demo lease or any remote LABUSER session is
+active. Local LABUSER sessions remain signed in; Hybrid Release preserves local
+console sessions.
 
 `Enable Local` is available only for `hybrid`, after confirming session
 inventory and that no remote lab-user session or reservation is active. It
