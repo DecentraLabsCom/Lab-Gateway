@@ -392,12 +392,12 @@
                                 : 'Prepare physical lab session';
             const profileActionsMarkup = profile === 'fmu-only'
                 ? '<button class="mini-btn primary" data-action="prepare" title="Physical session actions are unavailable for the FMU-only profile" disabled>Prepare</button>'
-                    + '<button class="mini-btn" data-action="release" title="Physical session actions are unavailable for the FMU-only profile" disabled>Release</button>'
+                    + '<button class="mini-btn warning" data-action="release" title="Physical session actions are unavailable for the FMU-only profile" disabled>Release</button>'
                 : hasPhysicalProfile
                     ? `<button class="mini-btn primary" data-action="prepare" title="${escapeHtml(prepareTitle)}"${prepareBlocked ? ' disabled' : ''}>Prepare</button>`
-                        + '<button class="mini-btn" data-action="release" title="Release the managed physical lab session">Release</button>'
+                        + '<button class="mini-btn warning" data-action="release" title="Release the managed physical lab session">Release</button>'
                     : '<button class="mini-btn primary" data-action="prepare" title="Refresh Station status to verify its profile" disabled>Prepare</button>'
-                        + '<button class="mini-btn" data-action="release" title="Refresh Station status to verify its profile" disabled>Release</button>';
+                        + '<button class="mini-btn warning" data-action="release" title="Refresh Station status to verify its profile" disabled>Release</button>';
             const localModeUnavailableTitle = ['dedicated', 'fmu-only'].includes(profile)
                 ? 'Local mode is only available on hybrid stations'
                 : 'Refresh Station status to verify its profile';
@@ -506,7 +506,7 @@
             </div>
             <div class="host-actions">
                 <button class="mini-btn" data-action="poll" title="Check station status">Heartbeat</button>
-                <button class="mini-btn" data-action="wake-ops" title="Configure Wake Ops and wake station">Wake Ops</button>
+                <button class="mini-btn success" data-action="wake-ops" title="Configure Wake Ops and wake station">Wake Ops</button>
                 ${profileActionsMarkup}
                 <button class="mini-btn danger" data-action="shutdown-ops" title="Configure station shutdown actions">Shutdown Ops</button>
                 ${localActionMarkup}

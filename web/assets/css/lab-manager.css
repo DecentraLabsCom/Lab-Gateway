@@ -1696,6 +1696,8 @@ body {
 }
 .mini-btn.primary { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: var(--bg); border: none; }
 .mini-btn.danger { border-color: #ff6b6b; color: #ffb3b3; }
+.mini-btn.success { border-color: var(--success); color: #a6f5dc; }
+.mini-btn.warning { background: var(--warning); color: #1b1607; border: none; }
 .mini-btn:disabled { opacity: 0.55; cursor: wait; }
 .pill.good { border-color: var(--success); color: var(--success); }
 .pill.warn { border-color: var(--warning); color: var(--warning); }
