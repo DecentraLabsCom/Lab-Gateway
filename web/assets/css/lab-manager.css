@@ -629,9 +629,15 @@ body {
 #shutdownOpsModal #shutdownOpsManualShutdown:hover {
     transform: translateY(-2px);
     background: transparent;
+    box-shadow: none;
+}
+#wakeOpsModal #wakeOpsManualWake:hover {
     border-color: #a7ffdf;
     color: #a7ffdf;
-    box-shadow: none;
+}
+#shutdownOpsModal #shutdownOpsManualShutdown:hover {
+    border-color: #ffd0d0;
+    color: #ffd0d0;
 }
 
 .danger-btn:focus-visible,
