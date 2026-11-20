@@ -156,7 +156,7 @@ JWT `iss`/`sub` must use that same canonical value.
 | Public lab-status projection | `LAB_STATUS_HEARTBEAT_MAX_AGE_SECONDS`, `LAB_STATUS_TARGET_PROBE_TIMEOUT_SECONDS`, `LAB_STATUS_TARGET_PROBE_CACHE_SECONDS`, `FMU_STATUS_*` | The public projection prefers a fresh Lab Station heartbeat. When that is missing or stale, Ops Worker may open the Guacamole catalog's configured RDP/VNC/SSH port with the bounded timeout and cache. A successful TCP connection is `reachable`, not `ready`; target host and port are never returned publicly. FMU resources use the private `fmu-runner` health and capacity signal in both `local` and `station` mode. In station mode that signal verifies the Lab Station executor through its internal health and protected capacity endpoints; FMU status does not depend on Guacamole, WoL or the physical-lab heartbeat. `FMU_STATUS_STATION_HOST` and `FMU_STATUS_STATION_BASE_URL` remain for Station enrollment and management configuration. |
 | Guacamole | `GUAC_ADMIN_*`, `API_SESSION_TIMEOUT`, `JWT_GUAC_IDLE_TIMEOUT_SECONDS`, `BAN_*` | Manual administrator login is an operations path, not the end-user hand-off. Keep anti-brute-force controls enabled. |
 | FMU | `FMU_RUNNER_ENABLED`, `FMU_BACKEND_MODE`, `FMU_LOCAL_DEV_MODE`, `FMU_EXECUTOR_IMAGE`, `FMU_LOCAL_EXECUTOR_BASE_URL`, `FMU_JWT_AUDIENCE`, `AUTH_JWKS_URL`, `FMU_STATION_BASE_URL`, `FMU_STATION_INTERNAL_TOKEN`, `FMU_STATUS_STATION_HOST`, `FMU_GATEWAY_ID`, `FMU_MAX_BATCH_CASES`, `FMU_MAX_SCENARIOS_PER_RESERVATION_PER_DAY`, `FMU_MAX_SIMULATION_STEPS`, `FMU_MAX_INPUT_UPDATES_PER_WINDOW`, `FMU_MAX_INPUT_UPDATES_PER_DAY`, `FMU_MAX_INPUT_UPDATE_BYTES_PER_DAY`, `FMU_MAX_OUTPUT_SUBSCRIPTION_HZ`, `FMU_MAX_INPUT_SCHEDULE_EVENTS`, `FMU_MAX_INPUT_SCHEDULE_BYTES`, `FMU_HISTORY_RETENTION_DAYS`, `FMU_MAX_HISTORY_RECORDS`, `FMU_MAX_RESULT_BYTES`, `FMU_MAX_HISTORY_BYTES` | The audience must be the exact public FMU `accessURI`. `FMU_GATEWAY_ID` uses the same host-plus-non-default-port identity as observer credentials. `FMU_BACKEND_MODE` selects the local shared Executor image or Lab Station execution; Full/Lite selects the JWKS source. Daily scenario and input-update quotas are unlimited by default in both Station and local Executor runtimes. Positive values enable explicit local Executor quotas. A provider can impose a per-lab input-update limit through `FMU_SESSION_TICKET_MAX_INPUT_UPDATES_PER_WINDOW_BY_LAB_JSON` in `blockchain-services/.env`; the signed ticket carries that server-owned limit into the Executor policy. Request payload, per-advance, simulation-step, worker-resource and output-rate bounds remain configured independently. Compose bounds scheduled variable-change payloads at 120,000 events/16 MiB by default. The Gateway owns one Station endpoint/token pair; `FMU_STATUS_STATION_HOST` optionally pins that endpoint to one registered host for Lab Manager enrollment. `AUTH_JWKS_URL` is an optional explicit override and must use HTTPS, except for loopback/private hosts used by local Compose networking. |
-| Ops / Lab Station / Energy | `OPS_SECRETS_KEY`, `OPS_WINRM_TRUST_PATH`, `OPS_STATION_CREDENTIALS_PATH`, `OPS_STATION_TRUST_PATH`, `STATION_MANAGEMENT_CIDRS` (`WINRM_MANAGEMENT_CIDRS` compatibility alias), `OPS_STATION_ALLOWED_COMMANDS` (`OPS_ALLOWED_COMMANDS` alias), `OPS_SSH_*`, `OPS_RESERVATION_*`, `OPS_DISCOVERY_*`, `WAKE_OPS_ENABLED`, `WAKE_OPS_INTERVAL_SECONDS`, `OPS_POWER_CONFIG`, `OPS_POWER_CREDENTIALS_PATH`, `OPS_POWER_STATUS_CACHE_SECONDS`, `NOTIFICATION_SERVICE_*` | Windows Stations use TLS WinRM on 5986; new hosts default to Station Contract v3 while explicit v2 compatibility remains available. Linux v3 stations use pinned SSH with an Ed25519 service key. `STATION_MANAGEMENT_CIDRS` contains the destination CIDRs of the Stations managed by this Gateway; these can differ by Gateway and from its source/macvlan subnet. Losing the stable Fernet key makes encrypted WinRM, SSH, and energy credentials unreadable. Keep management traffic on private allowlisted Station networks. The scheduler uses the Gateway `TZ` timezone by default; manual and scheduled Wake use the configured management port and require an authenticated Station status over WinRM or pinned SSH before reporting success. Both transports use the same conservative power-state classification, and ambiguous states skip commands. Online shutdowns on either platform require local mode off and a complete inactive user-session inventory both before dispatch and after the delay; Wake Ops also requires persistent WoL readiness. Timeline, discovery, notification controls, per-host trust stores, provider-local power catalog, encrypted power credentials and live-status cache are forwarded to `ops-worker` from the root `.env`. |
+| Ops / Lab Station / Energy | `OPS_SECRETS_KEY`, `OPS_WINRM_TRUST_PATH`, `OPS_STATION_CREDENTIALS_PATH`, `OPS_STATION_TRUST_PATH`, `STATION_MANAGEMENT_CIDRS` (`WINRM_MANAGEMENT_CIDRS` compatibility alias), `OPS_STATION_ALLOWED_COMMANDS` (`OPS_ALLOWED_COMMANDS` alias), `OPS_SSH_*`, `OPS_RESERVATION_*`, `OPS_DISCOVERY_*`, `WAKE_OPS_ENABLED`, `WAKE_OPS_INTERVAL_SECONDS`, `OPS_POWER_CONFIG`, `OPS_POWER_CREDENTIALS_PATH`, `OPS_POWER_STATUS_CACHE_SECONDS`, `NOTIFICATION_SERVICE_*` | Windows Stations use TLS WinRM on 5986; new hosts default to Station Contract v3 while explicit v2 compatibility remains available. Linux v3 stations use pinned SSH with an Ed25519 service key. `STATION_MANAGEMENT_CIDRS` contains the destination CIDRs of the Stations managed by this Gateway; these can differ by Gateway and from its source/macvlan subnet. Losing the stable Fernet key makes encrypted WinRM, SSH, and energy credentials unreadable. Keep management traffic on private allowlisted Station networks. The scheduler uses the Gateway `TZ` timezone by default; manual and scheduled Wake use the configured management port and require an authenticated Station status over WinRM or pinned SSH before reporting success. Both transports use the same conservative power-state classification, and ambiguous states skip commands. Online shutdowns on either platform require local mode off and a complete inactive user-session inventory before dispatch and on the Station before power-off. Any nonzero delay is followed by a second Station check. Shutdown Ops and Wake Ops pass zero delay; Wake Ops also requires persistent WoL readiness. Timeline, discovery, notification controls, per-host trust stores, provider-local power catalog, encrypted power credentials and live-status cache are forwarded to `ops-worker` from the root `.env`. |
 | AAS | `BASYX_AAS_URL`, `AAS_ALLOWED_HOSTS`, `AAS_SERVICE_TOKEN` | Use `https://` and exact host allow-listing for an external AAS. Caller JWTs are not forwarded. |
 | CORS and proxies | `CORS_ALLOWED_ORIGINS`, `ADMIN_TRUST_FORWARDED_IP` | Keep origins explicit. Marketplace-generated GLB batch streams and interactive sessions connect to Gateway from the browser, so the exact Marketplace origin must be allowed here; set the Preview origin explicitly for Preview deployments. Set `ADMIN_TRUST_FORWARDED_IP=true` only when forwarded client-IP headers come from a controlled upstream proxy; set it false when OpenResty is the public edge. The template default `true` assumes a private upstream proxy and must be changed for direct public exposure. |
 
@@ -185,23 +185,30 @@ current session. For physical Guacamole sessions, Lab Station reports that its
 managed applications have closed after this grace; the Gateway normally waits
 for that result, or for a fresh successful Station session query showing no
 remote LABUSER session, before running `pre_end`, `release-session`, and
-`post_end`. If that close result is missing, the Gateway has an intermediate
-fallback after 300 seconds total from the latest disconnect (configurable with
-`OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS`, up to 3600 seconds). It
-requires a Station status no older than 30 seconds and timestamped after the
-latest disconnect, a successful session query, known remote-client state with
-no connected remote client, no active local session, local mode off, and no
-tracked active reservation connection when Ops Worker claims the end. A
-reconnect resets the fallback deadline. If any safety state is
-unknown or active, the disconnect-triggered end waits for the scheduled end,
-which remains the final fallback. Windows RDP and Linux XRDP retain their
-180-second disconnected-session limit. FMU-only lifecycles do not need a
-Station close result. A reconnect after the grace expires that remains
-connected before Ops Worker claims `ENDING` starts a new `pre_start`,
-`prepare-session`, and `post_start` cycle after Lab Station has confirmed its
-local close. If end phases are already running, the reconnect stays pending
-until `release-session` completes. No-show reservations continue to use the
-scheduled end path.
+`post_end`. If that close result is missing, the Gateway starts an intermediate
+disconnect cleanup cycle after 180 seconds total from the latest disconnect
+(configurable with `OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS`, up to
+3600 seconds). It requires a Station status no older than 30 seconds and
+timestamped after the latest disconnect, a successful session query, known
+remote-client state with no connected remote client, no active local session,
+local mode off, and no tracked active reservation connection when Ops Worker
+claims the cycle. The Gateway runs `pre_end`, the matching `release-session`
+with a disconnected-RDP guard, and then `post_end`. Station attempts an orderly
+application close and ends the disconnected desktop session through that
+release command. This early cleanup releases the current session lifecycle but
+leaves the reservation active; a later reconnect can start a new session cycle.
+Only the scheduled end marks the reservation completed. A reconnect resets the
+fallback deadline. If any safety state is unknown or active, disconnect cleanup
+waits for the scheduled end, which remains the final fallback. Windows RDP and
+Linux XRDP retain a 240-second disconnected-session limit, leaving time for the
+Gateway retry at 180 seconds before the operating-system fallback. FMU-only
+lifecycles do not need a Station close result. A reconnect after the grace
+expires that remains connected before Ops Worker claims `ENDING` starts a new
+`pre_start`, `prepare-session`, and `post_start` cycle. If a reconnect races an
+already claimed early release, the Station guard refuses to log off the active
+RDP client; disconnect cleanup remains pending until the session disconnects
+again or the scheduled end performs final cleanup. No-show reservations
+continue to use the scheduled end path.
 
 Power controller definitions, Gateway safety metadata and encrypted device
 credentials are provider-local files under the persistent `ops-data` mount.

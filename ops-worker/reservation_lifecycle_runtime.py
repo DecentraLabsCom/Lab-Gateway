@@ -69,7 +69,7 @@ class ReservationLifecycleRuntime:
                         end_payload["powerAction"] = {
                             "mode": "shutdown",
                             "args": [
-                                "--delay=60",
+                                "--delay=0",
                                 "--require-idle",
                                 "--reason=Reservation ended",
                             ],

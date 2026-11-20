@@ -61,6 +61,29 @@ def test_reservation_lifecycle_runtime_forwards_trusted_reservation_snapshot():
     assert calls[1][2]["authoritative_reservation"] is reservation
 
 
+def test_reservation_end_shutdown_uses_zero_delay_and_idle_guard():
+    context, _hosts, calls = _context()
+    context = replace(
+        context,
+        get_shutdown_ops_schedule=lambda: lambda _host: {
+            "afterReservationEnd": True
+        },
+    )
+    runtime = create_reservation_lifecycle_runtime(context)
+
+    runtime.handle_reservation_end(
+        {"host": "station", "reservationId": "reservation-1", "labId": "lab-1"}
+    )
+
+    payload = calls[0][1]
+    assert payload["powerAction"]["args"] == [
+        "--delay=0",
+        "--require-idle",
+        "--reason=Reservation ended",
+    ]
+    assert calls[0][2]["shutdown_ops_optional"] is True
+
+
 def test_reservation_lifecycle_runtime_resolves_mutable_host_at_call_time():
     hosts = {"station": "first"}
     context, _hosts, _calls = _context(

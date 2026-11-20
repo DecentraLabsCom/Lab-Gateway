@@ -68,10 +68,10 @@ class ReservationOrchestrator:
         try:
             self.disconnect_close_fallback = max(
                 self.disconnect_grace,
-                min(3600, int(get_env("OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS", "300"))),
+                min(3600, int(get_env("OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS", "180"))),
             )
         except (TypeError, ValueError):
-            self.disconnect_close_fallback = max(self.disconnect_grace, 300)
+            self.disconnect_close_fallback = max(self.disconnect_grace, 180)
         self.projection_url = str(get_env("RESERVATION_PROJECTION_URL", "") or "").strip().rstrip("/")
         self.projection_gateway_id = str(get_env("RESERVATION_PROJECTION_GATEWAY_ID", "") or "").strip().lower()
         self.projection_token = env_or_secret_file("RESERVATION_PROJECTION_TOKEN")
@@ -407,11 +407,19 @@ class ReservationOrchestrator:
     def _disconnect_close_fallback_due(self, row: Mapping[str, Any]) -> bool:
         disconnect_at = self._latest_disconnect_at(row)
         now = self.as_utc_datetime(self.now())
-        return (
-            disconnect_at is not None
-            and now is not None
-            and now >= disconnect_at + timedelta(seconds=self.disconnect_close_fallback)
-        )
+        if disconnect_at is None or now is None:
+            return False
+        fallback_at = disconnect_at + timedelta(seconds=self.disconnect_close_fallback)
+        if now < fallback_at:
+            return False
+        end_time = self.as_utc_datetime(row.get("end_time"))
+        if end_time is not None:
+            # Let the scheduled end own cleanup when it is within the Station
+            # disconnect grace. Avoid ending energy/session phases early just
+            # because the disconnect fallback became due first.
+            if end_time <= now or fallback_at > end_time - timedelta(seconds=self.disconnect_grace):
+                return False
+        return True
 
     def _latest_disconnect_at(self, row: Mapping[str, Any]) -> Optional[datetime]:
         disconnect_at = self.as_utc_datetime(row.get("_lifecycle_disconnected_at"))

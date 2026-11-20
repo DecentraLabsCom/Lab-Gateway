@@ -1311,7 +1311,7 @@ def _wake_ops_shutdown(
             message=message,
         )
         return False
-    power_args = ["shutdown", "--delay=60", "--require-wake", "--require-idle"]
+    power_args = ["shutdown", "--delay=0", "--require-wake", "--require-idle"]
     power_args.append("--reason=Wake Ops weekly verification")
     result, _details = perform_command_step(
         dict(host),
@@ -1623,7 +1623,7 @@ def run_shutdown_ops() -> None:
                         lab_id,
                         action="shutdown_ops_weekly",
                         reason="Shutdown Ops weekly schedule",
-                        delay_seconds=60,
+                        delay_seconds=0,
                     )
             _finish_shutdown_ops_weekly_run_impl(
                 DB_ENGINE,

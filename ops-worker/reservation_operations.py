@@ -230,6 +230,8 @@ def handle_reservation_end(
 
     if success and release_enabled:
         release_args = normalize_args(payload.get("releaseArgs"), [])
+        if payload.get("actor") == "reservation-disconnect" and "--require-rdp-disconnected" not in release_args:
+            release_args.append("--require-rdp-disconnected")
         if reconciliation_only and "--protect-local-sessions" not in release_args:
             release_args.append("--protect-local-sessions")
         management_value = host.get("management")

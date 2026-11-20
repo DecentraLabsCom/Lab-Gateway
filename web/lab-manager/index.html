@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-ops-colors-v1">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-shutdown-ops-layout-v1">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=auth-token-modal-svg-v2">
 </head>
 <body>
@@ -1484,25 +1484,15 @@
                 <div class="wake-ops-summary">
                     <div class="wake-ops-summary-copy">
                         <div class="wake-ops-host" id="shutdownOpsModalHost"></div>
-                        <p class="hint wake-ops-description">Manual shutdown is immediate after the Gateway check. Lab Station checks again before powering off and cancels if it detects local use or an active user session. Reservation-end and weekly shutdowns use a 60-second delay. Weekly shutdown runs at the next selected time; saving does not trigger it immediately. Reservation-end automation requires reservation automation to be enabled on this Gateway.</p>
+                        <p class="hint wake-ops-description">Manual, reservation-end, and weekly shutdowns are sent immediately after the Gateway confirms the station is idle. Lab Station checks again before powering off and cancels if it detects local use or an active user session. Weekly shutdown runs at the next selected time; saving does not trigger it immediately. Reservation-end automation requires reservation automation to be enabled on this Gateway.</p>
                     </div>
-                </div>
-                <div class="shutdown-ops-actions">
-                    <div>
-                        <strong>Manual shutdown</strong>
-                        <p class="hint">Send a guarded shutdown command to this station.</p>
-                    </div>
-                    <button class="danger-btn" id="shutdownOpsManualShutdown" type="button"><i class="fas fa-power-off"></i> Shut down station</button>
-                </div>
-                <div class="shutdown-ops-schedule">
-                    <label class="wake-ops-enabled-field shutdown-ops-toggle" for="shutdownOpsAfterReservationEnd">
-                        <span>Shut down after each reservation</span>
-                        <span class="switch"><input type="checkbox" id="shutdownOpsAfterReservationEnd" aria-label="Shut down after each reservation"><span class="slider"></span></span>
-                    </label>
-                    <label class="wake-ops-enabled-field shutdown-ops-toggle" for="shutdownOpsWeeklyEnabled">
+                    <div class="wake-ops-enabled-field">
                         <span>Weekly shutdown</span>
-                        <span class="switch"><input type="checkbox" id="shutdownOpsWeeklyEnabled" aria-label="Enable weekly shutdown"><span class="slider"></span></span>
-                    </label>
+                        <label class="switch" for="shutdownOpsWeeklyEnabled">
+                            <input type="checkbox" id="shutdownOpsWeeklyEnabled" aria-label="Enable weekly shutdown">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
                 </div>
                 <div class="wake-ops-settings-grid">
                     <label class="field">
@@ -1527,10 +1517,18 @@
                     </label>
                 </div>
                 <div class="wake-ops-status" id="shutdownOpsStatus" role="status" aria-live="polite">Loading Shutdown Ops configuration...</div>
+                <label class="shutdown-ops-reservation-toggle" for="shutdownOpsAfterReservationEnd">
+                    <span>Shut down after each reservation</span>
+                    <span class="switch">
+                        <input type="checkbox" id="shutdownOpsAfterReservationEnd" aria-label="Shut down after each reservation">
+                        <span class="slider"></span>
+                    </span>
+                </label>
             </div>
             <div class="modal-footer">
                 <div class="footer-actions">
                     <button class="ghost-btn" id="cancelShutdownOps" type="button">Close</button>
+                    <button class="danger-btn" id="shutdownOpsManualShutdown" type="button"><i class="fas fa-power-off"></i> Shut down station</button>
                     <button class="primary-btn" id="saveShutdownOps" type="button"><i class="fas fa-save"></i> Save</button>
                 </div>
             </div>

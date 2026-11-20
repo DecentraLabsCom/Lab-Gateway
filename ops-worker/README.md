@@ -344,8 +344,8 @@ the state ambiguous. An open port without a verified Station identity is also
 ambiguous, so no power command is sent. Before cycling an online Windows or
 Linux Station, it requires a fresh status, local mode off,
 and a successful session inventory with no active user sessions. Every managed
-shutdown repeats that guard on the Station after the configured delay. Wake
-Ops also requires persistent WoL readiness before shutdown. Wake Ops manual
+shutdown repeats that guard on the Station immediately before powering off.
+Wake Ops also requires persistent WoL readiness before shutdown. Wake Ops manual
 and scheduled requests use the same configured management port and authenticated
 post-wake check. Set schedules for maintenance windows
 outside reservations and planned local use.
@@ -358,7 +358,7 @@ Reservation automation knobs:
 - `OPS_RESERVATION_LOOKBACK` (default `21600`)
 - `OPS_RESERVATION_RETRY_COOLDOWN` (default `60`)
 - `OPS_RESERVATION_DISCONNECT_GRACE_SECONDS` (default `120`, bounded to 1–300)
-- `OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS` (default `300`, maximum `3600`; measured from the latest disconnect and never earlier than the disconnect grace)
+- `OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS` (default `180`, maximum `3600`; measured from the latest disconnect and never earlier than the disconnect grace)
 
 OpenResty reports reservation-bound Guacamole WebSocket connections, and
 `fmu-runner` reports reservation-bound FMU session attachments, to the
@@ -371,22 +371,30 @@ same 120-second grace and reports the reservation-bound result through
 `status-json`; the worker waits for that result before `pre_end`,
 `release-session`, and `post_end`, or accepts a fresh successful Station
 session query that confirms no remote LABUSER session remains. If that result is
-missing, a 300-second total disconnect fallback is available before the
-scheduled end. It requires a fresh status with a successful session query,
-no older than 30 seconds and timestamped after the latest disconnect, known
-remote-client state with no remote client connected, no active local session,
-local mode off, and no tracked active reservation connection at the atomic end
-claim. The deadline resets on a later disconnect. If a Station or
-required safety state is unavailable, unknown, or indicates active use, the
-worker waits for the scheduled end, which remains the final fallback. Windows RDP and
-Linux XRDP retain a 180-second disconnected-session safety limit. FMU-only
-lifecycles do not need a Station close result. A reconnect after grace expiry
-is recorded even while release is running. If it arrives after Station closed
-the applications and remains connected before the worker claims `ENDING`, the worker starts a
-new `pre_start`, `prepare-session`, and `post_start` cycle without starting end
-phases. If end is already running, the reconnect stays pending until
-`release-session` completes, then starts that cycle with distinct operation
-identities. The scheduled end remains in place for no-shows and final cleanup.
+missing, the worker starts a disconnect cleanup cycle after 180 seconds total
+from the latest disconnect. It requires a fresh status with a successful
+session query, no older than 30 seconds and timestamped after the latest
+disconnect, known remote-client state with no remote client connected, no
+active local session, local mode off, and no tracked active reservation
+connection at the atomic end claim. The cycle runs `pre_end`, the matching
+`release-session` with a disconnected-RDP guard, then `post_end`. Station tries
+the orderly application close and desktop session teardown through this same
+release command. A successful early release marks the session lifecycle
+released but leaves the reservation active; a later connection can begin a new
+session cycle. Only the scheduled end marks the reservation complete. The
+deadline resets on a later disconnect. If a Station or required safety state is
+unavailable, unknown, or indicates active use, the worker waits for the
+scheduled end, which remains the final fallback. Windows RDP and Linux XRDP
+retain a 240-second disconnected-session safety limit so the Gateway retry can
+run first. FMU-only lifecycles do not need a Station close result. A reconnect
+after grace expiry is recorded even while release is running. If it arrives
+after Station closed the applications and remains connected before the worker
+claims `ENDING`, the worker starts a new `pre_start`, `prepare-session`, and
+`post_start` cycle without starting end phases. If a reconnect races an
+already claimed early release, the Station guard refuses to log off the active
+RDP client; disconnect cleanup stays pending until another disconnect or the
+scheduled end. The scheduled end remains in place for no-shows and final
+cleanup.
 
 Lab resolution configuration:
 

@@ -188,7 +188,7 @@ def test_connection_event_reaches_release_phases_through_worker_api_and_schedule
 ):
     monkeypatch.setenv("OPS_RESERVATION_AUTOMATION", "true")
     monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_GRACE_SECONDS", "120")
-    monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS", "300")
+    monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS", "180")
     monkeypatch.setenv("RESERVATION_PROJECTION_URL", "")
 
     reservation_id = f"reservation-{source}"
@@ -267,7 +267,41 @@ def test_connection_event_reaches_release_phases_through_worker_api_and_schedule
             ),
             {"reservation_id": reservation_id},
         ).scalar_one()
+        reservation_status = conn.execute(
+            text("SELECT status FROM lab_reservations WHERE transaction_hash=:reservation_id"),
+            {"reservation_id": reservation_id},
+        ).scalar_one()
     assert state == "RELEASED"
+    assert reservation_status == "ACTIVE"
+
+    _post_connection_event(
+        client,
+        source=source,
+        reservation_id=reservation_id,
+        event="connected",
+        connection_id=f"{source}-after-early-release",
+        sequence=1,
+    )
+    resume_at = datetime.now(timezone.utc)
+    orchestrator.now = lambda: resume_at
+    orchestrator.scan_once()
+
+    orchestrator.dispatch_start.assert_called_once()
+    assert orchestrator.dispatch_start.call_args.args[0]["actor"] == "reservation-reconnect"
+    with db_engine.connect() as conn:
+        state = conn.execute(
+            text(
+                "SELECT state FROM reservation_session_lifecycle "
+                "WHERE reservation_id=:reservation_id"
+            ),
+            {"reservation_id": reservation_id},
+        ).scalar_one()
+        reservation_status = conn.execute(
+            text("SELECT status FROM lab_reservations WHERE transaction_hash=:reservation_id"),
+            {"reservation_id": reservation_id},
+        ).scalar_one()
+    assert state == "ACTIVE"
+    assert reservation_status == "ACTIVE"
 
 
 def test_no_show_without_connection_event_still_releases_at_reservation_end(
@@ -294,14 +328,14 @@ def test_no_show_without_connection_event_still_releases_at_reservation_end(
     assert orchestrator.dispatch_end.call_args.args[0]["reservationId"] == reservation_id
 
 
-def test_station_close_fallback_runs_at_five_minutes_only_after_fresh_idle_status(
+def test_station_close_fallback_runs_at_three_minutes_only_after_fresh_idle_status(
     db_engine,
     client,
     monkeypatch,
 ):
     monkeypatch.setenv("OPS_RESERVATION_AUTOMATION", "true")
     monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_GRACE_SECONDS", "120")
-    monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS", "300")
+    monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS", "180")
     monkeypatch.setenv("RESERVATION_PROJECTION_URL", "")
 
     reservation_id = "reservation-station-fallback"
@@ -336,7 +370,7 @@ def test_station_close_fallback_runs_at_five_minutes_only_after_fresh_idle_statu
         disconnected_at = datetime.fromisoformat(disconnected_at)
     disconnected_at = disconnected_at.replace(tzinfo=timezone.utc)
 
-    scan_at = disconnected_at + timedelta(seconds=299)
+    scan_at = disconnected_at + timedelta(seconds=179)
     status = {
         "timestamp": scan_at.isoformat(),
         "profile": "dedicated",
@@ -368,7 +402,7 @@ def test_station_close_fallback_runs_at_five_minutes_only_after_fresh_idle_statu
     orchestrator.scan_once()
     assert events == []
 
-    scan_at = disconnected_at + timedelta(seconds=300)
+    scan_at = disconnected_at + timedelta(seconds=180)
     status_payload["value"] = {
         **status_payload["value"],
         "timestamp": scan_at.isoformat(),
@@ -391,14 +425,14 @@ def test_station_close_fallback_runs_at_five_minutes_only_after_fresh_idle_statu
     assert state == "RELEASED"
 
 
-def test_scheduled_end_preempts_missing_station_close_five_minute_fallback(
+def test_scheduled_end_preempts_missing_station_close_fallback_near_reservation_end(
     db_engine,
     client,
     monkeypatch,
 ):
     monkeypatch.setenv("OPS_RESERVATION_AUTOMATION", "true")
     monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_GRACE_SECONDS", "120")
-    monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS", "300")
+    monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS", "180")
     monkeypatch.setenv("RESERVATION_PROJECTION_URL", "")
 
     reservation_id = "reservation-end-before-disconnect-fallback"
@@ -445,19 +479,27 @@ def test_scheduled_end_preempts_missing_station_close_five_minute_fallback(
     _install_sqlite_status_updates(orchestrator, db_engine)
 
     # Station still sees the disconnected XRDP session. The reservation has
-    # two minutes left, so neither its normal end nor the 300-second fallback
-    # is due.
+    # two minutes left, so neither its normal end nor the fallback is due.
     orchestrator.scan_once()
     assert events == []
 
-    # The scheduled reservation end must release the station before the
-    # disconnect fallback deadline, even though Station never reported close.
+    # The fallback deadline arrives with only one minute left. Preserve the
+    # scheduled reservation end as the owner of release when it is within the
+    # Station disconnect grace.
+    scan_at = disconnected_at + timedelta(seconds=180)
+    status_payload["value"]["timestamp"] = scan_at.isoformat()
+    status_payload["value"]["sessions"]["remoteClientConnected"] = False
+    orchestrator.scan_once()
+    assert events == []
+
+    # The scheduled reservation end releases the station even though Station
+    # never reported close.
     scan_at = scheduled_end
     status_payload["value"]["timestamp"] = scan_at.isoformat()
     orchestrator.scan_once()
     assert events == ["pre_end", "release-session", "post_end"]
 
-    # Make the five-minute fallback conditions true. The completed reservation
+    # Make the fallback conditions true after completion. The reservation
     # must not be released a second time.
     scan_at = disconnected_at + timedelta(seconds=300)
     status_payload["value"]["timestamp"] = scan_at.isoformat()
@@ -491,7 +533,7 @@ def test_disconnect_with_less_than_two_minutes_left_uses_scheduled_end(
 ):
     monkeypatch.setenv("OPS_RESERVATION_AUTOMATION", "true")
     monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_GRACE_SECONDS", "120")
-    monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS", "300")
+    monkeypatch.setenv("OPS_RESERVATION_DISCONNECT_CLOSE_FALLBACK_SECONDS", "180")
     monkeypatch.setenv("RESERVATION_PROJECTION_URL", "")
 
     reservation_id = f"reservation-short-disconnect-{seconds_until_end}"

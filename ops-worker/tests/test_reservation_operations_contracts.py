@@ -177,6 +177,26 @@ def test_station_end_resolves_generation_scoped_release_context():
     assert deps["perform_command_step"].call_args.kwargs["dispatcher_request"]["context"]["generation"] == 3
 
 
+def test_disconnect_end_requires_station_session_to_remain_disconnected():
+    deps = _dependencies()
+    deps.pop("perform_wake_step")
+    host = {"name": "lab-ws-01", "management": {"transport": "ssh"}}
+    deps["resolve_host_by_lab"] = lambda _lab_id: host
+
+    response, status = handle_reservation_end(
+        {
+            "reservationId": "0xabc123",
+            "labId": "42",
+            "actor": "reservation-disconnect",
+        },
+        **deps,
+    )
+
+    assert status == 200 and response["success"] is True
+    release_args = deps["perform_command_step"].call_args.args[5]
+    assert "--require-rdp-disconnected" in release_args
+
+
 def test_linux_context_resolution_failure_is_passed_as_fail_closed_step():
     deps = _dependencies()
     host = {"name": "lab-ws-01", "management": {"transport": "ssh"}}

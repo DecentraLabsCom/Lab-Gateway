@@ -79,7 +79,7 @@
                 const lastRun = schedule.lastStatus
                     ? ` Last weekly run: ${schedule.lastStatus}${schedule.lastMessage ? ` (${schedule.lastMessage})` : ''}.`
                     : '';
-                fields.status.textContent = `Automatic actions use a 60-second delay and are blocked while local use or active user sessions are detected.${lastRun}`;
+                fields.status.textContent = `Automatic shutdowns are sent immediately after the Gateway confirms the station is idle. Lab Station checks again and blocks shutdown if local use or active user sessions are detected.${lastRun}`;
             }
             return data;
         }
