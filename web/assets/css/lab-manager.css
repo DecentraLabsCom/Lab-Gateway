@@ -640,12 +640,14 @@ body {
     color: #ffd0d0;
 }
 
+#shutdownOpsModal #shutdownOpsManualShutdown:focus-visible,
 .danger-btn:focus-visible,
 .file-picker-button:focus-visible {
     outline: 3px solid rgba(77, 225, 255, 0.45);
     outline-offset: 2px;
 }
 
+#shutdownOpsModal #shutdownOpsManualShutdown:disabled,
 .danger-btn:disabled {
     transform: none;
     cursor: not-allowed;
