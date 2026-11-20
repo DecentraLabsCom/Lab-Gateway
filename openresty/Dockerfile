@@ -68,6 +68,7 @@ COPY conf.d/gateway_intents.conf /etc/openresty/conf.d/gateway_intents.conf
 COPY conf.d/gateway_ops.conf /etc/openresty/conf.d/gateway_ops.conf
 COPY conf.d/gateway_lab_status.conf /etc/openresty/conf.d/gateway_lab_status.conf
 COPY conf.d/gateway_onboarding_webauthn.conf /etc/openresty/conf.d/gateway_onboarding_webauthn.conf
+COPY conf.d/gateway_access_policy.conf /etc/openresty/conf.d/gateway_access_policy.conf
 COPY conf.d/gateway_lab_manager.conf /etc/openresty/conf.d/gateway_lab_manager.conf
 COPY conf.d/gateway_lab_admin.conf /etc/openresty/conf.d/gateway_lab_admin.conf
 COPY conf.d/gateway_lab_content.conf /etc/openresty/conf.d/gateway_lab_content.conf
