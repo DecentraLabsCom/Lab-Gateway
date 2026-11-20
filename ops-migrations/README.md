@@ -14,6 +14,9 @@ versions created them through the backend Flyway history or MySQL bootstrap
 scripts. `baselineOnMigrate` plus idempotent DDL lets the one-shot migrator
 adopt those databases without recreating data.
 
+`V9__shutdown_ops_schedules.sql` stores per-station reservation-end and weekly
+Shutdown Ops settings.
+
 The remote Full Gateway or standalone `blockchain-services` remains the
 control plane for reservations, credentials and blockchain state. Nothing in
 this directory attempts to mirror that remote control-plane database.

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lab Manager - DecentraLabs</title>
-    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-policy-drag-handle-v4">
+    <link rel="stylesheet" href="../assets/css/lab-manager.css?v=lab-manager-shutdown-ops-v1">
     <link rel="stylesheet" href="../assets/css/auth-token-modal.css?v=auth-token-modal-svg-v2">
 </head>
 <body>
@@ -1474,6 +1474,69 @@
         </div>
     </div>
 
+    <div class="modal" id="shutdownOpsModal" role="dialog" aria-modal="true" aria-labelledby="shutdownOpsModalTitle" hidden>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="shutdownOpsModalTitle"><i class="fas fa-power-off"></i> Shutdown Ops</h3>
+                <button class="ghost-btn icon-btn" id="closeShutdownOpsModal" type="button" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="wake-ops-summary">
+                    <div class="wake-ops-summary-copy">
+                        <div class="wake-ops-host" id="shutdownOpsModalHost"></div>
+                        <p class="hint wake-ops-description">Manual shutdown is immediate after the Gateway check. Lab Station checks again before powering off and cancels if it detects local use or an active user session. Reservation-end and weekly shutdowns use a 60-second delay. Weekly shutdown runs at the next selected time; saving does not trigger it immediately. Reservation-end automation requires reservation automation to be enabled on this Gateway.</p>
+                    </div>
+                </div>
+                <div class="shutdown-ops-actions">
+                    <div>
+                        <strong>Manual shutdown</strong>
+                        <p class="hint">Send a guarded shutdown command to this station.</p>
+                    </div>
+                    <button class="danger-btn" id="shutdownOpsManualShutdown" type="button"><i class="fas fa-power-off"></i> Shut down station</button>
+                </div>
+                <div class="shutdown-ops-schedule">
+                    <label class="wake-ops-enabled-field shutdown-ops-toggle" for="shutdownOpsAfterReservationEnd">
+                        <span>Shut down after each reservation</span>
+                        <span class="switch"><input type="checkbox" id="shutdownOpsAfterReservationEnd" aria-label="Shut down after each reservation"><span class="slider"></span></span>
+                    </label>
+                    <label class="wake-ops-enabled-field shutdown-ops-toggle" for="shutdownOpsWeeklyEnabled">
+                        <span>Weekly shutdown</span>
+                        <span class="switch"><input type="checkbox" id="shutdownOpsWeeklyEnabled" aria-label="Enable weekly shutdown"><span class="slider"></span></span>
+                    </label>
+                </div>
+                <div class="wake-ops-settings-grid">
+                    <label class="field">
+                        <span>Day</span>
+                        <select id="shutdownOpsDay">
+                            <option value="0">Monday</option>
+                            <option value="1">Tuesday</option>
+                            <option value="2">Wednesday</option>
+                            <option value="3">Thursday</option>
+                            <option value="4">Friday</option>
+                            <option value="5">Saturday</option>
+                            <option value="6">Sunday</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Local time</span>
+                        <input type="time" id="shutdownOpsTime" step="60" value="23:00">
+                    </label>
+                    <label class="field full">
+                        <span>Timezone</span>
+                        <select id="shutdownOpsTimezone"></select>
+                    </label>
+                </div>
+                <div class="wake-ops-status" id="shutdownOpsStatus" role="status" aria-live="polite">Loading Shutdown Ops configuration...</div>
+            </div>
+            <div class="modal-footer">
+                <div class="footer-actions">
+                    <button class="ghost-btn" id="cancelShutdownOps" type="button">Close</button>
+                    <button class="primary-btn" id="saveShutdownOps" type="button"><i class="fas fa-save"></i> Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal" id="aasxViewModal" role="dialog" aria-modal="true" aria-labelledby="aasxViewTitle">
         <div class="modal-content">
             <div class="modal-header">
@@ -1503,7 +1566,7 @@
     <script src="../assets/js/lab-manager-access-policy.js?v=lab-manager-access-policy-v1"></script>
     <script src="../assets/js/lab-manager-heartbeat-errors.js?v=lab-manager-heartbeat-errors-v2"></script>
     <script src="../assets/js/lab-manager-hosts.js?v=lab-manager-hosts-v9"></script>
-    <script src="../assets/js/lab-manager-host-renderers.js?v=lab-manager-host-renderers-v17"></script>
+    <script src="../assets/js/lab-manager-host-renderers.js?v=lab-manager-host-renderers-v18"></script>
     <script src="../assets/js/lab-manager-host-discovery.js?v=lab-manager-host-discovery-v2"></script>
     <script src="../assets/js/lab-manager-winrm-credentials.js?v=lab-manager-winrm-credentials-v1"></script>
     <script src="../assets/js/lab-manager-winrm-trust.js?v=lab-manager-winrm-trust-v1"></script>
@@ -1511,13 +1574,14 @@
     <script src="../assets/js/lab-manager-host-provisioning.js?v=lab-manager-host-provisioning-v2"></script>
     <script src="../assets/js/lab-manager-host-modals.js?v=lab-manager-host-modals-v5"></script>
     <script src="../assets/js/lab-manager-host-view.js?v=lab-manager-host-view-v2"></script>
-    <script src="../assets/js/lab-manager-host-action-bindings.js?v=lab-manager-host-action-bindings-v5"></script>
+    <script src="../assets/js/lab-manager-host-action-bindings.js?v=lab-manager-host-action-bindings-v6"></script>
     <script src="../assets/js/lab-manager-ops-access.js?v=lab-manager-ops-access-v1"></script>
     <script src="../assets/js/lab-manager-operations-lifecycle.js?v=lab-manager-operations-lifecycle-v1"></script>
-    <script src="../assets/js/lab-manager-modal-bindings.js?v=lab-manager-modal-bindings-v2"></script>
+    <script src="../assets/js/lab-manager-modal-bindings.js?v=lab-manager-modal-bindings-v3"></script>
     <script src="../assets/js/lab-manager-host-actions.js?v=lab-manager-host-actions-v7"></script>
     <script src="../assets/js/lab-manager-wake-ops.js?v=lab-manager-wake-ops-v3"></script>
-    <script src="../assets/js/lab-manager-host-feature.js?v=lab-manager-host-feature-v12"></script>
+    <script src="../assets/js/lab-manager-shutdown-ops.js?v=lab-manager-shutdown-ops-v1"></script>
+    <script src="../assets/js/lab-manager-host-feature.js?v=lab-manager-host-feature-v13"></script>
     <script src="../assets/js/lab-manager-fmu-station.js?v=lab-manager-fmu-station-v3"></script>
     <script src="../assets/js/core/toast.js?v=lab-manager-toast-v3"></script>
     <script src="../assets/js/lab-manager-notifications-access.js?v=lab-manager-notifications-access-v2"></script>

@@ -508,7 +508,7 @@
                 <button class="mini-btn" data-action="poll" title="Check station status">Heartbeat</button>
                 <button class="mini-btn" data-action="wake-ops" title="Configure Wake Ops and wake station">Wake Ops</button>
                 ${profileActionsMarkup}
-                <button class="mini-btn danger" data-action="shutdown" title="Shut down station">Shutdown</button>
+                <button class="mini-btn danger" data-action="shutdown-ops" title="Configure station shutdown actions">Shutdown Ops</button>
                 ${localActionMarkup}
                 <button class="mini-btn${fmuStation.action === 'release-fmu' ? ' danger' : ''}" data-action="${fmuStation.action}" title="${fmuStation.title}"${fmuActionDisabled}>${fmuStation.actionLabel}</button>
             </div>

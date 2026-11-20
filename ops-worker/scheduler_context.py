@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,7 @@ class SchedulerContext:
     get_process_revocations: Callable[[], Any]
     get_now: Callable[[], Callable[[], Any]]
     get_logger: Callable[[], Any]
+    get_run_shutdown_ops: Optional[Callable[[], Any]] = None
 
 
 __all__ = ["SchedulerContext"]

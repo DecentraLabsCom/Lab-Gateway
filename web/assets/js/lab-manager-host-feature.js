@@ -45,6 +45,14 @@
                 save: () => {},
             }),
         };
+        const shutdownOpsModule = root.LabManagerShutdownOps || {
+            createController: () => Object.freeze({
+                close: () => {},
+                manualShutdown: () => {},
+                open: () => {},
+                save: () => {},
+            }),
+        };
         const modalBindingsModule = requireModule(root.LabManagerModalBindings, 'LabManagerModalBindings');
         const $ = selector => documentImpl?.querySelector?.(selector) || null;
 
@@ -127,6 +135,18 @@
         const wakeOpsTime = $('#wakeOpsTime');
         const wakeOpsTimezone = $('#wakeOpsTimezone');
         const wakeOpsStatus = $('#wakeOpsStatus');
+        const shutdownOpsModal = $('#shutdownOpsModal');
+        const closeShutdownOpsModalButton = $('#closeShutdownOpsModal');
+        const cancelShutdownOpsButton = $('#cancelShutdownOps');
+        const saveShutdownOpsButton = $('#saveShutdownOps');
+        const shutdownOpsManualButton = $('#shutdownOpsManualShutdown');
+        const shutdownOpsModalHost = $('#shutdownOpsModalHost');
+        const shutdownOpsAfterReservationEnd = $('#shutdownOpsAfterReservationEnd');
+        const shutdownOpsWeeklyEnabled = $('#shutdownOpsWeeklyEnabled');
+        const shutdownOpsDay = $('#shutdownOpsDay');
+        const shutdownOpsTime = $('#shutdownOpsTime');
+        const shutdownOpsTimezone = $('#shutdownOpsTimezone');
+        const shutdownOpsStatus = $('#shutdownOpsStatus');
 
         const hostState = {};
         const hostMetadata = {};
@@ -138,6 +158,7 @@
         let hostViewController;
         let winrmTrustModalController;
         let wakeOpsController;
+        let shutdownOpsController;
 
         function openProvisionHostModal(stationKey) {
             return hostModalsController?.openProvision(stationKey);
@@ -248,6 +269,22 @@
             return wakeOpsController?.manualWake();
         }
 
+        function openShutdownOpsModal(host) {
+            return shutdownOpsController?.open(host);
+        }
+
+        function closeShutdownOpsModal() {
+            return shutdownOpsController?.close();
+        }
+
+        async function saveShutdownOps() {
+            return shutdownOpsController?.save();
+        }
+
+        async function manualShutdownOps() {
+            return shutdownOpsController?.manualShutdown();
+        }
+
         const hostRenderersController = hostRenderersModule.createController({
             documentCtor: documentImpl,
             escapeHtml,
@@ -317,6 +354,25 @@
             confirmImpl: message => windowImpl.confirm?.(message),
             logger,
         });
+        shutdownOpsController = shutdownOpsModule.createController({
+            fields: {
+                modal: shutdownOpsModal,
+                host: shutdownOpsModalHost,
+                afterReservationEnd: shutdownOpsAfterReservationEnd,
+                weeklyEnabled: shutdownOpsWeeklyEnabled,
+                day: shutdownOpsDay,
+                time: shutdownOpsTime,
+                timezone: shutdownOpsTimezone,
+                status: shutdownOpsStatus,
+                saveButton: saveShutdownOpsButton,
+                shutdownButton: shutdownOpsManualButton,
+            },
+            fetchImpl,
+            callbacks: { showToast },
+            documentImpl,
+            confirmImpl: message => windowImpl.confirm?.(message),
+            logger,
+        });
         const hostActionBindingsController = hostActionBindingsModule.createController({
             hostListEl: hostListElement,
             hostState,
@@ -324,6 +380,7 @@
                 onEditHost: openEditHostModal,
                 onPoll: pollHeartbeat,
                 onWakeOps: openWakeOpsModal,
+                onShutdownOps: openShutdownOpsModal,
                 onWinrm: (...args) => hostActionsController.triggerWinrm(...args),
                 onToggleLocalMode: (...args) => hostActionsController.toggleLocalMode(...args),
                 onCredentials: openWinrmCredentialsModal,
@@ -528,6 +585,10 @@
                 cancelWakeOps: cancelWakeOpsButton,
                 saveWakeOps: saveWakeOpsButton,
                 manualWakeOps: wakeOpsManualWakeButton,
+                closeShutdownOps: closeShutdownOpsModalButton,
+                cancelShutdownOps: cancelShutdownOpsButton,
+                saveShutdownOps: saveShutdownOpsButton,
+                manualShutdownOps: shutdownOpsManualButton,
             },
             callbacks: {
                 closeProvision: closeProvisionHostModal,
@@ -546,6 +607,9 @@
                 closeWakeOps: closeWakeOpsModal,
                 saveWakeOps,
                 manualWakeOps,
+                closeShutdownOps: closeShutdownOpsModal,
+                saveShutdownOps,
+                manualShutdownOps,
             },
         });
 

@@ -224,6 +224,12 @@ off or unavailable Station from an internal worker failure.
 - `POST /api/wake-ops/<host_name>/wake`
   - Send a manual Wake request and record successful authenticated Station
     reachability as WoL evidence without changing the weekly schedule.
+- `GET/PUT /api/shutdown-ops/<host_name>`
+  - Read or update per-host shutdown settings. Reservation-end shutdown and
+    weekly shutdown are disabled by default; the weekly schedule uses the
+    configured day, local time, and timezone.
+- `POST /api/shutdown-ops/<host_name>/shutdown`
+  - Request an immediate guarded manual shutdown.
 - `POST /api/station/command`
   - Run an allowlisted Station command over the host's configured transport.
     On either platform, `power shutdown` first verifies local mode and session

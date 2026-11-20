@@ -29,6 +29,7 @@ class ReservationLifecycleContext:
         [], Callable[[Any, Optional[List[str]]], List[str]]
     ]
     get_authorize_remote_session_handoff: Optional[Callable[[], Callable[..., List[str]]]] = None
+    get_shutdown_ops_schedule: Optional[Callable[[], Callable[[str], Mapping[str, Any]]]] = None
 
 
 __all__ = ["ReservationLifecycleContext"]

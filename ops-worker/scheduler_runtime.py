@@ -13,7 +13,7 @@ class SchedulerRuntime:
 
     def start_scheduler(self) -> Any:
         context = self._context
-        return context.get_start_scheduler()(
+        kwargs = dict(
             scheduler_factory=context.get_scheduler_factory(),
             poll_enabled=context.get_poll_enabled(),
             poll_interval_seconds=context.get_poll_interval_seconds(),
@@ -33,6 +33,9 @@ class SchedulerRuntime:
             now=context.get_now(),
             logger=context.get_logger(),
         )
+        if context.get_run_shutdown_ops is not None:
+            kwargs["run_shutdown_ops"] = context.get_run_shutdown_ops()
+        return context.get_start_scheduler()(**kwargs)
 
 
 def create_scheduler_runtime(context: SchedulerContext) -> SchedulerRuntime:

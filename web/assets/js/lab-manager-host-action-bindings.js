@@ -10,6 +10,7 @@
             onEditHost = () => {},
             onPoll = () => {},
             onWakeOps = () => {},
+            onShutdownOps = () => {},
             onWinrm = () => {},
             onToggleLocalMode = () => {},
             onCredentials = () => {},
@@ -35,16 +36,16 @@
                 onWakeOps(host);
                 return;
             }
+            if (action === 'shutdown-ops') {
+                onShutdownOps(host);
+                return;
+            }
             if (action === 'prepare') {
                 onWinrm(host, 'prepare-session', ['--guard-grace=90']);
                 return;
             }
             if (action === 'release') {
                 onWinrm(host, 'release-session', []);
-                return;
-            }
-            if (action === 'shutdown') {
-                onWinrm(host, 'power', ['shutdown', '--delay=60', '--reason=Remote order']);
                 return;
             }
             if (action === 'toggle-local-mode') {

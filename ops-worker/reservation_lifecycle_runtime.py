@@ -50,6 +50,31 @@ class ReservationLifecycleRuntime:
         reconciliation_attempt: Optional[str] = None,
         reconciliation_only: bool = False,
     ) -> Tuple[Dict[str, Any], int]:
+        end_payload = dict(payload)
+        shutdown_ops_optional = False
+        if not reconciliation_only and not end_payload.get("powerAction"):
+            get_schedule = self._context.get_shutdown_ops_schedule
+            if get_schedule is not None:
+                lab_id = end_payload.get("labId") or end_payload.get("lab_id")
+                host_name = end_payload.get("host") or end_payload.get("hostName")
+                host = self._find_host(host_name) if host_name else None
+                if not host and lab_id:
+                    host = self._context.get_resolve_host_by_lab()(str(lab_id))
+                if host:
+                    try:
+                        schedule = get_schedule()(str(host.get("name") or host_name or ""))
+                    except Exception:  # The optional shutdown setting must not block reservation release.
+                        schedule = {}
+                    if schedule.get("afterReservationEnd") is True:
+                        end_payload["powerAction"] = {
+                            "mode": "shutdown",
+                            "args": [
+                                "--delay=60",
+                                "--require-idle",
+                                "--reason=Reservation ended",
+                            ],
+                        }
+                        shutdown_ops_optional = True
         kwargs = {}
         if authoritative_reservation is not None:
             kwargs["authoritative_reservation"] = authoritative_reservation
@@ -57,8 +82,10 @@ class ReservationLifecycleRuntime:
             kwargs["reconciliation_attempt"] = reconciliation_attempt
         if reconciliation_only:
             kwargs["reconciliation_only"] = True
+        if shutdown_ops_optional:
+            kwargs["shutdown_ops_optional"] = True
         return self._context.handle_reservation_end_impl(
-            payload,
+            end_payload,
             find_host=self._find_host,
             resolve_host_by_lab=self._context.get_resolve_host_by_lab(),
             get_mandatory_field=self._context.get_mandatory_field(),

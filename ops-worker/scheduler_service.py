@@ -1,6 +1,6 @@
 """Scheduler job registration for the Ops Worker."""
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 
 def start_scheduler(
@@ -23,6 +23,7 @@ def start_scheduler(
     process_revocations: Callable[[], Any],
     now: Callable[[], Any],
     logger: Any,
+    run_shutdown_ops: Optional[Callable[[], Any]] = None,
 ) -> Any:
     """Register enabled jobs and start the scheduler when work is present."""
     scheduler = scheduler_factory()
@@ -40,7 +41,7 @@ def start_scheduler(
         jobs += 1
         logger.info("Heartbeat poller enabled (interval %ss)", poll_interval_seconds)
 
-    if wake_ops_enabled:
+    if run_shutdown_ops is None and wake_ops_enabled:
         scheduler.add_job(
             run_wake_ops,
             "interval",
@@ -53,6 +54,26 @@ def start_scheduler(
         logger.info(
             "Wake Ops weekly verification enabled (interval %ss)",
             wake_ops_interval_seconds,
+        )
+    elif run_shutdown_ops is not None:
+        def run_station_ops_schedules() -> None:
+            if wake_ops_enabled:
+                run_wake_ops()
+            if run_shutdown_ops is not None:
+                run_shutdown_ops()
+
+        scheduler.add_job(
+            run_station_ops_schedules,
+            "interval",
+            seconds=max(30, wake_ops_interval_seconds),
+            next_run_time=now(),
+            id="station-ops-schedules",
+            replace_existing=True,
+        )
+        jobs += 1
+        logger.info(
+            "Station Ops schedule scan enabled (interval %ss)",
+            max(30, wake_ops_interval_seconds),
         )
 
     jobs += register_reservation_jobs(scheduler)

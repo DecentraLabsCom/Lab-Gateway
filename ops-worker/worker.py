@@ -29,12 +29,20 @@ from ops_app_factory import create_app, register_blueprints
 from wake_ops_persistence import get_schedule as _get_wake_ops_schedule_impl
 from wake_ops_persistence import latest_wake_operation as _latest_wake_operation_impl
 from wake_ops_persistence import save_schedule as _save_wake_ops_schedule_impl
+from shutdown_ops_persistence import (
+    claim_weekly_run as _claim_shutdown_ops_weekly_run_impl,
+    enabled_weekly_schedules as _get_shutdown_ops_weekly_schedules_impl,
+    finish_weekly_run as _finish_shutdown_ops_weekly_run_impl,
+    get_schedule as _get_shutdown_ops_schedule_impl,
+    save_schedule as _save_shutdown_ops_schedule_impl,
+)
 from wake_ops_service import (
     execute_wake_ops_cycle,
     is_schedule_due,
     normalize_schedule,
     scheduled_occurrence,
 )
+from shutdown_ops_service import normalize_shutdown_ops_schedule
 from entrypoint import (
     configure_logging as _configure_logging_impl,
     run as _run_entrypoint_impl,
@@ -1117,6 +1125,46 @@ def _wake_ops_schedule(host_name: str) -> Dict[str, Any]:
     )
 
 
+def _shutdown_ops_schedule(host_name: str) -> Dict[str, Any]:
+    return _get_shutdown_ops_schedule_impl(
+        DB_ENGINE,
+        host_name,
+        default_timezone=GATEWAY_TIMEZONE,
+        sql_text=text,
+    )
+
+
+def _shutdown_ops_save_schedule(host_name: str, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    current = _shutdown_ops_schedule(host_name)
+    normalized = normalize_shutdown_ops_schedule(payload, default_timezone=GATEWAY_TIMEZONE)
+    weekly_fields = ("weeklyEnabled", "dayOfWeek", "hour", "minute", "timezone")
+    reset_weekly_occurrence = any(
+        current.get(field) != normalized[field] for field in weekly_fields
+    )
+    weekly_baseline = None
+    if reset_weekly_occurrence and normalized["weeklyEnabled"]:
+        weekly_baseline = scheduled_occurrence(
+            _wake_ops_now(),
+            {
+                "enabled": True,
+                "dayOfWeek": normalized["dayOfWeek"],
+                "hour": normalized["hour"],
+                "minute": normalized["minute"],
+                "timezone": normalized["timezone"],
+            },
+        )
+    return _save_shutdown_ops_schedule_impl(
+        DB_ENGINE,
+        host_name,
+        normalized,
+        default_timezone=GATEWAY_TIMEZONE,
+        sql_text=text,
+        now=_wake_ops_now,
+        reset_weekly_occurrence=reset_weekly_occurrence,
+        weekly_baseline=weekly_baseline,
+    )
+
+
 def _wake_ops_save_schedule(host_name: str, payload: Mapping[str, Any]) -> Dict[str, Any]:
     current = _wake_ops_schedule(host_name)
     normalized = normalize_schedule(payload, default_timezone=GATEWAY_TIMEZONE)
@@ -1411,6 +1459,202 @@ def run_wake_ops() -> None:
             logging.info("Wake Ops weekly verification for %s: %s", host_name, result.get("status"))
         except Exception:  # pylint: disable=broad-except
             logging.exception("Wake Ops weekly verification failed for %s", host_name)
+
+
+def _shutdown_ops_execute(
+    host: Mapping[str, Any],
+    reservation_id: str,
+    lab_id: Optional[str],
+    *,
+    action: str,
+    reason: str,
+    delay_seconds: int,
+) -> Dict[str, Any]:
+    host_name = str(host.get("name") or "")
+    if _wake_ops_cycle_is_safe(host) is not True:
+        message = "Station shutdown guard blocked the request or could not verify that it was safe"
+        record_reservation_operation(
+            reservation_id,
+            lab_id,
+            host_name,
+            action,
+            "blocked",
+            False,
+            response_code=409,
+            message=message,
+        )
+        return {
+            "host": host_name,
+            "reservationId": reservation_id,
+            "success": False,
+            "status": "blocked",
+            "message": message,
+        }
+
+    success, step = perform_command_step(
+        dict(host),
+        reservation_id,
+        lab_id,
+        action,
+        "power",
+        [
+            "shutdown",
+            f"--delay={delay_seconds}",
+            "--require-idle",
+            f"--reason={reason}",
+        ],
+    )
+    if success and delay_seconds == 0:
+        message = "Immediate guarded shutdown requested; Lab Station rechecks idle state"
+    elif success:
+        message = "Guarded shutdown scheduled; Lab Station will recheck idle state after the delay"
+    else:
+        message = step.get("message") or "Station shutdown command failed"
+    return {
+        "host": host_name,
+        "reservationId": reservation_id,
+        "success": success,
+        "status": "completed" if success else "failed",
+        "message": message,
+        "step": step,
+    }
+
+
+def _shutdown_ops_manual_shutdown(host_name: str) -> Dict[str, Any]:
+    host = HOSTS.get(host_name)
+    if not host:
+        return {"host": host_name, "success": False, "status": "failed", "message": "Unknown host"}
+    reservation_id = f"shutdown-ops:manual:{uuid.uuid4().hex}"
+    lab_ids = resolve_lab_ids_for_host(dict(host))
+    lab_id = str(lab_ids[0]) if lab_ids else None
+    return _shutdown_ops_execute(
+        host,
+        reservation_id,
+        lab_id,
+        action="shutdown_ops_manual",
+        reason="Lab Manager Shutdown Ops manual request",
+        delay_seconds=0,
+    )
+
+
+def run_shutdown_ops() -> None:
+    if not DB_ENGINE:
+        logging.warning("Shutdown Ops skipped because the operations database is unavailable")
+        return
+    now = _wake_ops_now()
+    schedules = _get_shutdown_ops_weekly_schedules_impl(
+        DB_ENGINE,
+        default_timezone=GATEWAY_TIMEZONE,
+        sql_text=text,
+    )
+    for schedule in schedules:
+        host_name = str(schedule.get("host") or "")
+        claimed_occurrence: Optional[datetime] = None
+        try:
+            weekly = {
+                "enabled": schedule.get("weeklyEnabled", False),
+                "dayOfWeek": schedule.get("dayOfWeek", 6),
+                "hour": schedule.get("hour", 23),
+                "minute": schedule.get("minute", 0),
+                "timezone": schedule.get("timezone", GATEWAY_TIMEZONE),
+            }
+            if not is_schedule_due(now, weekly, last_scheduled_at=schedule.get("lastScheduledAt")):
+                continue
+            occurrence = scheduled_occurrence(now, weekly)
+            started_at = _wake_ops_now()
+            if not _claim_shutdown_ops_weekly_run_impl(
+                DB_ENGINE,
+                host_name,
+                occurrence,
+                started_at,
+                sql_text=text,
+            ):
+                continue
+            claimed_occurrence = occurrence
+
+            reservation_id = f"shutdown-ops:weekly:{host_name}:{occurrence.isoformat()}"
+            host = HOSTS.get(host_name)
+            lab_ids = resolve_lab_ids_for_host(dict(host)) if host else []
+            lab_id = str(lab_ids[0]) if lab_ids else None
+            if not host:
+                result = {
+                    "success": False,
+                    "status": "failed",
+                    "message": "Scheduled host is no longer registered",
+                }
+            else:
+                power_state = _wake_ops_probe(host)
+                if power_state is False:
+                    result = {
+                        "success": True,
+                        "status": "skipped",
+                        "message": "Station is already off or its management endpoint is unreachable",
+                    }
+                    record_reservation_operation(
+                        reservation_id,
+                        lab_id,
+                        host_name,
+                        "shutdown_ops_weekly",
+                        "skipped",
+                        True,
+                        response_code=200,
+                        message=result["message"],
+                    )
+                elif power_state is None:
+                    result = {
+                        "success": False,
+                        "status": "blocked",
+                        "message": "Station state could not be verified; scheduled shutdown was skipped",
+                    }
+                    record_reservation_operation(
+                        reservation_id,
+                        lab_id,
+                        host_name,
+                        "shutdown_ops_weekly",
+                        "blocked",
+                        False,
+                        response_code=409,
+                        message=result["message"],
+                    )
+                else:
+                    result = _shutdown_ops_execute(
+                        host,
+                        reservation_id,
+                        lab_id,
+                        action="shutdown_ops_weekly",
+                        reason="Shutdown Ops weekly schedule",
+                        delay_seconds=60,
+                    )
+            _finish_shutdown_ops_weekly_run_impl(
+                DB_ENGINE,
+                host_name,
+                occurrence,
+                _wake_ops_now(),
+                str(result.get("status") or "failed"),
+                result.get("message"),
+                sql_text=text,
+            )
+            claimed_occurrence = None
+            logging.info("Shutdown Ops weekly schedule for %s: %s", host_name, result.get("status"))
+        except Exception:  # pylint: disable=broad-except
+            if claimed_occurrence is not None:
+                try:
+                    _finish_shutdown_ops_weekly_run_impl(
+                        DB_ENGINE,
+                        host_name,
+                        claimed_occurrence,
+                        _wake_ops_now(),
+                        "failed",
+                        "Shutdown Ops execution failed; review Ops Worker logs",
+                        sql_text=text,
+                    )
+                except Exception:  # pylint: disable=broad-except
+                    logging.exception("Unable to persist Shutdown Ops failure for %s", host_name)
+            logging.exception("Shutdown Ops weekly schedule failed for %s", host_name)
+
+
+def _shutdown_ops_get_schedule(host_name: str) -> Dict[str, Any]:
+    return _shutdown_ops_schedule(host_name)
 
 
 def _wake_ops_get_schedule(host_name: str) -> Dict[str, Any]:
@@ -1787,6 +2031,7 @@ _RESERVATION_LIFECYCLE_CONTEXT = ReservationLifecycleContext(
     get_normalize_args=lambda: normalize_args,
     get_resolve_station_lease=lambda: resolve_station_lease_context,
     get_authorize_remote_session_handoff=lambda: authorize_remote_session_handoff,
+    get_shutdown_ops_schedule=lambda: _shutdown_ops_get_schedule,
 )
 _RESERVATION_LIFECYCLE_RUNTIME = create_reservation_lifecycle_runtime(
     _RESERVATION_LIFECYCLE_CONTEXT
@@ -2357,6 +2602,7 @@ _SCHEDULER_CONTEXT = SchedulerContext(
     get_process_revocations=lambda: process_guacamole_token_revocations,
     get_now=lambda: lambda: datetime.now(timezone.utc),
     get_logger=lambda: logging,
+    get_run_shutdown_ops=lambda: run_shutdown_ops,
 )
 _SCHEDULER_RUNTIME = create_scheduler_runtime(_SCHEDULER_CONTEXT)
 start_scheduler = _SCHEDULER_RUNTIME.start_scheduler

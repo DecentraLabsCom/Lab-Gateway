@@ -156,6 +156,8 @@ The current operational API, exposed through the gateway as `/ops/...`, includes
 | `GET /ops/api/operations/recent` | Read recent operation records for diagnostics. |
 | `GET/PUT /ops/api/wake-ops/<host_name>` | Read or configure the per-host weekly Wake Ops verification. |
 | `POST /ops/api/wake-ops/<host_name>/wake` | Send a manual Wake and record successful reachability evidence. |
+| `GET/PUT /ops/api/shutdown-ops/<host_name>` | Read or update per-host reservation-end and weekly shutdown settings; both automatic settings default to disabled. |
+| `POST /ops/api/shutdown-ops/<host_name>/shutdown` | Request an immediate guarded manual shutdown. |
 
 The `/ops/api/winrm` route and `/hosts/*/winrm-*` routes are the Windows v2
 compatibility surface. They accept only commands configured in
@@ -352,6 +354,27 @@ shut down before WoL; a verified-off station is woken and shut down again; an
 ambiguous state does not receive a remote shutdown. Configure the weekly window
 outside reservations and planned local use. Successful WoL evidence remains
 valid for seven days and is stored in `reservation_operations`.
+
+## Shutdown Ops
+
+Open **Operations → Lab Station Ops → Shutdown Ops** for a station. The modal
+can send a manual shutdown, enable shutdown after each reservation, or enable a
+weekly shutdown at a chosen day, local time, and timezone. Reservation-end and
+weekly automation are disabled until explicitly enabled. Manual shutdown is
+immediate after the Gateway check; reservation-end and weekly shutdowns use a
+60-second delay. Lab Station checks local mode and active sessions again before
+powering off.
+Saving or changing a weekly schedule does not trigger an immediate shutdown; it
+takes effect at the next selected weekly time.
+
+Reservation-end shutdown runs after the reservation's `release-session` and
+before the lab's `post_end` energy phase. It is best-effort: a blocked or failed
+station shutdown is recorded, while reservation cleanup and the remaining
+energy phase continue. It requires `OPS_RESERVATION_AUTOMATION=true`.
+Weekly shutdown skips stations that are off or
+unreachable; ambiguous status and unsafe session state are recorded as blocked
+without sending a power command. The schedule is stored in the local Ops
+database and applies to stations in both Full and Lite deployments.
 
 ## Windows v2 CLI and Linux v3 dispatcher
 

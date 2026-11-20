@@ -86,6 +86,8 @@ provider wallet.
    the Gateway, network switch, or any control-plane equipment with that strip.
 6. Return to `Operations`, provision the host, complete its management
    credentials and trust setup, check heartbeat, and run a controlled test.
+   Configure `Shutdown Ops` on the host card if it should shut down after each
+   reservation or on a weekly schedule.
 7. Create a test reservation and inspect the complete timeline: WoL,
    `prepare-session`, access, `release-session`, and any power actions.
 

@@ -26,6 +26,7 @@ from operations_blueprint import create_operations_blueprint
 from public_lab_status_blueprint import create_public_lab_status_blueprint
 from physical_operations_blueprint import create_physical_operations_blueprint
 from wake_ops_blueprint import create_wake_ops_blueprint
+from shutdown_ops_blueprint import create_shutdown_ops_blueprint
 from timeline_blueprint import create_timeline_blueprint
 from winrm_credentials_blueprint import create_winrm_credentials_blueprint
 from winrm_trust_blueprint import create_winrm_trust_blueprint
@@ -199,6 +200,17 @@ def register_blueprints(app: Flask, providers: Mapping[str, Any]) -> None:
             get_latest_wake=lambda host_name: get("_wake_ops_latest_wake")(host_name),
             manual_wake=lambda host_name: get("_wake_ops_manual_wake")(host_name),
             now=lambda: get("_wake_ops_now")(),
+        )
+    )
+    app.register_blueprint(
+        create_shutdown_ops_blueprint(
+            find_host=lambda host_name: get("HOSTS").get(host_name) if host_name else None,
+            get_schedule=lambda host_name: get("_shutdown_ops_get_schedule")(host_name),
+            save_schedule=lambda host_name, payload: get("_shutdown_ops_save_schedule")(
+                host_name,
+                payload,
+            ),
+            manual_shutdown=lambda host_name: get("_shutdown_ops_manual_shutdown")(host_name),
         )
     )
     app.register_blueprint(

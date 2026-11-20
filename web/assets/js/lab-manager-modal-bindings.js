@@ -19,6 +19,9 @@
             closeWakeOps = () => {},
             saveWakeOps = () => {},
             manualWakeOps = () => {},
+            closeShutdownOps = () => {},
+            saveShutdownOps = () => {},
+            manualShutdownOps = () => {},
         } = callbacks;
 
         function addListener(fieldName, eventName, callback) {
@@ -47,6 +50,10 @@
             addListener('cancelWakeOps', 'click', closeWakeOps);
             addListener('saveWakeOps', 'click', saveWakeOps);
             addListener('manualWakeOps', 'click', manualWakeOps);
+            addListener('closeShutdownOps', 'click', closeShutdownOps);
+            addListener('cancelShutdownOps', 'click', closeShutdownOps);
+            addListener('saveShutdownOps', 'click', saveShutdownOps);
+            addListener('manualShutdownOps', 'click', manualShutdownOps);
         }
 
         return Object.freeze({ bind });

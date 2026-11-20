@@ -189,6 +189,7 @@ def handle_reservation_end(
     authoritative_reservation: Optional[Mapping[str, Any]] = None,
     reconciliation_attempt: Optional[str] = None,
     reconciliation_only: bool = False,
+    shutdown_ops_optional: bool = False,
 ) -> Tuple[Dict[str, Any], int]:
     reservation_id = get_mandatory_field(payload, "reservationId", "reservation_id")
     host_name = get_mandatory_field(payload, "host", "hostName")
@@ -210,6 +211,7 @@ def handle_reservation_end(
     release_enabled = parse_bool(payload.get("release", True), True)
     power_cfg = payload.get("powerAction")
     steps: List[Dict[str, Any]] = []
+    warnings: List[str] = []
     success = True
     status_code = 200
 
@@ -286,8 +288,11 @@ def handle_reservation_end(
         )
         steps.append(step)
         if not ok:
-            success = False
-            status_code = 502
+            if shutdown_ops_optional:
+                warnings.append("Configured station shutdown did not complete; reservation cleanup continued")
+            else:
+                success = False
+                status_code = 502
 
     if success and lab_id:
         power_result = execute_power_phase(
@@ -309,6 +314,8 @@ def handle_reservation_end(
         "labId": lab_id,
         "steps": steps,
     }
+    if warnings:
+        response["warnings"] = warnings
     return response, status_code
 
 
