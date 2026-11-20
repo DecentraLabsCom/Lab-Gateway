@@ -103,6 +103,18 @@ body {
 }
 .ghost-btn:hover { transform: translateY(-2px); border-color: var(--primary); color: var(--primary); }
 
+#wakeOpsModal #wakeOpsManualWake {
+    background: transparent;
+    border-color: var(--success);
+    color: var(--success);
+    box-shadow: none;
+}
+#wakeOpsModal #wakeOpsManualWake:hover {
+    background: transparent;
+    border-color: #a7ffdf;
+    color: #a7ffdf;
+}
+
 .lm-tabs {
     margin-bottom: 24px;
 }
@@ -611,6 +623,19 @@ body {
     transform: translateY(-1px);
     border-color: #ffd0d0;
     box-shadow: 0 14px 30px rgba(134, 31, 50, 0.4);
+}
+
+#shutdownOpsModal #shutdownOpsManualShutdown {
+    background: transparent;
+    border-color: #ff8b8b;
+    color: #ff8b8b;
+    box-shadow: none;
+}
+#shutdownOpsModal #shutdownOpsManualShutdown:hover {
+    background: transparent;
+    border-color: #ffd0d0;
+    color: #ffd0d0;
+    box-shadow: none;
 }
 
 .danger-btn:focus-visible,
@@ -1891,6 +1916,14 @@ body {
 .modal-body { padding: 0 16px 16px; overflow-y: auto; }
 .icon-btn { width: 36px; height: 36px; border-radius: 50%; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem; }
 .footer-actions { display: flex; gap: 10px; align-items: center; }
+#wakeOpsModal .footer-actions > button,
+#shutdownOpsModal .footer-actions > button {
+    height: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
 
 .ssh-host-trust-dialog {
     width: min(560px, calc(100vw - 32px));
