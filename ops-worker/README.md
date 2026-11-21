@@ -317,7 +317,13 @@ off or unavailable Station from an internal worker failure.
 - `GET /api/reservations/timeline?reservationId=...&limit=...&offset=...`
 - `POST /api/hosts/reload`
 - `POST /api/hosts/local-mode`
-  - Enables local mode only for a hybrid Station after checking its live profile. Disabling a stale flag remains allowed.
+  - Enables local mode only for a Hybrid Station. Gateway requires fresh status
+    and session inventory with no remote LABUSER session; the current v3 Station
+    command also rejects an active persisted Station lease. The route does not
+    query the authoritative reservation projection, so schedule Enable Local
+    outside active reservation windows. The legacy Windows v2 compatibility
+    path writes the flag directly and omits the Station-side lease check.
+    Disabling a stale flag remains allowed.
 - `GET /api/operations/recent`
 - `POST /aas-admin/lab/<lab_id>/sync`
 

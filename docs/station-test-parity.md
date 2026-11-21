@@ -13,7 +13,11 @@ both vendored copies and keep both platform mappings pointing to executable
 tests. Native tests retain OS-specific implementation details while asserting
 the same policy results.
 
-For Prepare, Dedicated warns every active user session, waits through the
-grace period, then logs it off without a confirmation prompt. Hybrid requires
-local mode to be off and, when eviction is enabled, requires each affected
-local user to acknowledge the warning before the grace period and logoff.
+For Prepare, Dedicated warns every active local session and any Gateway-
+authorized remote LABUSER session, waits through the grace period, then logs
+those sessions off without a confirmation prompt. Other remote accounts remain
+connected and are not Prepare handoff targets. Dedicated does not support local
+mode. Hybrid requires local mode to be off and, when eviction is enabled, each
+eligible local or Gateway-authorized remote LABUSER session must affirmatively
+acknowledge its graphical prompt. Confirmation time counts against the grace
+period; any remaining time allows voluntary sign-out.

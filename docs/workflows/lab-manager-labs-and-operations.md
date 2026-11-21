@@ -330,13 +330,15 @@ rejected while a reservation or demo lease or any remote LABUSER session is
 active. Local LABUSER sessions remain signed in; Hybrid Release preserves local
 console sessions.
 
-`Enable Local` is available only for `hybrid`, after confirming session
-inventory and that no remote lab-user session or reservation is active. It
-marks exclusive on-site use and expires after eight hours by default on current
-Windows and Linux Stations. `Disable Local` remains available if a flag is
-present so an operator can clear a stale flag after a profile change. The
-Station serializes enabling against reservation operations and enforces the
-same profile rules as the Gateway.
+`Enable Local` is available only for `hybrid`, after a successful session
+inventory confirms no remote LABUSER session. On current v3 Stations, the
+command also rejects an active persisted Station lease. It does not query the
+Gateway's authoritative reservation projection, so schedule it outside active
+reservation windows. Local mode marks exclusive on-site use and expires after
+eight hours by default on current Windows and Linux Stations. `Disable Local`
+remains available if a flag is present so an operator can clear a stale flag
+after a profile change. The v3 Station serializes enabling against its lease
+journal.
 
 Heartbeat streaming starts only when the selected management credentials and
 trust are ready. For Windows v2, that means WinRM credentials and valid TLS

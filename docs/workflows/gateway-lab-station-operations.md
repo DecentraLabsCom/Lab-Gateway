@@ -440,7 +440,7 @@ The start path is normally:
    matrix](lab-station-session-policy-matrix.md).
 4. Record every attempt in `reservation_operations` and move the local projection to `ACTIVE` only after success.
 
-The end path normally runs the reservation's matching `release-session` without rebooting and can request a shutdown or hibernation action. On a Dedicated station, matching reservation Release logs off active local non-LABUSER console sessions and the managed remote LABUSER/Tiny Desk session, then restarts an installed FMU Executor and clears its temporary state. Administrative Release logs off the local non-LABUSER console sessions when allowed by the existing lease and remote-session protections. A local LABUSER console session remains signed in. Hybrid Release preserves local console sessions. Administrative Release is rejected while a lease or any remote LABUSER session is active; without a lease the Station cannot prove whether that remote session is reserved, so it remains protected. Incomplete session or FMU cleanup fails Release, leaves a reservation lease `recovery-required`, and prevents a requested reboot. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
+The end path normally runs the reservation's matching `release-session` without rebooting and can request a shutdown or hibernation action. On a Dedicated station, matching reservation Release logs off active local non-LABUSER console sessions and the managed remote LABUSER session (RemoteApp/RDP on Windows; XRDP/Tiny Desk on Linux), then restarts an installed FMU Executor and clears its temporary state. Administrative Release logs off the local non-LABUSER console sessions when allowed by the existing Station lease and remote-session protections. A local LABUSER console session remains signed in. Hybrid Release preserves local console sessions. Administrative Release is rejected while a Station lease or any remote LABUSER session is active; without a lease the Station cannot prove whether that remote session is reserved, so it remains protected. Incomplete session or FMU cleanup fails Release, leaves a reservation lease `recovery-required`, and prevents a requested reboot. A reboot is reserved for an explicit operational request, not the normal end-of-reservation path. The worker records the result and moves the local projection to `COMPLETED` only after successful cleanup. Missing host mappings and failed operations are recorded; they must be investigated rather than inferred from an on-chain reservation status.
 
 Each Station checks the lease's `expiresAt` locally as a fail-safe. Linux
 checks from `labstationd`; Windows checks from the setup-managed
@@ -472,12 +472,19 @@ Station's local reconciler has recovered the lease, while each Station still
 protects its own session state when Gateway connectivity is unavailable.
 
 Lab Manager's operator `Prepare`/`Release` controls follow the same physical
-profile rules. Dedicated `Release` closes active local non-LABUSER console
-sessions and the managed remote lab-user session; local LABUSER remains signed
-in. Hybrid `Release` preserves the local console user. The operator path is
-available only when no reservation or demo lease is active and no remote
-LABUSER session is active. `Enable Local` is hybrid-only; clearing an already
-active flag remains possible for cleanup.
+profile rules and carry no reservation context. The Station rejects them while
+an active Station lease or pending recovery is persisted. Dedicated `Release`
+closes active local non-LABUSER console sessions; local LABUSER remains signed
+in. Hybrid `Release` preserves the local console user. Administrative `Release`
+is also blocked by any remote LABUSER session. Administrative `Prepare` may
+handoff a remote LABUSER session only after Gateway proves that no mapped-lab
+reservation is active or imminent. `Enable Local` is hybrid-only. The current
+v3 path requires a fresh session inventory, no remote LABUSER session, and no
+active persisted Station lease, but does not query Gateway's authoritative
+reservation projection; use it outside active reservation windows. The legacy
+Windows v2 compatibility route updates the marker file directly and does not
+apply the Station-side lease check. Clearing an already active flag remains
+possible for cleanup.
 Before manual `Prepare`, the Gateway requires a fresh session inventory and
 authoritative proof that a remote `LABUSER` session has no active/imminent
 reservation on any mapped lab. If reservation state is unknown or a mapped-lab

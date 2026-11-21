@@ -3,7 +3,7 @@
 ## Terms
 
 - **Local session:** An interactive session on the physical Windows console or a local Linux seat. This includes a local session for `LABUSER`/`labuser`.
-- **Remote LABUSER session:** A Windows RDP or Linux XRDP/Tiny Desk session using the managed `LABUSER`/`labuser` account.
+- **Remote LABUSER session:** A Windows RemoteApp/RDP or Linux XRDP/Tiny Desk session using the managed `LABUSER`/`labuser` account.
 - **Other remote account:** A remote session that does not use the managed account. The session inventory classifies it as remote, but Prepare rules do not treat it the same as a remote LABUSER session.
 - **Administrative action:** An operator command with no reservation/demo context. It does not create or release a lease.
 - **Lease-bound action:** A Dispatcher v2 command carrying the identity, generation, and time window of a reservation or demo lease.
@@ -17,7 +17,7 @@
 | `hybrid` | Allows interactive local sign-in. With `local-mode` active, Prepare is rejected; otherwise eligible local sessions must confirm when `AllowLocalSessionEviction` is enabled. | Same policy; Linux uses `loginctl` and its local-session confirmation flow. | Sequential handoff, not guaranteed simultaneous use. `local-mode` protects declared local use; without it, remote access can request a handoff. |
 | `fmu-only` | Not supported as a physical profile for Prepare/Release. | Does not install Tiny Desk and does not support physical Prepare/Release. | Outside this physical-access matrix. |
 
-Windows and Linux classify physical sessions as local and RDP/XRDP sessions as remote, regardless of account. Linux uses the `loginctl` seat; Windows identifies the `console` session. Therefore, a remote session under another account does not set `localSessionActive`.
+Windows identifies its physical console as local and its RemoteApp/RDP sessions as remote. Linux uses the `loginctl` seat for local sessions and classifies XRDP/Tiny Desk sessions as remote. Both classifications apply regardless of account, so a remote session under another account does not set `localSessionActive`.
 
 ## Prepare matrix
 
@@ -25,15 +25,15 @@ The profile columns apply to both Windows and Linux unless a platform difference
 
 | Condition when preparing | `dedicated` | `hybrid` | Does Prepare continue? |
 | --- | --- | --- | --- |
-| No local session; `local-mode` off; inventory known | Continues if all other checks pass. | Same behavior. | Yes; Prepare cleans the managed environment and FMU Executor state first. |
+| No local session; the profile's local-mode guard is satisfied; inventory known | Continues if all other checks pass; Dedicated does not support local mode. | Continues if all other checks pass; Hybrid requires local mode off. | Yes; Prepare cleans the managed environment and FMU Executor state first. |
 | Local LABUSER session | Sends a warning, waits through the configured grace period, then logs off the session without a confirmation prompt. | With `AllowLocalSessionEviction=true` and local mode off, shows this session a graphical Allow/Deny prompt. Allow proceeds with the handoff; Deny, timeout, or an unavailable prompt cancels Prepare and leaves the session open. If eviction is disabled, Prepare rejects without prompting. | Dedicated proceeds after the warning and grace period. Hybrid proceeds only when every eligible local session allows the handoff; a denial or timeout cancels it. |
 | Local session for another account | Same behavior as for local LABUSER. | Same behavior as for local LABUSER. | Same profile-specific outcome as above; changed or unknown inventory fails before further logoff. |
 | Warning cannot be sent to every local session | Dedicated fails before logoff. | Same Dedicated behavior; Hybrid keeps its confirmation flow. | No silent Dedicated handoff. |
-| `local-mode` active or state unknown | Dedicated ignores stale markers; Hybrid rejects. | Same behavior. | Dedicated proceeds; Hybrid fails closed. A malformed Hybrid marker remains active until explicitly cleared. |
+| `local-mode` active or state unknown | Dedicated does not support local mode and treats any stale marker as disabled; Hybrid rejects. | Same behavior. | Dedicated proceeds; Hybrid fails closed. A malformed Hybrid marker remains active until explicitly cleared. |
 | Session inventory unknown or inconsistent | Rejects before handoff. | Same behavior. | No; inventory must be complete. |
 | Remote LABUSER session; another mapped-lab reservation is active, reservation state is unknown, or the incoming reservation already has access-session evidence | Rejects before handoff, even if the Station lease is missing. | Same behavior. | No; active or unverified access remains protected. |
 | Remote LABUSER session; no conflicting reservation or access-session evidence | Same handoff as a local LABUSER session: warn, wait the configured grace period, then log off without confirmation. | Same confirmation policy as a local LABUSER session: the eligible session must allow eviction; denial or timeout cancels Prepare. | Yes. Gateway passes the observed session IDs; the Station rechecks them before handoff and cleanup. |
-| Remote session under another account, with no active lease | Same handoff as a local non-LABUSER session: warn, wait the configured grace period, then log off without confirmation. | Same graphical confirmation policy as a local non-LABUSER session; denial or timeout cancels Prepare. | By policy, Prepare follows the profile-specific local-session rules. Current Windows and Linux agents leave these remote sessions out of the handoff, so Prepare may continue without closing them and shared cleanup may interrupt their work. |
+| Remote session under another account, with no active lease | Not included in Prepare's handoff; remains connected. | Same behavior. | Prepare may continue without closing it; shared FMU Executor cleanup may interrupt its work. |
 | Lease active, being prepared, or requiring recovery | Administrative Prepare is rejected. | Same behavior. | Contextual Prepare requires no other active lease or pending recovery; identity and generation prevent overlap. |
 | `AllowLocalSessionEviction=false` with a local session | Dedicated still warns and hands off; Hybrid follows this setting. | Same behavior. | The setting affects Hybrid only. |
 
@@ -52,7 +52,7 @@ On Windows, disconnected RDP sessions remain in `remoteLabUserSessionIds` and ca
 
 ## Release matrix
 
-Both variants have the same session effect; they differ in authorization and which lease state they can modify.
+Release effects depend on the Station profile; the variants differ in authorization and which lease state they can modify.
 
 | Variant | Windows | Linux | Lease effect |
 | --- | --- | --- | --- |
@@ -62,7 +62,7 @@ Both variants have the same session effect; they differ in authorization and whi
 
 | Sessions present during Release | Result for both Windows and Linux variants |
 | --- | --- |
-| Physical local console, any account | The local session is not logged off. If FMU Executor cleanup runs, it may interrupt the user's FMU work because the service is shared. |
+| Physical local console, any account | Dedicated logs off active local accounts other than LABUSER and preserves local LABUSER; Hybrid preserves local console sessions. Shared FMU Executor cleanup may still interrupt local FMU work. |
 | Remote LABUSER session, active lease | Only the matching lease-bound Release may close it. Administrative Release is rejected. |
 | Remote LABUSER session, no active lease | Administrative Release is also rejected because the Station cannot prove that the session is unreserved. The user must disconnect or an operator must end the OS session explicitly; FMU cleanup is not run by administrative Release. |
 | Remote session under another account | It is not logged off. Shared FMU Executor cleanup may still interrupt FMU work performed by that session. |
@@ -77,22 +77,22 @@ Release does not reboot the computer by default. If `--reboot` is explicitly req
 | Existing use | Administrative Prepare | Reservation/lease Prepare | Administrative or lease Release |
 | --- | --- | --- | --- |
 | LABUSER at the local console | Dedicated warns then hands off after grace; Hybrid follows local-mode and confirmation rules. | Same policy for both Prepare routes. | Preserves the local session; shared FMU cleanup may affect it. |
-| Another account at the local console | Same profile-specific behavior as above. | Same behavior. | Same effect. |
+| Another account at the local console | Same profile-specific behavior as above. | Same behavior. | Dedicated logs off the session; Hybrid preserves it. Shared FMU Executor cleanup may still affect its work. |
 | Remote LABUSER with an active lease | Rejected because a lease is active. | A second Prepare is rejected because the lease already exists. | Administrative Release is rejected. A matching lease Release can close the session and finish the lease. |
 | Residual remote LABUSER, no active lease | Prepare is rejected if Gateway cannot prove the session is unreserved; with authoritative proof, it follows the profile-specific handoff. Administrative Release stays blocked. | Same behavior. | Contextual Release requires a matching lease; administrative Release cannot close an unleased remote LABUSER session. |
-| Remote session under another account, no active lease | Apply the same profile-specific Prepare handoff as for a local non-LABUSER session. | Current Windows and Linux agents do not include these remote sessions in their handoff targets. | **Not yet implemented.** |
+| Remote session under another account, no active lease | Not included in Prepare's handoff; it remains connected and Prepare may continue. | Same behavior. | It is not logged off; shared FMU Executor cleanup may still affect its work. |
 
 ## Related controls and limits
 
-- **Local mode:** Can only be enabled in Hybrid, with a known inventory, no active lease, and no remote LABUSER session. Current configurations default to an eight-hour expiration. Enabling it blocks Hybrid Prepare but not Release; Release does not clear it. Dedicated status and Prepare treat local mode as unavailable and clear/ignore stale markers. Clearing local mode remains available on any profile.
+- **Local mode:** Can only be enabled in Hybrid, with a known inventory, no active Station lease, and no remote LABUSER session. The current Station Contract v3 path does not query Gateway's authoritative reservation projection, so operators should enable it outside active reservation windows. Current configurations default to an eight-hour expiration. Enabling it blocks Hybrid Prepare but not Release; Release does not clear it. Dedicated status and Prepare treat local mode as unavailable and clear/ignore stale markers. Clearing local mode remains available on any profile.
 - **Shutdown/hibernate:** Does not use the same session exception as Prepare. Gateway requires the Station to advertise the shutdown guard and blocks the request when `local-mode` is active or unknown, the inventory is unreliable, or any user session is active. Station checks again after the configured delay.
 - **`evictable` field:** Must not be used as a substitute for the Prepare decision. Hybrid depends on `AllowLocalSessionEviction`, `local-mode`, and confirmation. Dedicated warns and automatically hands off every local session. General Windows telemetry may mark local LABUSER as non-evictable while the Prepare-specific guard can release it; Linux reports local seat sessions as evictable.
-- **Concurrent connections:** The intended rule hands remote sessions under other accounts off using the same profile-specific Prepare flow as local non-LABUSER sessions when no lease is active. Current agents do not yet include those sessions in the handoff; AppControl/FMU cleanup may still affect their work.
+- **Concurrent connections:** Remote sessions under other account names are not included in Prepare's handoff and remain connected; shared FMU Executor cleanup may still affect their work.
 - **Linux support:** The agent README currently declares `supportTier: unverified` and prerelease status; session classification depends on the information provided by `loginctl` and the installed desktop environment.
 
 ## Compliance with the clarified priority rules
 
-The intended policy is:
+The current behavior is:
 
 - For a Dedicated reservation, remote admission and Prepare take precedence over all local sessions. Every local session receives an informational warning and grace period, then is logged off without an accept/decline prompt.
 - For a Hybrid station, `local-mode` protects declared on-site use and blocks Prepare. With it off, normal Prepare is turn-based: when eviction is enabled, each eligible local session can accept or decline the handoff; a decline or timeout leaves that session open and aborts Prepare. If eviction is disabled, Prepare is rejected.
