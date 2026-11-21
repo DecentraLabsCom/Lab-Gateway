@@ -81,7 +81,7 @@
                 <div class="reservation-item-main">
                     <div class="reservation-item-heading">
                         <span class="item-title">${escapeHtml(labLabel)}</span>
-                        <span class="reservation-item-reference">Reservation: <code title="${escapeHtml(key)}">${escapeHtml(shortAddress(key, 12, 10))}</code></span>
+                        <span class="reservation-item-reference">Reservation: <code title="${escapeHtml(key)}">${escapeHtml(key)}</code></span>
                         <span class="pill ${statusClass}">${escapeHtml(displayedStatus)}</span>
                     </div>
                     <div class="reservation-item-schedule">

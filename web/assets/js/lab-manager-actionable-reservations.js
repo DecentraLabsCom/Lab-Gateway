@@ -66,6 +66,27 @@
             button.textContent = loading ? 'Loading…' : 'Load more';
         }
 
+        function reservationStartTimestamp(reservation) {
+            const value = reservation?.start;
+            if (typeof value === 'number' && Number.isFinite(value)) return value;
+            if (typeof value !== 'string' || !value.trim()) return null;
+            const numeric = Number(value);
+            if (Number.isFinite(numeric)) return numeric;
+            const parsed = Date.parse(value);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+
+        function sortReservationsMostRecentFirst(reservations) {
+            reservations.sort((left, right) => {
+                const leftStart = reservationStartTimestamp(left);
+                const rightStart = reservationStartTimestamp(right);
+                if (leftStart === null) return rightStart === null ? 0 : 1;
+                if (rightStart === null) return -1;
+                return rightStart - leftStart;
+            });
+            return reservations;
+        }
+
         function render() {
             if (!listEl) return;
             if (!state.reservations.length) {
@@ -131,6 +152,7 @@
                 state.reservations = append
                     ? state.reservations.concat(page)
                     : page;
+                sortReservationsMostRecentFirst(state.reservations);
                 state.offset = Number.isFinite(Number(pagination.offset))
                     ? Number(pagination.offset)
                     : Number.isFinite(Number(body.offset))

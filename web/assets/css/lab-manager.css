@@ -1155,9 +1155,14 @@ body {
 .reservation-item-reference {
     color: var(--muted);
     font-size: 0.78rem;
-    white-space: nowrap;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
-.reservation-item-reference code { color: inherit; }
+.reservation-item-reference code {
+    color: inherit;
+    overflow-wrap: anywhere;
+    word-break: break-all;
+}
 .reservation-item-actions {
     grid-area: actions;
     display: flex;
