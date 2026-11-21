@@ -1112,8 +1112,8 @@ body {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, min(480px, 42%));
     grid-template-areas:
-        "main actions"
-        "meta actions";
+        "main side"
+        "meta side";
     column-gap: 12px;
     row-gap: 22px;
     align-items: start;
@@ -1128,6 +1128,14 @@ body {
     min-width: 0;
     flex-direction: column;
     gap: 5px;
+}
+.reservation-item-side {
+    grid-area: side;
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
 }
 .reservation-item-heading {
     display: flex;
@@ -1147,7 +1155,11 @@ body {
     color: var(--muted);
     font-size: 0.88rem;
 }
-.reservation-item-heading .pill { font-size: 0.75rem; }
+.reservation-item-status {
+    max-width: 100%;
+    font-size: 0.75rem;
+    text-align: center;
+}
 .reservation-item-heading .item-title {
     min-width: 0;
     overflow-wrap: anywhere;
@@ -1164,15 +1176,14 @@ body {
     word-break: break-all;
 }
 .reservation-item-actions {
-    grid-area: actions;
     display: flex;
+    width: 100%;
     flex-direction: column;
     align-items: flex-end;
     justify-content: flex-start;
     gap: 8px;
     flex-wrap: nowrap;
     min-width: 0;
-    margin-top: 36px;
 }
 .reservation-reason {
     width: 100%;
@@ -1206,13 +1217,15 @@ body {
         grid-template-columns: minmax(0, 1fr);
         grid-template-areas:
             "main"
-            "actions"
+            "side"
             "meta";
         row-gap: 5px;
     }
+    .reservation-item-side {
+        align-items: flex-start;
+    }
     .reservation-item-actions {
         align-items: flex-start;
-        margin-top: 0;
     }
     .reservation-item-heading { flex-wrap: wrap; }
     .reservation-cancel-note { text-align: left; }

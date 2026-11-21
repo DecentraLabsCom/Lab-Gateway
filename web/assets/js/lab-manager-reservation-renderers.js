@@ -82,13 +82,15 @@
                     <div class="reservation-item-heading">
                         <span class="item-title">${escapeHtml(labLabel)}</span>
                         <span class="reservation-item-reference">Reservation: <code title="${escapeHtml(key)}">${escapeHtml(key)}</code></span>
-                        <span class="pill ${statusClass}">${escapeHtml(displayedStatus)}</span>
                     </div>
                     <div class="reservation-item-schedule">
                         <span>${escapeHtml(formatReservationDate(reservation.start))} – ${escapeHtml(formatReservationDate(reservation.end))}</span>
                     </div>
                 </div>
-                ${actions}
+                <div class="reservation-item-side">
+                    <span class="pill reservation-item-status ${statusClass}">${escapeHtml(displayedStatus)}</span>
+                    ${actions}
+                </div>
                 <div class="reservation-item-meta">
                     <span>Price: ${escapeHtml(reservation.priceCredits || '0')} service credits</span>
                     <span>Provider share: ${escapeHtml(reservation.providerShareCredits || '0')} credits</span>
