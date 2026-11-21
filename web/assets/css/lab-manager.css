@@ -1934,6 +1934,11 @@ body {
     gap: 8px;
     margin-top: 6px;
 }
+.timeline-heartbeat-meta {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-top: 6px;
+}
 
 .modal {
     position: fixed;

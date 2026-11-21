@@ -241,8 +241,7 @@
                         ${renderHeartbeatPill('Local mode', heartbeat.localMode)}
                         ${renderHeartbeatPill('Local session', heartbeat.localSession)}
                     </div>
-                    <div class="meta">Power: ${htmlEscape(renderPowerInfo(heartbeat.lastPower))}</div>
-                    <div class="meta">Forced logoff: ${htmlEscape(renderLogoffInfo(heartbeat.lastForcedLogoff))}</div>
+                    <div class="timeline-heartbeat-meta">Power: ${htmlEscape(renderPowerInfo(heartbeat.lastPower))} · Forced logoff: ${htmlEscape(renderLogoffInfo(heartbeat.lastForcedLogoff))}</div>
                 </div>
             `;
         }
