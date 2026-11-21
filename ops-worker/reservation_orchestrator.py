@@ -879,9 +879,13 @@ class ReservationOrchestrator:
             payload["releaseAttempt"] = cycle_id
             payload["powerExecutionId"] = cycle_id
             payload["actor"] = "reservation-disconnect"
-            release_issued_at = self.as_utc_datetime(row.get("_lifecycle_updated_at"))
+            release_issued_at = self.as_utc_datetime(self.now())
             if release_issued_at is not None:
                 payload["releaseIssuedAt"] = release_issued_at.isoformat()
+        else:
+            # A scheduled Release gets a fresh dispatcher window and operation
+            # id on every scheduler attempt, even before the first failure.
+            payload["releaseAttempt"] = uuid4().hex
         dispatch_kwargs: Dict[str, Any] = {}
         if self.projection_url:
             dispatch_kwargs["authoritative_reservation"] = dict(row)

@@ -183,14 +183,14 @@ def test_dispatch_end_passes_the_selected_reservation_to_the_lifecycle_handler()
     orchestrator._dispatch_end(reservation)
 
     resolver.assert_called_once_with("lab-2")
-    dispatch.assert_called_once_with(
-        {
-            "reservationId": "reservation-2",
-            "host": "station-current",
-            "labId": "lab-2",
-        },
-        authoritative_reservation=reservation,
-    )
+    dispatch.assert_called_once()
+    payload = dispatch.call_args.args[0]
+    assert payload["reservationId"] == "reservation-2"
+    assert payload["host"] == "station-current"
+    assert payload["labId"] == "lab-2"
+    assert len(payload["releaseAttempt"]) == 32
+    assert payload["releaseAttempt"].isalnum()
+    assert dispatch.call_args.kwargs == {"authoritative_reservation": reservation}
 
 
 def test_station_close_fallback_waits_three_minutes_and_requires_fresh_idle_station_state():
