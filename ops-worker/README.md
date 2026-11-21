@@ -395,8 +395,8 @@ retain a 240-second disconnected-session safety limit so the Gateway retry can
 run first. FMU-only lifecycles do not need a Station close result. A reconnect
 after grace expiry is recorded even while release is running. If it arrives
 after Station closed the applications and remains connected before the worker
-claims `ENDING`, the worker starts a new `pre_start`, `prepare-session`, and
-`post_start` cycle without starting end phases. If a reconnect races an
+claims `ENDING`, the worker starts a new `pre_start`, `start`, `prepare-session`,
+and `post_start` cycle without starting end phases. If a reconnect races an
 already claimed early release, the Station guard refuses to log off the active
 RDP client; disconnect cleanup stays pending until another disconnect or the
 scheduled end. The scheduled end remains in place for no-shows and final
@@ -418,7 +418,7 @@ Guacamole temporary-user cleanup:
 - `GUACAMOLE_TEMP_USER_CLEANUP_ENABLED` (default `true`)
 - `GUACAMOLE_TEMP_USER_CLEANUP_INTERVAL_SECONDS` (default `900`)
 
-When a lab has a configured power policy, reservation start executes `pre_start` before Wake-on-LAN and `post_start` after preparation. Reservation end executes `pre_end`, the existing release/power action, and `post_end`. The policy can skip these phases while the latest persisted Lab Station heartbeat reports local mode.
+When a lab has a configured power policy, reservation start executes `pre_start` before Wake-on-LAN, `start` after the Wake attempt and before Station preparation, and `post_start` after the Prepare attempt even if that Station command fails. Reservation end executes `pre_end`, attempts Station Release even if `pre_end` fails, then executes `end` and `post_end` even if Release fails so equipment shutdown is not blocked by lease cleanup. Enabled reservation-end Shutdown Ops is attempted at the scheduled end, after `end`, even if Release or `end` fails; it is skipped during an early disconnect cleanup while the reservation remains active. Gateway and Station idle guards still prevent shutdown during local or user activity. An explicit `powerAction` remains gated on successful cleanup. The policy can skip its phases while the latest persisted Lab Station heartbeat reports local mode.
 
 Notification integration knobs:
 

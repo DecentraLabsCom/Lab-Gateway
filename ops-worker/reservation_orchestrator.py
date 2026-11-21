@@ -672,6 +672,8 @@ class ReservationOrchestrator:
             if (
                 status == "CONFIRMED"
                 and start_time is not None
+                and end_time is not None
+                and end_time > now
                 and window_lower <= start_time <= window_upper
                 and (reservation_id, "scheduler:start") not in successful_actions
                 and (reservation_id, "scheduler:start") not in recent_actions
@@ -702,6 +704,7 @@ class ReservationOrchestrator:
             WHERE r.status = 'CONFIRMED'
               AND r.start_time <= :window_upper
               AND r.start_time >= :window_lower
+              AND r.end_time > :now
               AND NOT EXISTS (
                   SELECT 1 FROM reservation_operations o
                   WHERE o.reservation_id = r.transaction_hash
@@ -717,6 +720,7 @@ class ReservationOrchestrator:
             {
                 "window_upper": window_upper,
                 "window_lower": window_lower,
+                "now": now,
                 "retry_cutoff": retry_cutoff,
                 "max_batch": max_batch,
             },

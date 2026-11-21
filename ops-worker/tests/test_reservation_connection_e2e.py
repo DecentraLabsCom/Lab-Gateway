@@ -254,7 +254,7 @@ def test_connection_event_reaches_release_phases_through_worker_api_and_schedule
     orchestrator.scan_once()
     orchestrator.scan_once()
 
-    assert events == ["pre_end", "release-session", "post_end"]
+    assert events == ["pre_end", "release-session", "end", "post_end"]
     orchestrator.dispatch_end = Mock()
     orchestrator.scan_once()
     orchestrator.dispatch_end.assert_not_called()
@@ -413,7 +413,7 @@ def test_station_close_fallback_runs_at_three_minutes_only_after_fresh_idle_stat
     }
     orchestrator.scan_once()
 
-    assert events == ["pre_end", "release-session", "post_end"]
+    assert events == ["pre_end", "release-session", "end", "post_end"]
     with db_engine.connect() as conn:
         state = conn.execute(
             text(
@@ -497,7 +497,7 @@ def test_scheduled_end_preempts_missing_station_close_fallback_near_reservation_
     scan_at = scheduled_end
     status_payload["value"]["timestamp"] = scan_at.isoformat()
     orchestrator.scan_once()
-    assert events == ["pre_end", "release-session", "post_end"]
+    assert events == ["pre_end", "release-session", "end", "post_end"]
 
     # Make the fallback conditions true after completion. The reservation
     # must not be released a second time.
@@ -507,7 +507,7 @@ def test_scheduled_end_preempts_missing_station_close_fallback_near_reservation_
         {"remoteClientConnected": False, "remoteLabUserSessionIds": []}
     )
     orchestrator.scan_once()
-    assert events == ["pre_end", "release-session", "post_end"]
+    assert events == ["pre_end", "release-session", "end", "post_end"]
     with db_engine.connect() as conn:
         reservation_status = conn.execute(
             text("SELECT status FROM lab_reservations WHERE transaction_hash=:reservation_id"),
@@ -575,7 +575,7 @@ def test_disconnect_with_less_than_two_minutes_left_uses_scheduled_end(
 
     scan_at = scheduled_end
     orchestrator.scan_once()
-    assert events == ["pre_end", "release-session", "post_end"]
+    assert events == ["pre_end", "release-session", "end", "post_end"]
     with db_engine.connect() as conn:
         state = conn.execute(
             text(
@@ -640,7 +640,7 @@ def test_first_connection_with_less_than_two_minutes_left_still_ends_at_schedule
 
     scan_at = scheduled_end
     orchestrator.scan_once()
-    assert events == ["pre_end", "release-session", "post_end"]
+    assert events == ["pre_end", "release-session", "end", "post_end"]
     with db_engine.connect() as conn:
         state = conn.execute(
             text(
@@ -728,6 +728,7 @@ def test_contiguous_reservation_start_retries_after_previous_lease_is_released(
             [
                 f"{reservation_id}:pre_end",
                 f"{reservation_id}:release-session",
+                f"{reservation_id}:end",
                 f"{reservation_id}:post_end",
             ]
         )
@@ -746,25 +747,30 @@ def test_contiguous_reservation_start_retries_after_previous_lease_is_released(
     _install_sqlite_status_updates(orchestrator, db_engine)
 
     # pre_start runs while the prior reservation still owns the station lease;
-    # Station rejects Prepare, leaving the next reservation confirmed for retry.
+    # Station rejects Prepare, but later start energy phases still run.
     orchestrator.scan_once()
     assert timeline == [
         f"{next_id}:pre_start",
         f"{next_id}:wake",
+        f"{next_id}:start",
         f"{next_id}:prepare-session:lease-conflict",
+        f"{next_id}:post_start",
     ]
 
     # At the shared boundary, the current scheduler retries the next start
     # before dispatching the previous end. That Prepare is also rejected; the
-    # previous reservation still receives its scheduled release.
+    # previous reservation still receives its scheduled energy cleanup.
     scan_at = next_start
     orchestrator.scan_once()
-    assert timeline[3:9] == [
+    assert timeline[5:14] == [
         f"{next_id}:pre_start",
         f"{next_id}:wake",
+        f"{next_id}:start",
         f"{next_id}:prepare-session:lease-conflict",
+        f"{next_id}:post_start",
         f"{previous_id}:pre_end",
         f"{previous_id}:release-session",
+        f"{previous_id}:end",
         f"{previous_id}:post_end",
     ]
 
@@ -772,9 +778,10 @@ def test_contiguous_reservation_start_retries_after_previous_lease_is_released(
     # released station lease and complete its start phases.
     scan_at = next_start + timedelta(seconds=61)
     orchestrator.scan_once()
-    assert timeline[9:] == [
+    assert timeline[14:] == [
         f"{next_id}:pre_start",
         f"{next_id}:wake",
+        f"{next_id}:start",
         f"{next_id}:prepare-session:ok",
         f"{next_id}:post_start",
     ]

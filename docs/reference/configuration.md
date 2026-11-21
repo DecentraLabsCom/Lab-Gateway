@@ -204,7 +204,7 @@ Linux XRDP retain a 240-second disconnected-session limit, leaving time for the
 Gateway retry at 180 seconds before the operating-system fallback. FMU-only
 lifecycles do not need a Station close result. A reconnect after the grace
 expires that remains connected before Ops Worker claims `ENDING` starts a new
-`pre_start`, `prepare-session`, and `post_start` cycle. If a reconnect races an
+`pre_start`, `start`, `prepare-session`, and `post_start` cycle. If a reconnect races an
 already claimed early release, the Station guard refuses to log off the active
 RDP client; disconnect cleanup remains pending until the session disconnects
 again or the scheduled end performs final cleanup. No-show reservations

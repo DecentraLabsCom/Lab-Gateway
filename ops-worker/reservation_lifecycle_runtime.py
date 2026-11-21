@@ -52,7 +52,12 @@ class ReservationLifecycleRuntime:
     ) -> Tuple[Dict[str, Any], int]:
         end_payload = dict(payload)
         shutdown_ops_optional = False
-        if not reconciliation_only and not end_payload.get("powerAction"):
+        is_disconnect_cleanup = end_payload.get("actor") == "reservation-disconnect"
+        if (
+            not reconciliation_only
+            and not is_disconnect_cleanup
+            and not end_payload.get("powerAction")
+        ):
             get_schedule = self._context.get_shutdown_ops_schedule
             if get_schedule is not None:
                 lab_id = end_payload.get("labId") or end_payload.get("lab_id")

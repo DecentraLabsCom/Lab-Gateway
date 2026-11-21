@@ -34,7 +34,8 @@ def test_start_preserves_phase_order_and_defaults():
     assert response["success"] is True
     assert [step["action"] for step in response["steps"]] == ["wake", "prepare"]
     assert deps["execute_power_phase"].call_args_list[0].args[3] == "pre_start"
-    assert deps["execute_power_phase"].call_args_list[1].args[3] == "post_start"
+    assert deps["execute_power_phase"].call_args_list[1].args[3] == "start"
+    assert deps["execute_power_phase"].call_args_list[2].args[3] == "post_start"
     deps["perform_command_step"].assert_called_once_with(
         {"name": "lab-ws-01", "management": {"transport": "legacy-test"}},
         "r-1",

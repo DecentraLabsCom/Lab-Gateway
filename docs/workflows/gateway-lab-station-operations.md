@@ -227,7 +227,7 @@ separate.
 A reconnect after the grace expires is recorded even if the release sequence
 is still running. If it arrives after Station has closed the applications and
 remains connected before Ops Worker claims `ENDING`, the worker starts a fresh
-`pre_start`, `prepare-session`, and `post_start` cycle without starting the end
+`pre_start`, `start`, `prepare-session`, and `post_start` cycle without starting the end
 phases. If a reconnect races an already claimed early release, the Station
 guard refuses to log off the active RDP client; disconnect cleanup remains
 pending until the session disconnects again or the scheduled end performs final
@@ -241,19 +241,30 @@ reservations that never create a tracked connection.
 `T0` is the reservation start and `T_end` is its scheduled end. With the
 default 120-second start lead and 10-second scheduler scan, preparation
 normally starts on the first scan in the `T0-120 s` to `T0-110 s` window.
-`pre_start` runs before Wake-on-LAN; `post_start` runs after session
-preparation. The reservation workflow does not dispatch a separate `start`
-energy phase. At `T_end`, cleanup is eligible immediately and starts on the
-next scan, normally within 10 seconds. The diagram shows the successful path;
-failed operations are recorded and reconciled by the orchestrator.
+`pre_start` runs before Wake-on-LAN, `start` runs after the Wake attempt and
+before Station preparation, and `post_start` runs after the Prepare attempt,
+even when either Station operation fails. Start retries stop once `T_end` has passed; scheduled end cleanup
+handles the no-show or failed-start reservation. At `T_end`, cleanup is eligible
+immediately and starts on the next scan, normally within 10 seconds. The diagram
+shows the successful path; failed operations are recorded and reconciled by the
+orchestrator. At end, the `end` and `post_end` energy policy phases run after
+the Release step even when it fails. The automatic station shutdown from an
+enabled reservation-end `Shutdown Ops` schedule is also attempted at the
+scheduled reservation end if Release or the `end` phase fails. It is not run
+during an early disconnect cleanup while the reservation remains active. It
+remains best-effort:
+Gateway preflight and the Station's idle guard block shutdown when local mode
+is enabled, session inventory is unknown, or a user session is active. An
+explicit `powerAction` request remains gated on successful cleanup.
 
 ```mermaid
 flowchart TD
     CONFIRMED["Reservation confirmed"] --> START_WINDOW["First eligible scan in the T0-120 s lead window"]
     START_WINDOW --> PRE_START["pre_start energy policy, if configured"]
-    PRE_START --> WAKE["Wake-on-LAN and wait for reachability, if enabled"]
-    WAKE --> PREPARE["prepare-session, when enabled for the Station"]
-    PREPARE --> POST_START["post_start energy policy, if configured"]
+    PRE_START --> WAKE["Wake-on-LAN attempt, if enabled"]
+    WAKE --> START_POLICY["start energy policy, if configured"]
+    START_POLICY --> PREPARE["prepare-session attempt, when enabled for the Station"]
+    PREPARE --> POST_START["post_start energy policy, if configured, even if Prepare fails"]
     POST_START --> PREPARED["Reservation session prepared"]
     CONFIRMED --> T0["T0: scheduled reservation start"]
     T0 --> ACTIVE["Reservation interval; user may or may not connect"]
@@ -262,9 +273,10 @@ flowchart TD
     T_END --> END_SCAN["Next Ops Worker scan, normally within 10 s"]
     END_SCAN --> PRE_END["pre_end energy policy"]
     PRE_END --> RELEASE["release-session"]
-    RELEASE --> POWER{"Configured powerAction?"}
-    POWER -->|"Yes"| POWER_ACTION["Run shutdown or hibernate action"]
-    POWER -->|"No"| POST_END["post_end energy policy"]
+    RELEASE --> END_POLICY["end energy policy after Release attempt"]
+    END_POLICY --> SAFE_POWER{"Shutdown Ops enabled for reservation end?"}
+    SAFE_POWER -->|"Yes; attempt with idle guard"| POWER_ACTION["Attempt station shutdown"]
+    SAFE_POWER -->|"No"| POST_END["post_end energy policy"]
     POWER_ACTION --> POST_END
     POST_END --> COMPLETED["Mark local reservation projection COMPLETED"]
 ```
@@ -345,7 +357,7 @@ flowchart TD
     END_MARGIN -->|"No: scheduled end is near"| WAIT_END
     END_MARGIN -->|"Yes"| CLAIM
 
-    CLAIM -->|"Reconnect wins before ENDING is claimed"| RESUME["Run pre_start, prepare-session, and post_start; skip end phases"]
+    CLAIM -->|"Reconnect wins before ENDING is claimed"| RESUME["Run pre_start, start, prepare-session, and post_start; skip end phases"]
     CLAIM -->|"Claim succeeds"| PRE_END["pre_end energy policy"]
 
     RESERVATION["Reservation exists, with or without a tracked connection"] --> SCHEDULED["At T_end: scheduled cleanup runs, including for a no-show"]
@@ -353,9 +365,10 @@ flowchart TD
     SCHEDULED --> PRE_END
 
     PRE_END --> RELEASE["release-session; disconnect path includes disconnected-RDP guard"]
-    RELEASE --> ORIGIN{"Scheduled-end cleanup?"}
-    ORIGIN -->|"Yes"| POWER{"Configured powerAction?"}
-    POWER -->|"Yes"| POWER_ACTION["Run shutdown or hibernate action"]
+    RELEASE --> END_POLICY["end energy policy, even if Release fails"]
+    END_POLICY --> ORIGIN{"Scheduled-end cleanup?"}
+    ORIGIN -->|"Yes"| POWER{"Shutdown Ops enabled?"}
+    POWER -->|"Yes; attempt with idle guard"| POWER_ACTION["Attempt station shutdown"]
     POWER -->|"No"| POST_SCHEDULED["post_end energy policy"]
     POWER_ACTION --> POST_SCHEDULED
     ORIGIN -->|"No: early disconnect release"| POST_EARLY["post_end energy policy"]
@@ -536,10 +549,13 @@ detects use.
 Saving or changing a weekly schedule does not trigger an immediate shutdown; it
 takes effect at the next selected weekly time.
 
-Reservation-end shutdown runs after the reservation's `release-session` and
-before the lab's `post_end` energy phase. It is best-effort: a blocked or failed
-station shutdown is recorded, while reservation cleanup and the remaining
-energy phase continue. It requires `OPS_RESERVATION_AUTOMATION=true`.
+Reservation-end shutdown runs only at the scheduled reservation end, after the
+`release-session` attempt and the lab's `end` energy phase, before `post_end`.
+It is also attempted if Release or the `end` phase fails. It does not run during
+early disconnect cleanup while the reservation remains active. Shutdown is
+best-effort: a blocked or failed station shutdown is recorded, while reservation
+cleanup and the remaining energy phase continue. It requires
+`OPS_RESERVATION_AUTOMATION=true`.
 Weekly shutdown skips stations that are off or
 unreachable; ambiguous status and unsafe session state are recorded as blocked
 without sending a power command. The schedule is stored in the local Ops

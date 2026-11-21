@@ -43,6 +43,7 @@ def handle_reservation_start(
     guard_grace = int(payload.get("guardGrace", 90))
     steps: List[Dict[str, Any]] = []
     success = True
+    power_phases_success = True
     status_code = 200
 
     if lab_id:
@@ -56,6 +57,7 @@ def handle_reservation_start(
         steps.extend(power_result.get("steps", []))
         if not power_result.get("success"):
             success = False
+            power_phases_success = False
             status_code = 502
 
     if success and wake_enabled:
@@ -68,6 +70,20 @@ def handle_reservation_start(
         steps.append(step)
         if not ok:
             success = False
+            status_code = 502
+
+    if power_phases_success and lab_id:
+        power_result = execute_power_phase(
+            reservation_id,
+            lab_id,
+            host,
+            "start",
+            payload,
+        )
+        steps.extend(power_result.get("steps", []))
+        if not power_result.get("success"):
+            success = False
+            power_phases_success = False
             status_code = 502
 
     if success and prepare_enabled:
@@ -152,7 +168,7 @@ def handle_reservation_start(
                 success = False
                 status_code = 502
 
-    if success and lab_id:
+    if power_phases_success and lab_id:
         power_result = execute_power_phase(
             reservation_id,
             lab_id,
@@ -228,7 +244,10 @@ def handle_reservation_end(
             success = False
             status_code = 502
 
-    if success and release_enabled:
+    # Station lease cleanup is independent of the pre-end energy result. Even
+    # when a power step fails, attempt Release and retain the failure in the
+    # aggregate reservation result.
+    if release_enabled:
         release_args = normalize_args(payload.get("releaseArgs"), [])
         if payload.get("actor") == "reservation-disconnect" and "--require-rdp-disconnected" not in release_args:
             release_args.append("--require-rdp-disconnected")
@@ -276,7 +295,32 @@ def handle_reservation_end(
             success = False
             status_code = 502
 
-    if success and power_cfg and not reconciliation_only:
+    # Energy shutdown phases must run even when Station Release fails. The
+    # reservation remains failed and retryable, but lab equipment must not stay
+    # powered merely because Station lease cleanup is unavailable.
+    if lab_id:
+        power_result = execute_power_phase(
+            reservation_id,
+            lab_id,
+            host,
+            "end",
+            payload,
+        )
+        steps.extend(power_result.get("steps", []))
+        if not power_result.get("success"):
+            success = False
+            status_code = 502
+
+    # A Shutdown Ops action injected from the per-host reservation-end
+    # schedule is best-effort cleanup. Try it even if Release or an energy
+    # phase failed; the Gateway preflight and Station's require-idle guard
+    # independently prevent shutdown while the Station is in use. Explicit
+    # powerAction requests remain gated on successful cleanup.
+    if (
+        power_cfg
+        and not reconciliation_only
+        and (success or shutdown_ops_optional)
+    ):
         mode = power_cfg.get("mode", "shutdown")
         extra_args = normalize_args(power_cfg.get("args"), [])
         args = [mode] + extra_args
@@ -296,7 +340,7 @@ def handle_reservation_end(
                 success = False
                 status_code = 502
 
-    if success and lab_id:
+    if lab_id:
         power_result = execute_power_phase(
             reservation_id,
             lab_id,

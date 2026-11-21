@@ -197,9 +197,11 @@ Available phases are:
 | Phase | Typical use |
 | --- | --- |
 | `pre_start` | Power PLCs, HMIs, and other equipment before waking/preparing the station. |
-| `start` / `post_start` | Actions during or after preparation. |
+| `start` | Actions after the Wake attempt and before Station preparation, even if Wake fails. |
+| `post_start` | Actions after the Prepare attempt, even if Prepare fails. |
 | `pre_end` | Prepare shutdown before releasing the reservation. |
-| `end` / `post_end` | Turn off the configured outlets in the policy order. |
+| `end` | Actions after the Station Release attempt, even when Release fails, and before an optional station power action. |
+| `post_end` | Final policy actions; run after the optional station power action even when Release or another closing step fails. Commonly used to turn off configured outlets. |
 | `manual`, `maintenance`, `emergency_stop` | Explicit procedures outside the normal cycle. |
 
 A typical initial policy powers required outlets on in `pre_start` and powers
@@ -254,10 +256,11 @@ flow is:
 | Moment | Operation |
 | --- | --- |
 | Before start | Policy `pre_start` phase. |
-| Preparation | WoL and Lab Station `prepare-session`; `start`/`post_start` phases run according to the scheduler. |
+| Preparation | `start` runs after the WoL attempt and before Lab Station `prepare-session`; `post_start` runs after the Prepare attempt even if it fails. |
 | Before end | Policy `pre_end` phase, when defined. |
-| Release | `release-session` and the configured closing operation. |
-| After end | Policy `post_end` phase, normally to switch outlets off. |
+| Release | Lab Station `release-session` is attempted even if `pre_end` fails. A failure remains recorded and retryable. |
+| End | Policy `end` phase after the Release attempt, even if Release fails. Enabled reservation-end `Shutdown Ops` is attempted after this phase even if Release or `end` fails, subject to the idle guard. |
+| After end | Policy `post_end` runs last, including when Release, station shutdown, or another closing step fails; commonly used to switch outlets off. |
 
 Energy automation does not replace WoL, Station management, heartbeat, or Lab
 Station session control. These are complementary layers. `respectLocalMode`
