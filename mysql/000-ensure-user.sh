@@ -129,7 +129,7 @@ grant_guacamole_worker_tables() {
 
     exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='guacamole_connection_group_permission' LIMIT 1" || true)"
     if [ "$exists" = "1" ]; then
-        mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "GRANT INSERT, DELETE ON \`${escaped_mysql_database}\`.\`guacamole_connection_group_permission\` TO '${escaped_ops_guacamole_mysql_user}'@'%';"
+        mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "GRANT SELECT, INSERT, DELETE ON \`${escaped_mysql_database}\`.\`guacamole_connection_group_permission\` TO '${escaped_ops_guacamole_mysql_user}'@'%';"
     fi
 
     # History is evidence only; the worker must never mutate it.
