@@ -34,7 +34,7 @@ ensure_schema() {
         return 0
     fi
 
-    for table in guacamole_entity guacamole_user guacamole_system_permission guacamole_user_permission; do
+    for table in guacamole_entity guacamole_user guacamole_system_permission guacamole_user_permission guacamole_connection_group guacamole_connection_group_permission; do
         exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${schema}' AND table_name='${table}' LIMIT 1" || true)"
         if [ "$exists" != "1" ]; then
             missing+=("$table")
@@ -122,6 +122,16 @@ grant_guacamole_worker_tables() {
         fi
     done
 
+    exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='guacamole_connection_group' LIMIT 1" || true)"
+    if [ "$exists" = "1" ]; then
+        mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "GRANT SELECT ON \`${escaped_mysql_database}\`.\`guacamole_connection_group\` TO '${escaped_ops_guacamole_mysql_user}'@'%';"
+    fi
+
+    exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='guacamole_connection_group_permission' LIMIT 1" || true)"
+    if [ "$exists" = "1" ]; then
+        mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "GRANT INSERT, DELETE ON \`${escaped_mysql_database}\`.\`guacamole_connection_group_permission\` TO '${escaped_ops_guacamole_mysql_user}'@'%';"
+    fi
+
     # History is evidence only; the worker must never mutate it.
     exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='guacamole_connection_history' LIMIT 1" || true)"
     if [ "$exists" = "1" ]; then
@@ -171,7 +181,7 @@ waited=0
 max_wait=60
 while true; do
     missing_tables=()
-    for table in guacamole_entity guacamole_user guacamole_system_permission guacamole_user_permission; do
+    for table in guacamole_entity guacamole_user guacamole_system_permission guacamole_user_permission guacamole_connection_group guacamole_connection_group_permission; do
         exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='${table}' LIMIT 1" || true)"
         if [ "$exists" != "1" ]; then
             missing_tables+=("$table")
@@ -186,7 +196,7 @@ while true; do
         echo "Guacamole schema not ready after ${max_wait}s (missing: ${missing_tables[*]}); attempting auto-import."
         if ensure_schema "${MYSQL_DATABASE}"; then
             missing_tables=()
-            for table in guacamole_entity guacamole_user guacamole_system_permission guacamole_user_permission; do
+            for table in guacamole_entity guacamole_user guacamole_system_permission guacamole_user_permission guacamole_connection_group guacamole_connection_group_permission; do
                 exists="$(mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -N -B -e "SELECT 1 FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name='${table}' LIMIT 1" || true)"
                 if [ "$exists" != "1" ]; then
                     missing_tables+=("$table")

@@ -205,6 +205,29 @@ if resource_type == "lab"
     return local_fail(401, "Invalid access credential reservation")
 end
 
+-- A physical reservation carries its Guacamole selector in the signed JWT.
+-- Preserve the existing clean URL hand-off while opening that exact connection
+-- directly in Guacamole instead of landing on the connection list.
+local redirect_path = path
+if resource_type == "lab" and type(claims.accessKey) == "string" then
+    local connection_id = claims.accessKey:match("^guac:id:([1-9]%d*)$")
+    local numeric_connection_id = connection_id and tonumber(connection_id)
+    if connection_id and #connection_id <= 10 and numeric_connection_id
+        and numeric_connection_id <= 2147483647 then
+        local base_path = (path or ""):gsub("/+$", "")
+        if base_path == "" then
+            base_path = "/guacamole"
+        end
+        if base_path == "/guacamole" then
+            local client_identifier = ngx.encode_base64(connection_id .. "\0c\0mysql")
+                :gsub("%+", "-")
+                :gsub("/", "_")
+                :gsub("=", "")
+            redirect_path = base_path .. "/#/client/" .. client_identifier
+        end
+    end
+end
+
 local username_lower = string.lower(username)
 local remaining_lifetime = math.max(1, exp - ngx.time())
 local token_security_retention = tonumber(config:get("guac_token_security_retention_seconds")) or 1200
@@ -254,5 +277,5 @@ ngx.header["Set-Cookie"] = "JTI=" .. jti .. "; Max-Age=" .. remaining_lifetime .
 ngx.header["Referrer-Policy"] = "no-referrer"
 
 ngx.status = 303
-ngx.header["Location"] = path ~= "" and path or "/guacamole/"
+ngx.header["Location"] = redirect_path and redirect_path ~= "" and redirect_path or "/guacamole/"
 return ngx.exit(303)

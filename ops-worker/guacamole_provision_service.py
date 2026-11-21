@@ -14,6 +14,53 @@ def _validate_session_id(session_id: str) -> str:
     return str(session_id)
 
 
+def _organizational_group_path(
+    conn: Any,
+    connection_id: int,
+    sql_text: Callable[[str], Any],
+) -> list[int]:
+    """Return the organizational groups needed to expose a connection in the tree.
+
+    A READ grant on a balancing group would authorize using the load balancer,
+    which can select any child connection. Reservation users are scoped to one
+    connection, so such a path cannot be granted safely.
+    """
+    group_id = conn.execute(
+        sql_text("SELECT parent_id FROM guacamole_connection WHERE connection_id = :connection_id"),
+        {"connection_id": connection_id},
+    ).scalar()
+
+    path: list[int] = []
+    visited: set[int] = set()
+    while group_id is not None:
+        if group_id in visited:
+            raise RuntimeError("Cycle detected in Guacamole connection group hierarchy")
+        visited.add(group_id)
+
+        group = conn.execute(
+            sql_text(
+                "SELECT parent_id, type FROM guacamole_connection_group "
+                "WHERE connection_group_id = :group_id"
+            ),
+            {"group_id": group_id},
+        ).first()
+        if group is None:
+            raise RuntimeError("Guacamole connection references a missing group")
+
+        parent_id, group_type = group[0], str(group[1]).upper()
+        if group_type == "BALANCING":
+            raise RuntimeError(
+                "Reservation access cannot target a connection inside a Guacamole balancing group"
+            )
+        if group_type != "ORGANIZATIONAL":
+            raise RuntimeError("Unsupported Guacamole connection group type")
+
+        path.append(group_id)
+        group_id = parent_id
+
+    return path
+
+
 def provision_temporary_user(
     selector: str,
     session_id: str,
@@ -115,12 +162,58 @@ def provision_temporary_user(
                     ),
                     {"entity_id": entity_id, "connection_id": connection_id},
                 )
+
+            # Reconcile managed-user permissions on every provision so a reused
+            # session ID cannot retain access to an earlier connection or group.
+            conn.execute(
+                sql_text(
+                    "DELETE FROM guacamole_connection_permission "
+                    "WHERE entity_id = :entity_id "
+                    "AND NOT (connection_id = :connection_id AND permission = 'READ')"
+                ),
+                {"entity_id": entity_id, "connection_id": connection_id},
+            )
+
+            group_path = _organizational_group_path(conn, connection_id, sql_text)
+            conn.execute(
+                sql_text(
+                    "DELETE FROM guacamole_connection_group_permission "
+                    "WHERE entity_id = :entity_id"
+                ),
+                {"entity_id": entity_id},
+            )
+            for group_id in group_path:
+                if conn.dialect.name == "mysql":
+                    conn.execute(
+                        sql_text(
+                            """
+                            INSERT INTO guacamole_connection_group_permission
+                                (entity_id, connection_group_id, permission)
+                            VALUES (:entity_id, :group_id, 'READ')
+                            """
+                        ),
+                        {"entity_id": entity_id, "group_id": group_id},
+                    )
+                else:
+                    conn.execute(
+                        sql_text(
+                            """
+                            INSERT OR IGNORE INTO guacamole_connection_group_permission
+                                (entity_id, connection_group_id, permission)
+                            VALUES (:entity_id, :group_id, 'READ')
+                            """
+                        ),
+                        {"entity_id": entity_id, "group_id": group_id},
+                    )
         else:
             conn.execute(
                 sql_text("DELETE FROM guacamole_connection_permission WHERE entity_id = :entity_id"),
                 {"entity_id": entity_id},
             )
-
+            conn.execute(
+                sql_text("DELETE FROM guacamole_connection_group_permission WHERE entity_id = :entity_id"),
+                {"entity_id": entity_id},
+            )
     logger.info("Provisioned temporary Guacamole user")
     return {
         "success": True,
@@ -149,6 +242,7 @@ def delete_temporary_user(
         if entity_id is None:
             return False
         conn.execute(sql_text("DELETE FROM guacamole_connection_permission WHERE entity_id = :entity_id"), {"entity_id": entity_id})
+        conn.execute(sql_text("DELETE FROM guacamole_connection_group_permission WHERE entity_id = :entity_id"), {"entity_id": entity_id})
         conn.execute(sql_text("DELETE FROM guacamole_user WHERE entity_id = :entity_id"), {"entity_id": entity_id})
         conn.execute(sql_text("DELETE FROM guacamole_entity WHERE entity_id = :entity_id"), {"entity_id": entity_id})
     logger.info(

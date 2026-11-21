@@ -24,6 +24,12 @@ In a Full + N Lite or standalone-backend + N Lite deployment, the control plane
 uses `accessURI` to choose an explicit protected provisioner route. It must
 never fall back to a different Gateway's Guacamole catalog.
 
+Reservation connections may be left in `ROOT` or placed under one or more
+`ORGANIZATIONAL` groups. The Gateway grants the temporary user access to that
+connection and its organizational path. Do not place a reservation connection
+inside a `BALANCING` group: granting access to the balancer could expose any of
+its child connections, so reservation provisioning rejects that layout.
+
 ```mermaid
 flowchart LR
     Admin[Gateway operator] --> UI[Guacamole administration UI]
@@ -201,8 +207,9 @@ administrator account.
 5. Complete a reservation-based access test. The expected user path is an
    opaque code whose redemption is reserved at `POST /auth/access-code/redeem`,
    validated locally by the gateway, and committed only after validation;
-   successful access ends at a clean Guacamole URL with a Secure, HttpOnly
-   session cookie. A failed local check releases the short-lived handle.
+   successful access opens the selected connection directly at a clean
+   Guacamole URL with a Secure, HttpOnly session cookie. A failed local check
+   releases the short-lived handle.
 
 If a reservation reaches the manual Guacamole login screen instead, diagnose
 the access-code and provisioning path with [Operations and health](../reference/operations-and-health.md),

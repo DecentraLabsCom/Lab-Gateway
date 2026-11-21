@@ -217,8 +217,8 @@ authentication flow:
 3. The backend returns an opaque access code; OpenResty reserves it server-to-server,
    validates the returned JWT locally, and commits it only after the secure JTI
    session mapping is ready.
-4. The browser is redirected to the selected gateway's Guacamole viewer without
-   a JWT in the URL.
+4. The browser opens the selected connection in the gateway's Guacamole viewer,
+   without a JWT in the URL.
 
 ### 4.3 User reaches the lab desktop
 

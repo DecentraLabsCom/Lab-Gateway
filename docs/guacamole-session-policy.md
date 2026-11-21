@@ -57,7 +57,15 @@ Browser hand-off uses an opaque access code with a short-lived redemption lease.
 Reservation users are temporary users provisioned as `dlabs-res-...`.
 
 - Created by the gateway-local Guacamole provisioner for a specific reservation.
-- Granted only the selected connection permission.
+- Granted `READ` on the selected connection and on each organizational group in
+  its path, so Guacamole can expose the connection in the tree. A connection in
+  `ROOT` needs no group permission. Other connections in those folders remain
+  inaccessible because they do not receive a connection permission.
+- The browser hand-off opens the selected connection directly from the
+  reservation's signed `guac:id:<connection_id>` access key.
+- Provisioning fails closed if the path includes a balancing group: `READ` on a
+  balancing group would allow opening its load balancer and could select any of
+  its child connections.
 - Bounded by the JWT `exp` and by the temporary user's `valid_until`.
 - May reconnect within the valid reservation window if the remote desktop tunnel closes.
 - Are not automatically logged out on tunnel close.
@@ -87,14 +95,16 @@ reservation user because the provisioner names those users
 directory on first use. This allows per-reservation transfer directories on a
 shared RDP connection; a separate temporary connection is not required.
 
-The current provisioner creates the temporary Guacamole user and grants
-`READ` on the selected connection. It does not set the connection's drive
-parameters or delete the resulting transfer directory when the temporary user
-is removed. Configure the tokenized path on the Guacamole connection and
-define cleanup for expired directories. With the current Gateway Compose
-configuration, these directories are under the `128M` temporary `/tmp` mount
-in `guacd`; all reservations share that capacity, and container recreation
-clears the files.
+The current provisioner grants `READ` on the selected connection and the
+organizational groups required to reveal it. Re-provisioning reconciles these
+grants for the managed temporary user. Removing that user also removes its
+group grants through the Guacamole schema's entity foreign key cascade. The
+provisioner does not set the connection's drive parameters or delete the
+resulting transfer directory when the temporary user is removed. Configure the
+tokenized path on the Guacamole connection and define cleanup for expired
+directories. With the current Gateway Compose configuration, these directories
+are under the `128M` temporary `/tmp` mount in `guacd`; all reservations share
+that capacity, and container recreation clears the files.
 
 This only describes Guacamole's redirected transfer drive. All these RDP
 sessions still use the Windows account configured on the shared connection,

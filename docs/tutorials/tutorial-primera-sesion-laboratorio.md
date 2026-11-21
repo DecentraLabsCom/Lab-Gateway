@@ -222,8 +222,8 @@ Esto inicia el flujo de autenticación:
    duración; OpenResty valida localmente el JWT, el destino y el estado de la
    sesión antes de confirmar el canje. Si la validación falla, libera la
    reserva; solo conserva el mapeo de sesión JTI seguro después del commit.
-4. El navegador se redirige al Guacamole del gateway seleccionado sin incluir
-   el JWT en la URL.
+4. El navegador abre la conexión seleccionada en Guacamole, sin incluir el JWT
+   en la URL.
 
 ### 4.3 El usuario llega al escritorio del laboratorio
 
