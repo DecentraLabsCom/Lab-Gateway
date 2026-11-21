@@ -228,6 +228,19 @@ if resource_type == "lab" and type(claims.accessKey) == "string" then
     end
 end
 
+-- Keep the signed expiry visible to the Guacamole page so the browser can
+-- return to Marketplace as soon as the reservation ends. This is a timestamp,
+-- not an access credential; the JWT remains server-side.
+if resource_type == "lab" then
+    local fragment_start = redirect_path:find("#", 1, true)
+    local redirect_base = fragment_start and redirect_path:sub(1, fragment_start - 1) or redirect_path
+    if redirect_base == "/guacamole" or redirect_base == "/guacamole/" then
+        local fragment = fragment_start and redirect_path:sub(fragment_start) or ""
+        redirect_base = "/guacamole/"
+        redirect_path = redirect_base .. "?dlabs_session_exp=" .. tostring(exp) .. fragment
+    end
+end
+
 local username_lower = string.lower(username)
 local remaining_lifetime = math.max(1, exp - ngx.time())
 local token_security_retention = tonumber(config:get("guac_token_security_retention_seconds")) or 1200

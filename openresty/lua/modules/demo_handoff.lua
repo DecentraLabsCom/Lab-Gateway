@@ -183,7 +183,7 @@ function _M.run(ngx_ctx, deps)
         .. "; Path=/guacamole; Secure; HttpOnly; SameSite=Lax"
     ngx.header["Cache-Control"] = "no-store"
     ngx.header["Referrer-Policy"] = "no-referrer"
-    return ngx.redirect("/guacamole/", ngx.HTTP_SEE_OTHER or 303)
+    return ngx.redirect("/guacamole/?dlabs_session_exp=" .. tostring(exp), ngx.HTTP_SEE_OTHER or 303)
 end
 
 return _M

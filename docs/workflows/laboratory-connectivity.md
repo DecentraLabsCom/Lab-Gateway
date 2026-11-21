@@ -82,6 +82,8 @@ reference](../reference/configuration.md#physical-lan-wol-overlay).
 
 For a Guacamole laboratory, `accessURI` identifies the gateway that owns the local Guacamole connection catalog. The provider backend selects a provisioning route from that URI and creates a reservation-scoped temporary user on that access gateway. The browser receives an opaque access code; the gateway reserves a short-lived redemption handle, validates the JWT, destination and local state, and commits only after those checks succeed. It then redirects to a clean Guacamole URL with a Secure, HttpOnly session cookie; failed local validation releases the handle.
 
+When the reservation expires, the Gateway closes the Guacamole session and the browser returns to the Marketplace origin configured by `MARKETPLACE_URL`. Manual Guacamole logins are not affected.
+
 `guacd` then reaches the configured RDP, VNC, or SSH target over the provider's private laboratory network. The target machine must be reachable from `guacd`; it does not need a public address.
 
 ## FMU connectivity
