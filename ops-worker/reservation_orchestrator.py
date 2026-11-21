@@ -774,6 +774,10 @@ class ReservationOrchestrator:
             "reservationId": reservation_id,
             "host": host_name,
             "labId": lab_id,
+            # Each scheduler retry needs a fresh Station dispatcher window and
+            # idempotency key; a reservation-start-derived window expires while
+            # the reservation itself may still be active.
+            "prepareAttempt": uuid4().hex,
         }
         dispatch_kwargs: Dict[str, Any] = {}
         if self.projection_url:

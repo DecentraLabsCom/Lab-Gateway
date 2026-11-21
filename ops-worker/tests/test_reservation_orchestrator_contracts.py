@@ -129,14 +129,14 @@ def test_dispatch_start_resolves_the_current_host_from_the_lab_id():
     orchestrator._dispatch_start(reservation)
 
     resolver.assert_called_once_with("lab-1")
-    dispatch.assert_called_once_with(
-        {
-            "reservationId": "reservation-1",
-            "host": "station-current",
-            "labId": "lab-1",
-        },
-        authoritative_reservation=reservation,
-    )
+    dispatch.assert_called_once()
+    payload = dispatch.call_args.args[0]
+    assert payload["reservationId"] == "reservation-1"
+    assert payload["host"] == "station-current"
+    assert payload["labId"] == "lab-1"
+    assert len(payload["prepareAttempt"]) == 32
+    assert payload["prepareAttempt"].isalnum()
+    assert dispatch.call_args.kwargs == {"authoritative_reservation": reservation}
 
 
 def test_local_dispatch_keeps_current_gateway_reservation_lookup():
@@ -155,13 +155,14 @@ def test_local_dispatch_keeps_current_gateway_reservation_lookup():
 
     orchestrator._dispatch_start(reservation)
 
-    dispatch.assert_called_once_with(
-        {
-            "reservationId": "reservation-1",
-            "host": "station-current",
-            "labId": "lab-1",
-        }
-    )
+    dispatch.assert_called_once()
+    payload = dispatch.call_args.args[0]
+    assert payload["reservationId"] == "reservation-1"
+    assert payload["host"] == "station-current"
+    assert payload["labId"] == "lab-1"
+    assert len(payload["prepareAttempt"]) == 32
+    assert payload["prepareAttempt"].isalnum()
+    assert dispatch.call_args.kwargs == {}
 
 
 def test_dispatch_end_passes_the_selected_reservation_to_the_lifecycle_handler():
