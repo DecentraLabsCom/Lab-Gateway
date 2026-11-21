@@ -1109,25 +1109,41 @@ body {
     border-radius: 999px;
 }
 .reservation-item {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, min(480px, 42%));
+    grid-template-areas:
+        "main actions"
+        "meta actions";
+    column-gap: 12px;
+    row-gap: 22px;
+    align-items: start;
     padding: 12px;
     border: 1px solid var(--border);
     border-radius: 10px;
     background: #0f1422;
 }
+.reservation-item-main {
+    grid-area: main;
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 5px;
+}
 .reservation-item-heading {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
 }
 .reservation-item-schedule {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+.reservation-item-meta {
+    grid-area: meta;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
     color: var(--muted);
     font-size: 0.88rem;
 }
@@ -1142,22 +1158,19 @@ body {
     white-space: nowrap;
 }
 .reservation-item-reference code { color: inherit; }
-.reservation-item-meta {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 5px;
-    color: var(--muted);
-    font-size: 0.88rem;
-}
 .reservation-item-actions {
+    grid-area: actions;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: 8px;
     flex-wrap: nowrap;
+    min-width: 0;
+    margin-top: 36px;
 }
 .reservation-reason {
+    width: 100%;
     min-height: 32px;
     max-width: 480px;
     padding: 6px 8px;
@@ -1184,9 +1197,19 @@ body {
         width: 100%;
     }
 
+    .reservation-item {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+            "main"
+            "actions"
+            "meta";
+        row-gap: 5px;
+    }
+    .reservation-item-actions {
+        align-items: flex-start;
+        margin-top: 0;
+    }
     .reservation-item-heading { flex-wrap: wrap; }
-    .reservation-item-schedule { align-items: flex-start; flex-direction: column; }
-    .reservation-item-actions { align-items: flex-start; justify-content: flex-start; }
     .reservation-cancel-note { text-align: left; }
 }
 .item {

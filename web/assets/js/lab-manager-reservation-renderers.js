@@ -78,15 +78,17 @@
                 const labLabel = resolveReservationLabDisplayName(reservation);
                 const institution = reservation.institutionName || shortAddress(reservation.institutionAddress);
                 return `<article class="reservation-item" data-reservation-key="${escapeHtml(key)}" data-reservation-status="${numericStatus ?? ''}">
-                <div class="reservation-item-heading">
-                    <span class="item-title">${escapeHtml(labLabel)}</span>
-                    <span class="reservation-item-reference">Reservation: <code title="${escapeHtml(key)}">${escapeHtml(shortAddress(key, 12, 10))}</code></span>
-                    <span class="pill ${statusClass}">${escapeHtml(displayedStatus)}</span>
+                <div class="reservation-item-main">
+                    <div class="reservation-item-heading">
+                        <span class="item-title">${escapeHtml(labLabel)}</span>
+                        <span class="reservation-item-reference">Reservation: <code title="${escapeHtml(key)}">${escapeHtml(shortAddress(key, 12, 10))}</code></span>
+                        <span class="pill ${statusClass}">${escapeHtml(displayedStatus)}</span>
+                    </div>
+                    <div class="reservation-item-schedule">
+                        <span>${escapeHtml(formatReservationDate(reservation.start))} – ${escapeHtml(formatReservationDate(reservation.end))}</span>
+                    </div>
                 </div>
-                <div class="reservation-item-schedule">
-                    <span>${escapeHtml(formatReservationDate(reservation.start))} – ${escapeHtml(formatReservationDate(reservation.end))}</span>
-                    ${actions}
-                </div>
+                ${actions}
                 <div class="reservation-item-meta">
                     <span>Price: ${escapeHtml(reservation.priceCredits || '0')} service credits</span>
                     <span>Provider share: ${escapeHtml(reservation.providerShareCredits || '0')} credits</span>
