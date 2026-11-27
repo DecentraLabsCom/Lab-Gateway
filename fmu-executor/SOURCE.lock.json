@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "repository": "DecentraLabsCom/FMU-Executor",
+  "version": "0.3.11",
+  "runtimeDownloads": false,
+  "commit": "711ec3e6e3a5bc7f8ac674587c7b9a84852eddeb",
+  "sourceTree": {
+    "format": "git-ls-tree-manifest-v1",
+    "sha256": "8276d39edeacb94477a66bf7c1f78fe2c1158fc305b65d34025e8486fc96931d"
+  },
+  "runtimePayload": {
+    "format": "sha256-path-manifest-v1",
+    "sha256": "d99ead7d15b660cb0b9372815c14ef2b6d8c8d442657678b7486835796b46d13"
+  },
+  "containerImage": {
+    "repository": "ghcr.io/decentralabscom/fmu-executor",
+    "reference": "ghcr.io/decentralabscom/fmu-executor:0.3.11@sha256:deb2e0704486f39134ceecb623994fbe3634f09828ef60d97850966fed6178a6",
+    "digest": "sha256:deb2e0704486f39134ceecb623994fbe3634f09828ef60d97850966fed6178a6"
+  }
+}

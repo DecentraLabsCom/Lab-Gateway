@@ -952,7 +952,7 @@ services:
   # local FMU data directory with the Gateway facade.
   fmu-executor-local:
     profiles: ["fmu-local-dev"]
-    image: ${FMU_EXECUTOR_IMAGE:-ghcr.io/decentralabscom/fmu-executor:0.3.10}
+    image: ${FMU_EXECUTOR_IMAGE:-ghcr.io/decentralabscom/fmu-executor:0.3.11@sha256:deb2e0704486f39134ceecb623994fbe3634f09828ef60d97850966fed6178a6}
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     environment:
       - FMU_EXECUTOR_HOST=0.0.0.0
